@@ -1,0 +1,346 @@
+"""Actual App integration checks with only native IPC and reader transport mocked.
+
+Run after task-workspace-build.mjs. Uses intercepted URLs, no HTTP server, source
+network requests, AI calls or paid speech recognition. Browser installation is a
+CI prerequisite; this script never changes the browser sandbox configuration.
+"""
+import asyncio
+import json
+import os
+from pathlib import Path
+from urllib.parse import urlparse
+
+from playwright.async_api import async_playwright, expect
+
+ROOT = Path(os.environ.get('LINKREAD_REPO', Path(__file__).resolve().parents[3])).resolve()
+OUT = Path(os.environ.get('LINKREAD_TASK_WORKSPACE_OUT', ROOT.parent / 'task-workspace-verification')).resolve()
+SITE = OUT / 'site'
+ENGINE = os.environ.get('LINKREAD_ENGINE', 'chromium')
+BASE = 'http://task-workspace.linkread.test/'
+RESULTS = []
+SOURCE_A = 'https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527'
+SOURCE_B = 'https://podcasts.apple.com/cn/podcast/id6788661772?i=1000775971124'
+
+ASR = {'enabled': False, 'reuseToken': False, 'baseUrl': 'https://dashscope.aliyuncs.com/api/v1',
+       'model': 'paraformer-v2', 'maxMinutes': 120, 'chunkMinutes': 5, 'ffmpegPath': ''}
+PREFS = {'provider': 'codex', 'paths': {'codex': '/fixture/codex', 'claude': ''},
+         'api': {'baseUrl': '', 'model': ''}, 'asr': ASR}
+
+
+def article(identity, title, platform='local', **flags):
+    return {'id': identity, 'title': title, 'platform': platform, 'author': 'Offline QA', 'category': 'QA',
+            'hasAnalysis': True, 'sourceUrl': None, 'updatedAt': 1794974400000, 'publishedAt': None,
+            'durationMs': 2460000, 'thumbnailUrl': None, 'isRead': False, 'isStarred': False,
+            'readingKey': 'qa-workspace-' + identity, **flags}
+
+
+ARTICLES = [article('qa-completed', '已完成的文章', isRead=True),
+            article('qa-corrupt', '没有有效阅读位置的文章'),
+            article('qa-resume', '计算器、火炮与登月：一场被低估的算力革命', 'apple_podcasts', isStarred=True),
+            article('qa-fresh', '刚加入书架的新文章', 'youtube')]
+POSITION = {'version': 1, 'updatedAt': 1794974400000, 'activeTab': 'transcript',
+            'tabs': {'transcript': {'signature': 'p1-0123456789abcdef-1', 'anchor': {'kind': 'top'}, 'offset': 0, 'ratio': 0}},
+            'mindmap': None}
+POSITIONS = {'qa-workspace-qa-resume': POSITION, 'qa-workspace-qa-completed': POSITION,
+             'qa-workspace-qa-corrupt': {'version': 999, 'activeTab': 'transcript'}}
+RECENT = ['qa-deleted', 'qa-completed', 'qa-corrupt', 'qa-resume', 'qa-fresh']
+
+
+def old_failure(index):
+    return {'id': f'old-{index:02}', 'createdAt': 1794974400000, 'updatedAt': 1794974400000, 'status': 'error',
+            'input': {'source': f'/fixture/old-{index:02}.srt', 'localFile': True, 'sourceKey': f'old:{index}', 'replaceRequested': False},
+            'settings': {'provider': 'codex', 'executable': '/fixture/codex', 'baseUrl': '', 'model': '', 'asr': ASR},
+            'metadata': {'title': f'旧任务 {index:02}', 'platform': 'local'},
+            'progress': {'step': 1, 'percent': 20, 'message': '先前模型请求失败，已保留字幕'},
+            'failure': {'message': '先前模型请求失败，已保留字幕', 'code': 'ai_unavailable', 'stage': 'analysis', 'retryable': True, 'action': 'retry'}}
+
+
+async def routes(route):
+    parsed = urlparse(route.request.url)
+    if parsed.hostname != 'task-workspace.linkread.test':
+        await route.abort()
+        raise AssertionError('Unexpected external request: ' + route.request.url)
+    if parsed.path.startswith('/native/'):
+        identity = parsed.path.rsplit('/', 1)[1]
+        key = 'qa-workspace-preview' if '/preview/' in parsed.path else 'qa-workspace-' + identity
+        body = '''<!doctype html><html><head><meta charset="utf-8"><style>body{font:16px/1.8 system-ui;padding:32px 48px;max-width:800px;margin:auto;color:#303239}button{font:inherit}</style></head><body>
+        <h1>Reader transport fixture</h1><p>The real App shell and reading-position bridge remain active.</p>
+        <button id="frame-focus">Focus reader body</button><p>Task dialog dismissal must preserve this document and its position.</p>
+        <script>
+        const key=KEY,session='task_workspace_session_12345678';
+        let state=POSITION;
+        window.readerInstance=Math.random();
+        addEventListener('message',event=>{
+          const restore=event.data.linkReadPositionRestore;
+          if(restore&&restore.key===key&&restore.state){state=restore.state;window.readerRestoredState=restore.state;}
+          const flush=event.data.linkReadPositionFlush;
+          if(flush&&flush.key===key)parent.postMessage({linkReadPositionChanged:{version:1,key,session,state,requestId:flush.requestId}},'*');
+        });
+        addEventListener('keydown',event=>{if(event.key==='Escape'&&!event.isComposing){event.preventDefault();parent.postMessage({linkReadEscape:true},'*');}});
+        setTimeout(()=>parent.postMessage({linkReadPositionReady:{version:1,key,session}},'*'),0);
+        </script></body></html>'''.replace('KEY', json.dumps(key)).replace('POSITION', json.dumps(POSITION))
+        await route.fulfill(content_type='text/html', body=body)
+    else:
+        path = SITE / (parsed.path.lstrip('/') or 'index.html')
+        await route.fulfill(path=str(path), content_type={'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css'}.get(path.suffix))
+
+
+async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=1280):
+    context = await browser.new_context(viewport={'width': width, 'height': 980},
+                                        color_scheme='dark' if dark else 'light', reduced_motion='reduce')
+    await context.route('**/*', routes)
+    page = await context.new_page()
+    errors, confirmations = [], []
+    page.on('pageerror', lambda error: errors.append(str(error)))
+
+    async def confirm(dialog):
+        confirmations.append(dialog.message)
+        await dialog.accept()
+
+    page.on('dialog', confirm)
+    config = {'library': ARTICLES, 'positions': POSITIONS,
+              'journal': {'version': 1, 'tasks': [old_failure(index) for index in range(old_count)]}}
+    seed = {'config': config, 'preferences': PREFS, 'recent': RECENT,
+            'reviewed': [f'old-{index:02}' for index in range(old_count)] if reviewed else []}
+    await page.add_init_script('''if(window===window.top){const seed=SEED;window.__taskWorkspaceConfig=seed.config;
+        localStorage.setItem('linkread-preferences',JSON.stringify(seed.preferences));
+        localStorage.setItem('linkread-recently-opened-v1',JSON.stringify(seed.recent));
+        localStorage.setItem('linkread-reviewed-tasks-v1',JSON.stringify(seed.reviewed));}'''.replace('SEED', json.dumps(seed, ensure_ascii=False)))
+    await page.goto(BASE)
+    await page.wait_for_function("window.taskWorkspaceFixture?.calls.some(call=>call.command==='save_task_journal')")
+    await expect(page.locator('.continue-reading')).to_be_visible()
+    return context, page, errors, confirmations
+
+
+async def check_no_overflow(page):
+    overflowing = await page.evaluate('''() => [...document.querySelectorAll('.home-page,.home-form,.task-center[open],.task-center-body,.source-readiness,.continue-reading')]
+      .filter(element=>element.getBoundingClientRect().width>0&&element.scrollWidth>element.clientWidth+1)
+      .map(element=>({className:element.className,width:element.clientWidth,scroll:element.scrollWidth}))''')
+    assert not overflowing, overflowing
+
+
+async def queue_video(page, index):
+    source = 'https://www.youtube.com/watch?v=abcdefghij' + str(index)
+    await page.get_by_role('textbox', name='视频或播客链接', exact=True).fill(source)
+    await expect(page.locator('.source-preview')).to_contain_text(f'Processing video ij{index}')
+    await page.locator('.home-primary').click()
+    await expect(page.get_by_role('textbox', name='视频或播客链接', exact=True)).to_have_value('')
+
+
+async def verify_tasks(browser):
+    context, page, errors, confirmations = await open_app(browser, old_count=20)
+    for index in (1, 2, 3):
+        await queue_video(page, index)
+    await expect(page.locator('.home-tasks .task-card')).to_have_count(1)
+    await expect(page.locator('.home-task-summary')).to_contain_text('2 个任务排队中')
+    await expect(page.locator('.home-task-summary')).to_contain_text('20 条已保留记录')
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='generate').length") == 1
+    await check_no_overflow(page)
+    await page.screenshot(path=str(OUT / f'{ENGINE}-workspace-home.png'))
+    await page.locator('.titlebar-tasks').click()
+    dialog = page.locator('.task-center[open]')
+    await expect(dialog).to_be_visible()
+    await expect(dialog.locator('.task-center-queue > li')).to_have_count(2)
+    await expect(dialog.locator('.task-center-disclosure')).to_have_attribute('aria-expanded', 'false')
+    await expect(dialog.locator('.task-card-active')).to_have_count(1)
+    await page.screenshot(path=str(OUT / f'{ENGINE}-workspace-tasks.png'))
+    await dialog.locator('.task-center-queue > li').first.get_by_role('button', name='取消排队', exact=True).click()
+    await expect(dialog.locator('.task-center-queue > li')).to_have_count(1)
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='cancel_generation').length") == 0
+    first_id = await page.evaluate('window.taskWorkspaceFixture.pendingGenerations[0].args.requestId')
+    await page.evaluate('''id=>window.taskWorkspaceFixture.failGeneration(id,{message:'QA new failure: saved transcript remains available',code:'ai_unavailable',stage:'analysis',retryable:true,action:'retry'})''', first_id)
+    await expect(dialog.locator('.task-center-queue > li')).to_have_count(0)
+    await expect(dialog.locator('.task-center-disclosure')).to_have_attribute('aria-expanded', 'true')
+    await expect(dialog.locator('.task-center-unseen')).to_contain_text('1 条未查看')
+    assert first_id not in await page.evaluate("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1'))")
+    # The new failure is below the existing records: opening the drawer alone
+    # must not acknowledge or clear it without it entering the scroll viewport.
+    await page.evaluate('window.taskWorkspaceFixture.failJournal=true')
+    before = await dialog.locator('.task-card').count()
+    await dialog.get_by_role('button', name='清理已查看记录', exact=False).click()
+    await expect(dialog).to_contain_text('清理未完成，任务记录已保留')
+    await expect(dialog.locator('.task-card')).to_have_count(before)
+    assert await page.evaluate('window.taskWorkspaceFixture.journal.tasks.some(task=>task.id==="old-00")')
+    assert confirmations and '处理缓存不会删除' in confirmations[-1]
+    await page.evaluate('window.taskWorkspaceFixture.failJournal=false')
+    await dialog.get_by_role('button', name='清理已查看记录', exact=False).click()
+    await page.wait_for_function("!window.taskWorkspaceFixture.journal.tasks.some(task=>task.id.startsWith('old-'))")
+    assert await page.evaluate('id=>window.taskWorkspaceFixture.journal.tasks.some(task=>task.id===id)', first_id)
+    assert await page.evaluate("window.taskWorkspaceFixture.journal.tasks.some(task=>task.status==='running')")
+    await check_no_overflow(page)
+    RESULTS.append({'check': 'One running plus two queued and 20 old failures shows one full Home card; queued cancellation is local; new unseen failures remain visible; clearing preserves records on journal write failure and removes only reviewed terminal records after successful persistence'})
+
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.task-center')).to_have_count(0)
+    await page.locator('.continue-reading-link').click()
+    frame = page.locator('.desktop-reader-frame')
+    await expect(frame).to_be_visible()
+    await page.wait_for_function("document.querySelector('.desktop-reader-frame')?.contentWindow.readerRestoredState?.activeTab==='transcript'")
+    await page.evaluate('window.workspaceOriginalFrame=document.querySelector(".desktop-reader-frame");window.workspaceReaderInstance=window.workspaceOriginalFrame.contentWindow.readerInstance')
+    prepare_count = await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='prepare_article').length")
+    await page.locator('.titlebar-tasks').click()
+    await expect(page.locator('.task-center[open]')).to_be_visible()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.task-center')).to_have_count(0)
+    assert await page.evaluate('document.querySelector(".desktop-reader-frame")===window.workspaceOriginalFrame')
+    assert await page.evaluate('document.querySelector(".desktop-reader-frame").contentWindow.readerInstance===window.workspaceReaderInstance')
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='prepare_article').length") == prepare_count
+    assert await page.locator('.titlebar-tasks').evaluate('element=>element===document.activeElement')
+    RESULTS.append({'check': 'Tasks is accessible while reading; one Escape dismisses only the dialog, restores trigger focus and preserves the iframe document, source, session and reading state'})
+    assert not errors, errors
+    await context.close()
+
+
+async def verify_continue(browser):
+    context, page, errors, _ = await open_app(browser)
+    resume = page.locator('.continue-reading')
+    await expect(resume).to_contain_text(ARTICLES[2]['title'])
+    await expect(resume).to_contain_text('Transcript')
+    loaded = await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='load_reading_position').map(call=>call.args.key)")
+    assert loaded == ['qa-workspace-qa-corrupt', 'qa-workspace-qa-resume'], loaded
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='prepare_article').length") == 0
+    await expect(page.locator('.article-card[data-article-id="qa-resume"]')).to_have_count(0)
+    await page.get_by_role('button', name='查看书架', exact=True).click()
+    row = page.locator('.shelf-row[data-article-id="qa-resume"]')
+    await row.get_by_role('button', name='Mark Complete', exact=True).click()
+    await expect(row.get_by_role('button', name='Mark Unread', exact=True)).to_have_attribute('aria-pressed', 'true')
+    await page.get_by_role('button', name='New Article', exact=True).click()
+    await expect(page.locator('.home-page')).to_be_visible()
+    await expect(resume).to_have_count(0)
+    assert await page.evaluate("window.taskWorkspaceFixture.library.find(article=>article.id==='qa-resume').isRead")
+    assert not errors, errors
+    await context.close()
+
+    context, page, errors, confirmations = await open_app(browser)
+    await expect(page.locator('.article-card[data-article-id="qa-resume"]')).to_have_count(0)
+    await page.get_by_role('button', name='查看书架', exact=True).click()
+    row = page.locator('.shelf-row[data-article-id="qa-resume"]')
+    await row.get_by_role('button', name=ARTICLES[2]['title'] + '的更多操作', exact=True).click()
+    await row.get_by_role('button', name='删除文章', exact=True).click()
+    await expect(row).to_have_count(0)
+    await page.get_by_role('button', name='New Article', exact=True).click()
+    await expect(page.locator('.home-page')).to_be_visible()
+    await expect(page.locator('.continue-reading')).to_have_count(0)
+    assert not await page.evaluate("window.taskWorkspaceFixture.library.some(article=>article.id==='qa-resume')")
+    assert confirmations and '确认永久删除' in confirmations[-1]
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='generate').length") == 0
+    RESULTS.append({'check': 'Continue uses current unread membership, exact reading keys and valid saved positions; recent cards omit the continued article; completing or deleting it in the bookshelf removes the continuation on returning home without generation or reader preparation'})
+    assert not errors, errors
+    await context.close()
+
+
+async def verify_unseen_visibility(browser):
+    context, page, errors, _ = await open_app(browser, old_count=20, reviewed=False)
+    await expect(page.locator('.home-task-summary')).to_contain_text('20 个任务需要查看')
+    await page.locator('.titlebar-tasks').click()
+    await expect(page.locator('.task-center-disclosure')).to_have_attribute('aria-expanded', 'true')
+    await page.wait_for_function("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1')).includes('old-00')")
+    assert 'old-19' not in await page.evaluate("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1'))")
+    # Expose only the final card's first 24px (its cover/title), keeping the
+    # actual error reason below the viewport: the record must remain unseen.
+    await page.evaluate('''() => {
+      const area=document.querySelector('.task-center-body');
+      const card=document.querySelector('.task-center-attention .task-card:last-child');
+      area.scrollTop+=card.getBoundingClientRect().top-area.getBoundingClientRect().bottom+24;
+    }''')
+    await page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+    assert 'old-19' not in await page.evaluate("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1'))")
+    await page.locator('.task-center-attention .task-card').last.locator('.task-error-summary').scroll_into_view_if_needed()
+    await page.wait_for_function("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1')).includes('old-19')")
+    # Native modal focus remains inside the drawer while tabbing backward.
+    await page.get_by_role('button', name='关闭任务中心', exact=True).focus()
+    await page.keyboard.press('Shift+Tab')
+    assert await page.locator('.task-center').evaluate('element=>element.contains(document.activeElement)')
+    RESULTS.append({'check': 'Only a substantially visible error explanation acknowledges a task; title/cover slivers and off-screen failures remain unread; the native modal keeps keyboard focus inside'})
+    assert not errors, errors
+    await context.close()
+
+
+async def verify_source_checks(browser, *, dark=False, width=1280):
+    context, page, errors, _ = await open_app(browser, dark=dark, width=width)
+    field = page.get_by_role('textbox', name='视频或播客链接', exact=True)
+    panel = page.locator('.source-readiness')
+    await field.fill(SOURCE_A)
+    await expect(page.locator('.source-preview')).to_contain_text('商业就是这样')
+    await expect(panel).to_have_attribute('data-state', 'idle')
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>['check_source','generate'].includes(call.command)).length") == 0
+    await panel.get_by_role('button', name='检查来源', exact=True).click()
+    await page.wait_for_function('window.taskWorkspaceFixture.pendingSourceChecks.length===1')
+    await field.fill(SOURCE_B)
+    await expect(panel).to_have_attribute('data-state', 'idle')
+    await expect(page.locator('.source-preview')).to_contain_text('Human Stories')
+    await panel.get_by_role('button', name='检查来源', exact=True).click()
+    await page.wait_for_function('window.taskWorkspaceFixture.pendingSourceChecks.length===2')
+    blocked = {'source': SOURCE_B, 'status': 'blocked', 'code': 'protected_media',
+               'message': '该单集使用受保护音源，请打开来源收听，或导入你已有的字幕。', 'checkedAt': 1794974400000}
+    await page.evaluate('result=>window.taskWorkspaceFixture.releaseSource(result.source,result)', blocked)
+    await expect(panel).to_have_attribute('data-state', 'blocked')
+    await page.evaluate('result=>window.taskWorkspaceFixture.releaseSource(result.source,result)',
+                        {'source': SOURCE_A, 'status': 'captions', 'code': 'captions_available', 'message': 'STALE SOURCE A', 'checkedAt': 1794974400000})
+    await expect(panel).to_have_attribute('data-state', 'blocked')
+    assert 'STALE SOURCE A' not in await panel.inner_text()
+    await expect(page.locator('.home-primary')).to_be_disabled()
+    await field.press('Enter')
+    await page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='generate').length") == 0
+    await panel.get_by_role('button', name='查看来源', exact=True).click()
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='open_video').at(-1).args.source") == SOURCE_B
+    await check_no_overflow(page)
+    await page.screenshot(path=str(OUT / f'{ENGINE}-source-blocked{"-dark-narrow" if dark else ""}.png'))
+
+    # Rechecking a known blocked source must not briefly re-enable submission
+    # before the replacement result has been received.
+    await panel.get_by_role('button', name='重新检查', exact=True).click()
+    await page.wait_for_function('window.taskWorkspaceFixture.pendingSourceChecks.length===1')
+    await expect(panel).to_have_attribute('data-state', 'checking')
+    await expect(page.locator('.home-primary')).to_be_disabled()
+    await page.evaluate('result=>window.taskWorkspaceFixture.releaseSource(result.source,result)', blocked)
+    await expect(panel).to_have_attribute('data-state', 'blocked')
+
+    # The alternate file import remains available even while the link is blocked.
+    await panel.get_by_role('button', name='导入字幕', exact=True).click()
+    await expect(page.get_by_role('textbox', name='选中的字幕文件', exact=True)).to_have_value('imported-subtitles.srt')
+    await expect(panel).to_have_count(0)
+    await expect(page.locator('.home-primary')).to_be_enabled()
+    await page.locator('.home-primary').click()
+    await page.wait_for_function("window.taskWorkspaceFixture.calls.some(call=>call.command==='generate'&&call.args.localFile===true)")
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='check_source').length") == 3
+    if dark:
+        await page.locator('.titlebar-tasks').click()
+        await expect(page.locator('.task-center[open]')).to_be_visible()
+        await check_no_overflow(page)
+        bounds = await page.locator('.task-center').bounding_box()
+        assert bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= width + 1, bounds
+        await page.screenshot(path=str(OUT / f'{ENGINE}-tasks-dark-narrow.png'))
+    RESULTS.append({'check': f'Source availability check is explicit; late source A cannot override blocked source B; Enter cannot bypass blocked submission; open-source and local-subtitle import remain available; viewport={width}, dark={dark}'})
+    assert not errors, errors
+    await context.close()
+
+
+async def main():
+    OUT.mkdir(parents=True, exist_ok=True)
+    async with async_playwright() as playwright:
+        browser = await getattr(playwright, ENGINE).launch()
+        try:
+            await verify_tasks(browser)
+            await verify_unseen_visibility(browser)
+            await verify_continue(browser)
+            await verify_source_checks(browser)
+            await verify_source_checks(browser, dark=True, width=740)
+        except Exception:
+            for context_index, context in enumerate(browser.contexts):
+                for page_index, page in enumerate(context.pages):
+                    stem = f'{ENGINE}-failure-{context_index}-{page_index}'
+                    await page.screenshot(path=str(OUT / f'{stem}.png'))
+                    (OUT / f'{stem}.txt').write_text(await page.locator('body').inner_text())
+                    calls = await page.evaluate('window.taskWorkspaceFixture?.calls')
+                    (OUT / f'{stem}-calls.json').write_text(json.dumps(calls, ensure_ascii=False, indent=2))
+            raise
+        finally:
+            (OUT / f'{ENGINE}-task-workspace-metrics.json').write_text(json.dumps(RESULTS, ensure_ascii=False, indent=2))
+            await browser.close()
+    print(json.dumps({'engine': ENGINE, 'passed': True, 'checks': len(RESULTS)}, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

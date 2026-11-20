@@ -1,0 +1,35 @@
+LinkRead Desktop
+Copyright (c) 2026 Yano (LjyYano) and the respective rights holders.
+
+This repository was migrated from the maintainer's existing LinkRead
+code at revision a2297a5a7fe98d50435ce6bed1449ffca92e2aca. It is now
+maintained as a separate desktop application with its own Python backend.
+The migration does not claim that the CLI and desktop application have
+unrelated code histories.
+
+Migration changes include a private linkread_desktop Python package,
+extraction of the desktop generation workflow from the former CLI module,
+updated app build paths, and separate licensing and packaging metadata.
+See docs/migration.md and docs/licensing.md.
+
+Earlier revisions, including
+c344033ef61e2a570529afc0b37c1bb3b2449933, carried Apache-2.0 terms.
+Revision a2297a5a7fe98d50435ce6bed1449ffca92e2aca used component licensing
+and a GPL output exception. Rights validly granted under earlier terms
+remain in effect. The retained Apache-2.0 text is not a blanket alternative
+license for new project material.
+
+Reading and bookshelf templates were adapted from LjyYano/html-library,
+revision bca81c0d07a2849c154b3f621cfc92e32df5468b:
+  scripts/build.py
+  pages/charlie-munger-etf-trap/index.html
+  scripts/mindmap.py
+This attribution does not claim ownership of source articles or
+third-party components. See docs/rendering.md for source links.
+
+D3, Markmap, @gera2ld/jsx-dom, and js-yaml retain their upstream notices in
+src/linkread_desktop/renderers/vendor/ and in reading pages that include
+those components. Other dependencies retain their own licenses.
+
+This file provides attribution and historical information. It does not
+add conditions to, or replace, any applicable license.

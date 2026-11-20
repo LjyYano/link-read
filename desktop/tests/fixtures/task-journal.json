@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "tasks": [
+    {
+      "id": "task_20261118_1",
+      "createdAt": 1794980000000,
+      "updatedAt": 1794980040000,
+      "status": "error",
+      "input": {
+        "source": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527",
+        "localFile": false,
+        "sourceKey": "apple-podcasts-1552904790-1000801308527",
+        "replaceRequested": true
+      },
+      "settings": {
+        "provider": "api",
+        "executable": "",
+        "baseUrl": "https://api.example.com/v1",
+        "model": "reader-test-model",
+        "asr": {
+          "enabled": false,
+          "reuseToken": false,
+          "baseUrl": "https://dashscope.aliyuncs.com/api/v1",
+          "model": "paraformer-v2",
+          "maxMinutes": 120,
+          "chunkMinutes": 5
+        }
+      },
+      "metadata": {
+        "platform": "apple_podcasts",
+        "title": "商业就是这样 · 小历史",
+        "author": "第一财经",
+        "publishedAt": "2026-11-18",
+        "sourceUrl": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527",
+        "thumbnailUrl": "https://is1-ssl.mzstatic.com/image/thumb/fixture/cover.jpg",
+        "durationMs": 2460000
+      },
+      "progress": {
+        "step": 2,
+        "percent": 59,
+        "message": "连接暂时中断，已保存成功完成的批次。",
+        "activity": {
+          "startedAt": 1794980000000,
+          "lastEventAt": 1794980040000,
+          "lanes": {
+            "extract": {
+              "label": "提取字幕",
+              "message": "已保存字幕",
+              "state": "complete",
+              "startedAt": 1794980000000,
+              "updatedAt": 1794980005000
+            },
+            "analysis": {
+              "label": "提炼内容",
+              "message": "全部内容提炼完成",
+              "state": "complete",
+              "startedAt": 1794980005000,
+              "updatedAt": 1794980030000,
+              "completed": 3,
+              "total": 3
+            },
+            "polish": {
+              "label": "校对正文",
+              "message": "校对已完成 2/5 批",
+              "state": "running",
+              "startedAt": 1794980030000,
+              "updatedAt": 1794980040000,
+              "completed": 2,
+              "total": 5
+            }
+          },
+          "history": [
+            {
+              "at": 1794980005000,
+              "stage": "saved_transcript",
+              "message": "已保存字幕"
+            },
+            {
+              "at": 1794980040000,
+              "stage": "polish_done",
+              "message": "校对已完成 2/5 批"
+            }
+          ]
+        }
+      },
+      "previewId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "failure": {
+        "message": "连接暂时中断，已保存成功完成的批次。",
+        "code": "network",
+        "retryable": true,
+        "action": "retry",
+        "stage": "polish"
+      }
+    }
+  ]
+}

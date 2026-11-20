@@ -1,0 +1,22 @@
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.env
+.DS_Store
+*.log
+/library/
+/site/
+/desktop/node_modules/
+/desktop/src-tauri/target/
+/desktop/src-tauri/binaries/
+/desktop/src-tauri/gen/
+/test-artifacts/
+
+# Browser session cookies are sensitive credentials; never commit them.
+*cookies*.txt
+*.cookie.txt
+.cookies/

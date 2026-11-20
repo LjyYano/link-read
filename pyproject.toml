@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linkread-desktop-backend"
+version = "0.3.2"
+description = "Private Python backend bundled with the LinkRead desktop application."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "LicenseRef-LinkRead-Desktop"
+license-files = [
+  "LICENSE",
+  "NOTICE",
+  "THIRD_PARTY_NOTICES.md",
+  "LICENSES/Apache-2.0.txt",
+  "src/linkread_desktop/renderers/vendor/*.LICENSE.txt",
+]
+authors = [{name = "Yano"}]
+dependencies = [
+  "pydantic>=2,<3",
+  "requests>=2.31,<3",
+]
+
+[project.optional-dependencies]
+youtube = ["yt-dlp>=2025.1.1"]
+test = ["pytest>=8,<10"]
+all = ["yt-dlp>=2025.1.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["linkread_desktop*"]
+
+[tool.setuptools.package-data]
+"linkread_desktop.renderers" = ["*.html", "*.js", "*.css", "vendor/*.js", "vendor/*.LICENSE.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

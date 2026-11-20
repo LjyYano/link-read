@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LinkRead",
+  "version": "0.1.0",
+  "identifier": "com.yano.linkread",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "LinkRead",
+        "width": 1060,
+        "height": 640,
+        "minWidth": 720,
+        "minHeight": 580,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 18, "y": 21 },
+        "backgroundColor": "#fbfcfe"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: https://i.ytimg.com https://*.hdslb.com https://*.mzstatic.com; style-src 'self'; connect-src ipc: http://ipc.localhost; frame-src linkread-reader:; object-src 'none'",
+      "capabilities": ["main"]
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": ["app"],
+    "icon": ["icons/icon.png", "icons/icon.icns"],
+    "macOS": { "minimumSystemVersion": "12.0" }
+  }
+}

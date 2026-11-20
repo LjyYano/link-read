@@ -46,6 +46,8 @@ npm run app
 
 产物位于 `desktop/src-tauri/target/release/bundle/macos/LinkRead.app`。App 带有自己的 Python 后端、运行时、yt-dlp 和离线阅读资源。
 
+打包时自动收集项目与实际依赖的许可证、版本和文件哈希，随 sidecar 和 App 的 `Contents/Resources/licenses/` 分发。缺少许可正文会报出具体组件并停止打包；处理方式见[许可收集说明](desktop/licenses/README.md)。
+
 当前配置使用临时签名用于本机测试。公开分发须完成 Developer ID 签名、Apple 公证及实机安装验证；支付、激活和订阅系统尚未接入。
 
 # 4. 本地验证

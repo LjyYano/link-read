@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Yano 的网页阅读书架。完整文稿、知识笔记与金句卡片。" />
+<meta name="theme-color" content="#ffffff" />
+<title>阅读书架 · Yano</title>
+<style>
+:root {--bg:#fff;--fg:#37352f;--fg-muted:#9b9a97;--fg-secondary:#787774;--line:#e9e9e7;--hover:#f7f7f5;--search:#f7f7f5;--link:#37352f;--tag-bg:#f1f1ef;--tag-fg:#60605e;--select:#edf4ff;--accent:#2383e2;--font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+[data-theme="dark"] {--bg:#191919;--fg:#e3e3e1;--fg-muted:#999992;--fg-secondary:#aaa9a3;--line:#333330;--hover:#262626;--search:#252525;--link:#e3e3e1;--tag-bg:#33332f;--tag-fg:#c7c7bd;--select:#1e3447;--accent:#70aff0}
+*{box-sizing:border-box}html{font-family:var(--font);-webkit-font-smoothing:antialiased}body{background:var(--bg);color:var(--fg);margin:0;font-size:14px;min-height:100vh}a{color:inherit;text-decoration:none}button,input{font:inherit}button{cursor:pointer}button:focus-visible,a:focus-visible,input:focus-visible,tr:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.main{max-width:1160px;margin:0 auto;padding:46px 44px 100px}
+.top{display:flex;align-items:center;justify-content:space-between;padding-bottom:32px}.brand{font-size:13px;font-weight:620;color:var(--fg-secondary);display:flex;align-items:center;gap:9px}.brand a:hover{color:var(--fg)}.brand .sep{color:var(--fg-muted)}.right-links{display:flex;align-items:center;gap:20px;font-size:12px;color:var(--fg-secondary)}.right-links a:hover{color:var(--fg)}
+.theme{border:0;background:transparent;color:var(--fg-muted);display:flex;align-items:center;gap:4px;padding:5px 6px;border-radius:6px}.theme:hover{background:var(--hover);color:var(--fg)}.theme svg{height:16px;width:16px}
+.header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin:13px 0 21px}
+h1{font-size:28px;font-weight:725;line-height:1.3;letter-spacing:-.6px;margin:0}.count{color:var(--fg-muted);font-size:12px;margin-left:8px;font-weight:400}.tools{display:flex;gap:8px;align-items:center}.searchbox{display:flex;align-items:center;gap:7px;border:1px solid transparent;background:var(--search);border-radius:6px;padding:7px 10px;width:225px;max-width:40vw;color:var(--fg-secondary)}.searchbox:focus-within{border-color:var(--line)}.searchbox svg{height:15px;width:15px;flex-shrink:0}.searchbox input{border:0;outline:none;min-width:0;width:100%;background:transparent;color:var(--fg);font-size:12px}.searchbox input::placeholder{color:var(--fg-muted)}
+.table-scroll{width:100%;overflow-x:auto}table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:13px}thead th{color:var(--fg-secondary);font-size:12px;font-weight:450;text-align:left;padding:9px 12px;height:39px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);border-right:1px solid var(--line)}thead th:first-child{padding-left:9px}thead th:last-child{border-right:0}tbody td{height:43px;padding:7px 12px;vertical-align:middle;border-bottom:1px solid var(--line);border-right:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}tbody td:first-child{padding-left:9px}tbody td:last-child{border-right:0}tbody tr:hover{background:var(--hover);cursor:pointer}tbody tr[hidden]{display:none}.name-col{width:46%}.category-col{width:16%}.tag-col{width:24%}.date-col{width:14%}
+.document-link{display:flex;align-items:center;gap:8px;color:var(--link);font-size:13.5px;min-width:0}.document-link>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.doc-icon{height:17px;width:17px;flex-shrink:0;color:var(--fg-muted)}.record:hover .document-link>span{text-decoration:underline;text-decoration-color:#a8a8a4;text-underline-offset:2px}
+.category{display:inline-flex;align-items:center;background:#e8f0fc;color:#3a6d9c;border-radius:4px;padding:2px 7px;font-size:11.5px;max-width:100%;overflow:hidden;text-overflow:ellipsis}[data-theme="dark"] .category{background:#23364a;color:#a3c4f4}.tag-set{display:flex;flex-wrap:nowrap;gap:5px;overflow:hidden}.tag{background:var(--tag-bg);color:var(--tag-fg);border-radius:4px;padding:2px 7px;font-size:11.5px;white-space:nowrap}.date{font-size:12px;color:var(--fg-secondary);font-variant-numeric:tabular-nums}
+.empty{color:var(--fg-muted);padding:34px 8px;font-size:13px;display:none} .footer{margin-top:16px;color:var(--fg-muted);font-size:11px}
+@media (max-width:750px){.main{padding:20px 18px 55px}.top{padding-bottom:28px}.right-links{gap:10px}.header{flex-direction:column;align-items:stretch;gap:15px}h1{font-size:25px}.searchbox{width:100%;max-width:none}.tools{width:100%}.name-col{width:64%}.date-col{width:36%}.category-col,.tag-col,th.category-header,th.tag-header,td.category-cell,td.tags-cell{display:none}.record td.name-cell{white-space:normal}.document-link>span{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.footer{font-size:11px}}
+</style>
+<style id="linkread-bookshelf-extensions">
+.tag-set{flex-wrap:wrap;overflow:visible;gap:4px 5px}
+.tag{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.library-filters{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 18px;color:var(--fg-secondary)}
+.read-filter{display:flex;gap:3px;padding:3px;border-radius:7px;background:var(--search)}
+.library-filters button{border:0;border-radius:5px;background:transparent;padding:6px 10px;color:inherit;font-size:12px}
+.read-filter button[aria-pressed="true"]{color:var(--fg);background:var(--bg);box-shadow:0 1px 3px #00000012}
+.library-filters .star-filter{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line)}
+.star-filter[aria-pressed="true"]{color:#ad7410;border-color:#cba65c;background:#cba65c12}
+.reading-flags{display:flex;align-items:center;gap:4px}.reading-toggle{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--fg-muted);border-radius:4px;padding:5px 3px;font-size:11px;white-space:nowrap}.reading-toggle:hover{background:var(--tag-bg)}
+.reading-toggle[data-read]{justify-content:center;min-width:28px;min-height:28px}
+.reading-toggle svg,.star-filter svg{width:15px;height:15px;flex-shrink:0}.reading-toggle[data-read][aria-pressed="true"]{color:#2f8554}.star-toggle[aria-pressed="true"]{color:#b07a18}.star-toggle[aria-pressed="true"] svg{fill:currentColor}
+.name-col{width:36%}.category-col{width:12%}.tag-col{width:22%}.reading-col{width:17%}.date-col{width:13%}
+.storage-error{font-size:12px;color:#c43d3d;margin:0 0 12px}.empty button{margin-left:12px;border:0;background:transparent;color:var(--accent);padding:4px}
+@media(max-width:750px){
+  .table-scroll table{min-width:880px}
+  .category-col,.tag-col{display:table-column}
+  th.category-header,th.tag-header,td.category-cell,td.tags-cell{display:table-cell}
+  .name-col{width:36%}.category-col{width:12%}.tag-col{width:22%}.reading-col{width:17%}.date-col{width:13%}
+}
+</style>
+</head>
+<body>
+<main class="main">
+  <nav class="top"><div class="brand"><a href="https://yano.blog" target="_blank" rel="noopener">Yano</a><span class="sep">/</span><span>阅读书架</span></div><div class="right-links"><a href="https://yano.blog" target="_blank" rel="noopener">博客 ↗</a><a href="https://weekly.yano.blog" target="_blank" rel="noopener">周刊 ↗</a><button type="button" class="theme" id="theme-switch" aria-label="切换深浅色"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 15.7A8.4 8.4 0 0 1 8.3 4 8.5 8.5 0 1 0 20 15.7Z" /></svg></button></div></nav>
+  <div class="header"><h1>阅读书架 <span class="count" id="article-count"><!--LR:COUNT--></span></h1><div class="tools"><label class="searchbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg><input id="search" type="search" placeholder="搜索文章..." aria-label="搜索文章" autocomplete="off"/></label></div></div>
+  <div class="library-filters" aria-label="Reading filters">
+    <div class="read-filter" role="group" aria-label="Reading status"><button type="button" data-read-filter="all" aria-pressed="true">All</button><button type="button" data-read-filter="unread" aria-pressed="false">Unread</button><button type="button" data-read-filter="completed" aria-pressed="false">Completed</button></div>
+    <button type="button" class="star-filter" id="star-filter" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m12 3 2.8 5.7 6.3.9-4.5 4.4 1 6.2-5.6-3-5.6 3 1-6.2L2 9.6l6.3-.9Z"/></svg>Starred</button>
+  </div>
+  <p class="storage-error" id="storage-error" role="alert" hidden></p>
+  <div class="table-scroll"><table aria-label="阅读文章表"><colgroup><col class="name-col"/><col class="category-col"/><col class="tag-col"/><col class="reading-col"/><col class="date-col"/></colgroup><thead><tr><th>名称</th><th class="category-header">分类</th><th class="tag-header">标签</th><th>Status</th><th>日期</th></tr></thead><tbody id="table-body"><!--LR:ROWS--></tbody></table></div>
+  <div class="empty" id="empty">没有找到匹配的文章<button type="button" id="reset-filters">Clear filters</button></div>
+</main>
+<script type="application/json" id="article-data"><!--LR:ARTICLE_DATA--></script>
+<script>
+const ARTICLES=JSON.parse(document.getElementById("article-data").textContent);
+const rows=[...document.querySelectorAll('tr.record')];
+const search=document.querySelector('#search');
+const STATE_KEY='linkread-reading-state-v1';let readFilter='all',starredOnly=false;
+function storedFlags(){try{const value=JSON.parse(localStorage.getItem(STATE_KEY)||'{}');return value&&typeof value==='object'&&!Array.isArray(value)?value:{}}catch{return {}}}
+function articleFlags(article,stored){const value=Object.prototype.hasOwnProperty.call(stored,article.readingKey)?stored[article.readingKey]:article.readingState;return {isRead:value?.isRead===true,isStarred:value?.isStarred===true}}
+function filter(){const q=search.value.trim().toLocaleLowerCase();const stored=storedFlags();let matched=0;rows.forEach((row,i)=>{const a=ARTICLES[i],flags=articleFlags(a,stored);const haystack=[a.title,a.description,a.category,a.source,...a.tags].join(' ').toLocaleLowerCase();const visible=(!q||haystack.includes(q))&&(!starredOnly||flags.isStarred)&&(readFilter==='all'||(readFilter==='completed'?flags.isRead:!flags.isRead));row.hidden=!visible;if(visible)matched++;const read=row.querySelector('[data-read]'),star=row.querySelector('[data-star]');read.setAttribute('aria-pressed',String(flags.isRead));const readLabel=flags.isRead?'Mark Unread':'Mark Complete';read.setAttribute('aria-label',readLabel);read.title=readLabel;star.setAttribute('aria-pressed',String(flags.isStarred));star.setAttribute('aria-label',flags.isStarred?'Unstar':'Star')});document.getElementById('empty').style.display=matched?'none':'block';document.getElementById('article-count').textContent=matched;}
+search.addEventListener('input',filter);
+function setFlags(article,patch){const stored=storedFlags();stored[article.readingKey]={...articleFlags(article,stored),...patch};const error=document.getElementById('storage-error');try{localStorage.setItem(STATE_KEY,JSON.stringify(stored));error.hidden=true;filter()}catch{error.textContent='Could not save reading status. Your previous status is unchanged.';error.hidden=false}}
+rows.forEach((row,i)=>{const a=ARTICLES[i];row.querySelector('[data-read]').addEventListener('click',()=>setFlags(a,{isRead:!articleFlags(a,storedFlags()).isRead}));row.querySelector('[data-star]').addEventListener('click',()=>setFlags(a,{isStarred:!articleFlags(a,storedFlags()).isStarred}));row.addEventListener('click',e=>{if(!e.target.closest('a,button'))location.href=row.dataset.href});row.addEventListener('keydown',e=>{if(e.target===row&&e.key==='Enter')location.href=row.dataset.href});});
+document.querySelectorAll('[data-read-filter]').forEach(button=>button.addEventListener('click',()=>{readFilter=button.dataset.readFilter;document.querySelectorAll('[data-read-filter]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));filter()}));
+document.getElementById('star-filter').addEventListener('click',event=>{starredOnly=!starredOnly;event.currentTarget.setAttribute('aria-pressed',String(starredOnly));filter()});
+document.getElementById('reset-filters').addEventListener('click',()=>{search.value='';readFilter='all';starredOnly=false;document.querySelectorAll('[data-read-filter]').forEach(item=>item.setAttribute('aria-pressed',String(item.dataset.readFilter==='all')));document.getElementById('star-filter').setAttribute('aria-pressed','false');filter()});
+window.addEventListener('storage',event=>{if(event.key===STATE_KEY)filter()});window.addEventListener('pageshow',filter);
+document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();search.focus()}});
+try{const pref=localStorage.getItem('yano-library-theme');if(pref==='dark')document.documentElement.dataset.theme='dark'}catch(e){}
+document.getElementById('theme-switch').addEventListener('click',()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;try{localStorage.setItem('yano-library-theme',next)}catch(e){}});
+filter();
+</script>
+</body></html>

@@ -1,0 +1,195 @@
+"""YouTube subtitle extraction via yt-dlp (no audio/video download)."""
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from ..errors import ExtractionError, SubtitleUnavailableError
+from ..models import SourceInfo, TranscriptDocument
+from ..parsers import parse_srt_vtt
+from ..progress import ProgressCallback, report
+
+
+# Authentication is explicitly opt-in. Never silently read local browser sessions.
+_SUPPORTED_BROWSERS = frozenset({
+    "brave", "chrome", "chromium", "edge", "firefox", "opera",
+    "safari", "vivaldi", "whale",
+})
+
+
+class _QuietLogger:
+    """Prevent yt-dlp from printing duplicate raw errors (or sensitive paths)."""
+
+    def debug(self, message: str) -> None:
+        pass
+
+    def warning(self, message: str) -> None:
+        pass
+
+    def error(self, message: str) -> None:
+        pass
+
+
+def _cookie_options(
+    cookies_from_browser: str | None, cookies_file: Path | None,
+) -> dict:
+    if cookies_from_browser is not None and cookies_file is not None:
+        raise ExtractionError("--cookies-from-browser 和 --cookies 只能选择一种")
+    if cookies_from_browser is not None:
+        browser = cookies_from_browser.strip().lower()
+        if browser not in _SUPPORTED_BROWSERS:
+            raise ExtractionError(
+                "不支持该浏览器；可选 chrome、edge、firefox、safari、brave 等"
+            )
+        # yt-dlp's Python API expects (browser, profile, keyring, container).
+        return {"cookiesfrombrowser": (browser, None, None, None)}
+    if cookies_file is not None:
+        path = cookies_file.expanduser().resolve()
+        if not path.is_file():
+            raise ExtractionError("Cookie 文件不存在或不可读取；请检查 --cookies 路径")
+        return {"cookiefile": str(path)}
+    return {}
+
+
+def _language_rank(language: str) -> int:
+    key = language.lower()
+    if key in {"zh-hans", "zh-cn", "zh"}:
+        return 0
+    if key.startswith("zh"):
+        return 1
+    if key in {"en", "en-us", "en-gb"}:
+        return 2
+    if key.startswith("en"):
+        return 3
+    return 4
+
+
+def _choose_caption(info: dict) -> tuple[str, dict, bool] | None:
+    candidates = []
+    for is_auto, field in enumerate(("subtitles", "automatic_captions")):
+        for language, tracks in (info.get(field) or {}).items():
+            for track in tracks:
+                ext = track.get("ext", "").lower()
+                if ext in {"vtt", "srt"} and track.get("url"):
+                    candidates.append((_language_rank(language), is_auto, 0 if ext == "vtt" else 1, language, track))
+    if not candidates:
+        return None
+    _, is_auto, _, language, track = sorted(candidates, key=lambda item: item[:3])[0]
+    return language, track, bool(is_auto)
+
+
+def _source_info(info: dict, url: str) -> SourceInfo:
+    from ..metadata import thumbnail_url
+    upload_date = info.get("upload_date")
+    published_at = None
+    if upload_date:
+        try:
+            published_at = datetime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc).date().isoformat()
+        except (TypeError, ValueError):
+            pass
+    duration = info.get("duration")
+    description = info.get("description")
+    description = description if isinstance(description, str) and description.strip() else None
+    return SourceInfo(
+        platform="youtube", title=info.get("title") or info.get("id") or "Untitled",
+        url=info.get("webpage_url") or url, video_id=info.get("id"),
+        author=info.get("channel") or info.get("uploader"), published_at=published_at,
+        duration_ms=round(float(duration) * 1000) if duration is not None else None,
+        thumbnail_url=thumbnail_url(info.get("thumbnail")), description=description,
+        description_format="text" if description is not None else None,
+    )
+
+
+def youtube_metadata(url: str) -> SourceInfo:
+    """Explicit description refresh; metadata only, never captions or media."""
+    from ..links import canonical_link
+    url = canonical_link(url)
+    expected_id = url.rsplit("=", 1)[1]
+    try:
+        from yt_dlp import YoutubeDL
+    except ImportError as exc:
+        raise ExtractionError("获取 YouTube 简介需要 yt-dlp，请检查桌面版后端是否完整安装") from exc
+    options = {"quiet": True, "no_warnings": True, "noplaylist": True,
+               "skip_download": True, "writesubtitles": False, "writeautomaticsub": False,
+               "writethumbnail": False, "socket_timeout": 15, "retries": 1,
+               "extractor_retries": 1, "logger": _QuietLogger()}
+    try:
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if (not isinstance(info, dict) or info.get("_type") in {"playlist", "multi_video"}
+                or info.get("id") != expected_id):
+            raise ExtractionError("YouTube 返回的简介与当前视频不匹配")
+        result = _source_info(info, url)
+        # The known selected video, rather than a response-provided redirect,
+        # remains the identity of this explicit metadata refresh.
+        return result.model_copy(update={"url": url})
+    except ExtractionError:
+        raise
+    except Exception as exc:
+        raise ExtractionError("暂时无法读取 YouTube 简介，请检查网络或稍后重试") from exc
+
+
+def extract_youtube(
+    url: str, *, progress: ProgressCallback | None = None,
+    cookies_from_browser: str | None = None,
+    cookies_file: Path | None = None,
+) -> TranscriptDocument:
+    try:
+        from yt_dlp import YoutubeDL
+    except ImportError as exc:
+        raise ExtractionError("提取 YouTube 字幕需要 yt-dlp，请检查桌面版后端是否完整安装") from exc
+    cookie_options = _cookie_options(cookies_from_browser, cookies_file)
+    try:
+        if cookies_from_browser:
+            report(progress, "authentication", f"已选择从 {cookies_from_browser.lower()} 读取 Cookie（仅本次请求）")
+        elif cookies_file:
+            report(progress, "authentication", "已选择本地 Cookie 文件（仅本次请求）")
+        report(progress, "metadata", "正在获取 YouTube 视频元数据（首次访问可能较慢）")
+        options = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "skip_download": True,
+            "socket_timeout": 20,
+            "retries": 2,
+            "extractor_retries": 2,
+            "logger": _QuietLogger(),
+        }
+        options.update(cookie_options)
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not isinstance(info, dict) or info.get("_type") in {"playlist", "multi_video"}:
+                raise ExtractionError("未能识别单个 YouTube 视频；请使用包含 v=视频ID 的 watch 链接")
+            source = _source_info(info, url)
+            report(progress, "metadata_done", f"已获取视频：{source.title}", source=source)
+            report(progress, "captions", "正在检查字幕列表")
+            selected = _choose_caption(info)
+            if selected is None:
+                raise SubtitleUnavailableError("该 YouTube 视频没有可获取的 VTT/SRT 字幕；可启用 ASR", source=source)
+            language, track, is_auto = selected
+            caption_type = "自动字幕" if is_auto else "人工字幕"
+            report(progress, "captions_done", f"选定字幕：{language}（{caption_type} / {track['ext'].upper()}）")
+            report(progress, "download", "正在下载字幕文本（不下载视频或音频）")
+            with ydl.urlopen(track["url"]) as response:
+                content = response.read().decode("utf-8-sig", errors="replace")
+    except (ExtractionError, SubtitleUnavailableError):
+        raise
+    except Exception as exc:
+        reason = str(exc).lower()
+        if ("not a bot" in reason or "sign in to confirm" in reason
+                or "sign in to verify" in reason):
+            raise ExtractionError(
+                "YouTube 要求验证登录状态或触发了反机器人风控。"
+                "建议先更新 yt-dlp 并稍后重试；如果你有权使用该视频，"
+                "可显式添加 --cookies-from-browser chrome（或 edge/firefox/safari）。"
+                "此选项会读取本机浏览器会话，可能有账号风控风险，默认不启用。"
+            ) from exc
+        raise ExtractionError(f"YouTube 字幕提取失败：{str(exc)[:450]}") from exc
+    report(progress, "parse", "正在解析字幕时间戳和文本")
+    segments = parse_srt_vtt(content)
+    report(progress, "parsed", f"字幕解析完成：{len(segments)} 个片段")
+    return TranscriptDocument(
+        source=source,
+        transcript_source="subtitle",
+        language=language,
+        segments=segments,
+    )

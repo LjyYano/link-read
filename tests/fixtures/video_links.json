@@ -1,0 +1,214 @@
+[
+  {
+    "input": "【【飞鸟】爱情有啥用呢？学会掌握亲密关系！】 https\\://www\\.bilibili.com/video/BV1H4sJ6XEF5/?share_source=copy_web&vd_source=912f25495e17ef25942ac5a5a0ec81a8",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=1"
+  },
+  {
+    "input": "https://www.bilibili.com/list/watchlater?oid=117617863955745&bvid=BV1H4sJ6XEF5&spm_id_from=333.1007.top_right_bar_window_view_later.content.click&vd_source=02981ebacc2159767b5f8e5ff4dc134a",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=1"
+  },
+  {
+    "input": "[视频](https://www.bilibili.com/list/watchlater?bvid=BV1H4sJ6XEF5\\&p=2)",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=2"
+  },
+  {
+    "input": "https://www.bilibili.com/video/BV1H4sJ6XEF5/?p=2&amp;share_source=copy_web",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=2"
+  },
+  {
+    "input": "https\\://www\\.youtube.com/watch\\\\?v\\\\=1-Fo8McCD9w",
+    "output": "https://www.youtube.com/watch?v=1-Fo8McCD9w"
+  },
+  {
+    "input": "[https://youtu.be/1-Fo8McCD9w](https://youtu.be/1-Fo8McCD9w)",
+    "output": "https://www.youtube.com/watch?v=1-Fo8McCD9w"
+  },
+  {
+    "input": "【视频分享】https://b23.tv/AbCd12。",
+    "output": "https://b23.tv/AbCd12"
+  },
+  {
+    "input": "https://www.bilibili.com/list/watchlater?oid=123",
+    "output": null
+  },
+  {
+    "input": "https://www.bilibili.com/list/watchlater?bvid=BV1H4sJ6XEF5&bvid=BV1rxqmBhE91",
+    "output": null
+  },
+  {
+    "input": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=0",
+    "output": null
+  },
+  {
+    "input": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=1&p=2",
+    "output": null
+  },
+  {
+    "input": "https://evil.example/?bvid=BV1H4sJ6XEF5",
+    "output": null
+  },
+  {
+    "input": "https://bilibili.com.evil.example/video/BV1H4sJ6XEF5",
+    "output": null
+  },
+  {
+    "input": "https://user:secret@www.bilibili.com/video/BV1H4sJ6XEF5",
+    "output": null
+  },
+  {
+    "input": "http://www.bilibili.com/video/BV1H4sJ6XEF5",
+    "output": null
+  },
+  {
+    "input": "https://www.bilibili.com/redirect?bvid=BV1H4sJ6XEF5",
+    "output": null
+  },
+  {
+    "input": "https://youtu.be/1-Fo8McCD9w https://b23.tv/AbCd12",
+    "output": null
+  },
+  {
+    "input": "https://www.bilibili.com:443/video/BV1H4sJ6XEF5",
+    "output": null
+  },
+  {
+    "input": "https://youtu.be:443/1-Fo8McCD9w",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/%E5%95%86%E4%B8%9A%E5%B0%B1%E6%98%AF%E8%BF%99%E6%A0%B7/id1552904790?i=1000801308527",
+    "output": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527"
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/商业就是这样/id1552904790?i=1000801308527&utm_source=copy#episode",
+    "output": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527"
+  },
+  {
+    "input": "[商业就是这样](https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527)",
+    "output": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527"
+  },
+  {
+    "input": "商业就是这样 https\\://podcasts\\.apple\\.com/cn/podcast/id1552904790?i=1000801308527",
+    "output": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527"
+  },
+  {
+    "input": "https://podcasts.apple.com/CN/podcast/id1552904790/?i=1000801308527",
+    "output": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527"
+  },
+  {
+    "input": "https://podcasts.apple.com/podcast/id1552904790?i=1000801308527",
+    "output": "https://podcasts.apple.com/us/podcast/id1552904790?i=1000801308527"
+  },
+  {
+    "input": "https://podcasts.apple.com/us/podcast/title/id1552904790?i=1000801308527&ls=1",
+    "output": "https://podcasts.apple.com/us/podcast/id1552904790?i=1000801308527"
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527&i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527&i=2",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790?episode=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790?i=",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790?i=01000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790?i=-1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id01552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id0?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790?i=123456789012345678901",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com.evil.example/cn/podcast/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://evil.example/cn/podcast/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://user@podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com:443/cn/podcast/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/china/podcast/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/extra/extra/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "http://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527 https://www.youtube.com/watch?v=1-Fo8McCD9w",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/x/../id123?i=456",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/%2e%2e/id123?i=456",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/./id123?i=456",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/.%2E/id123?i=456",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/%2E./id123?i=456",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/%2e/id123?i=456",
+    "output": null
+  },
+  {
+    "input": "https://@podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com:/cn/podcast/id1552904790?i=1000801308527",
+    "output": null
+  },
+  {
+    "input": "https:///podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527",
+    "output": null
+  }
+]

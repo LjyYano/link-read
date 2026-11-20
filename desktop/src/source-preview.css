@@ -1,0 +1,16 @@
+.source-preview { display:flex; align-items:center; gap:18px; padding:16px; margin-top:10px; border:1px solid var(--line); border-radius:14px; background:var(--paper); min-height:118px; }
+.source-preview .shelf-cover, .preview-cover { flex:0 0 auto; width:160px; height:90px; border-radius:8px; }
+.source-preview .shelf-cover[data-platform="apple_podcasts"], .preview-cover[data-platform="apple_podcasts"] { width:88px; height:88px; aspect-ratio:1; }
+.source-preview-info { display:grid; gap:10px; min-width:0; }
+.source-preview-info strong { font-size:16px; line-height:1.5; font-weight:650; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.source-preview-info > span { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.preview-author { color:var(--muted); font-size:12px; }
+.preview-unavailable { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; color:var(--muted); font-size:12px; padding:8px 2px 0; }
+.preview-unavailable .text-button { display:inline-flex; align-items:center; gap:5px; font-size:12px; padding:3px 0; }
+.preview-pending-cover { display:grid; place-items:center; border:1px solid var(--line); background:var(--surface); color:var(--muted); }
+.preview-pending-cover[data-platform="apple_podcasts"] { color:#a34ad3; background:color-mix(in srgb,#a34ad3 7%,var(--paper)); }
+.preview-loading-info strong { font-size:14px; font-weight:600; }
+.source-preview-info .preview-status { display:flex; gap:6px; color:var(--muted); align-items:center; font-size:12px; }
+.preview-status .spin { color:var(--accent); flex-shrink:0; }
+@media(max-width:790px) { .source-preview .shelf-cover, .preview-cover { width:112px; height:63px; } .source-preview { padding:12px; min-height:88px; gap:12px; } .source-preview-info strong { font-size:14px; } }
+@media(max-width:790px) { .source-preview .shelf-cover[data-platform="apple_podcasts"], .preview-cover[data-platform="apple_podcasts"] { width:64px; height:64px; } }

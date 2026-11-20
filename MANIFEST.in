@@ -1,0 +1,6 @@
+# Private Python backend build inputs; the desktop frontend is built by Tauri.
+include CONTRIBUTING.md
+graft docs
+graft tests
+prune desktop
+global-exclude __pycache__ *.py[cod] .DS_Store

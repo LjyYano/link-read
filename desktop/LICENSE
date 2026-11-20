@@ -1,0 +1,16 @@
+LinkRead Desktop
+
+Project-owned files in this directory are covered by the
+LinkRead Desktop Source License, version 1.0 (2026-11-20),
+in the repository root LICENSE.
+
+Copyright (c) 2026 Yano (LjyYano) and the respective rights holders.
+All rights reserved, except as expressly granted by that license,
+applicable third-party licenses, or law.
+
+The same root license covers the app's private Python backend under
+src/linkread_desktop/. Third-party code retains its own terms.
+See ../LICENSE, ../NOTICE, and ../THIRD_PARTY_NOTICES.md.
+
+This file is a scope pointer for npm and Cargo metadata; distribute
+the complete root license and applicable notices with the application.

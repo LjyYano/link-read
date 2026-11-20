@@ -1,0 +1,11 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build && python3 scripts/bundle_sidecar.py"
+  },
+  "bundle": {
+    "active": true,
+    "externalBin": ["binaries/linkread-sidecar"],
+    "resources": { "../build/licenses/": "licenses/" },
+    "macOS": { "signingIdentity": "-", "hardenedRuntime": false }
+  }
+}

@@ -1,0 +1,156 @@
+import { Channel, invoke } from "@tauri-apps/api/core"
+import type { AsrOptions } from "./asrSettings"
+import type { TaskJournal } from "./taskJournal"
+
+export type Provider = "codex" | "claude" | "api"
+export type ExportFormat = "html" | "markdown"
+export type MarkdownExportOptions = { content: "readable" | "full"; includeTimestamped: boolean }
+export type ArticleDetails = {
+  title: string; category: string; originalTitle: string; originalCategory: string
+  titleOverridden: boolean; categoryOverridden: boolean
+}
+export type ArticleState = { isRead: boolean; isStarred: boolean }
+export type ArticleStatePatch = Partial<ArticleState>
+
+export type Article = {
+  id: string
+  title: string
+  category: string
+  hasAnalysis?: boolean
+  platform: "bilibili" | "youtube" | "apple_podcasts" | "local"
+  sourceUrl: string | null
+  updatedAt: number
+  author: string | null
+  publishedAt: string | null
+  durationMs: number | null
+  thumbnailUrl: string | null
+  isRead?: boolean
+  isStarred?: boolean
+  previewId?: string
+  readingKey?: string
+}
+
+export type RequestActivity = {
+  sequence: number; id: string; stage: "analysis" | "polish" | "publication" | null
+  phase: "queued" | "running" | "received" | "validating" | "complete" | "cache" | "failed"
+  active: number; queued: number; validating: number; completed: number; cacheHits: number
+}
+
+export type GenerationFailure = {
+  message: string; code: string; stage?: string | null; retryable: boolean
+  action: "retry" | "settings" | "setup" | "source" | "details"
+}
+
+export function normalizeGenerationFailure(error: unknown): GenerationFailure {
+  if (error && typeof error === "object" && "message" in error) {
+    const value = error as Partial<GenerationFailure>
+    const action = ["retry", "settings", "setup", "source", "details"].includes(value.action ?? "")
+      ? value.action! : "details"
+    return { message: String(value.message), code: typeof value.code === "string" ? value.code : "unknown",
+      stage: typeof value.stage === "string" ? value.stage : null, retryable: value.retryable === true, action }
+  }
+  const message = String(error)
+  return { message, code: message === "已取消生成" ? "cancelled" : "unknown", stage: null,
+    retryable: true, action: "retry" }
+}
+
+export type Progress = {
+  stage: string
+  message: string
+  completed: number | null
+  total: number | null
+  metadata?: ArticleMetadata | null
+  previewId?: string | null
+  request?: RequestActivity | null
+}
+
+export type ArticleMetadata = Pick<Article, "title" | "platform" | "sourceUrl" | "author" | "publishedAt" | "durationMs" | "thumbnailUrl">
+
+export type Library = { articles: Article[]; unavailable: number }
+export type Duplicate = { key: string | null; article: Article | null }
+export type ToolStatus = { executable: string | null; keyAvailable: boolean }
+
+export const providerNames = { codex: "Codex", claude: "Claude Code", api: "自定义 API" }
+export const platformNames = { youtube: "YouTube", bilibili: "Bilibili", apple_podcasts: "Apple 播客", local: "本地字幕" }
+
+export function generateArticle(
+  source: string,
+  provider: Provider,
+  executable: string,
+  onProgress: (event: Progress) => void,
+  requestId: string,
+  localFile: boolean,
+  replace = false,
+  baseUrl = "",
+  model = "",
+  asr?: AsrOptions,
+  resumePreview?: string,
+) {
+  const progress = new Channel<Progress>(onProgress)
+  return invoke<Article>("generate", { source, provider, executable, progress, requestId, localFile, replace, baseUrl, model, asr, resumePreview })
+}
+
+export const cancelGeneration = (requestId: string) => invoke("cancel_generation", { requestId })
+export const listArticles = () => invoke<Library>("list_articles")
+export const checkTool = (provider: Provider, executable: string) =>
+  invoke<ToolStatus>("check_tool", { provider, executable })
+export const exportArticle = (id: string, format: ExportFormat, options?: MarkdownExportOptions) =>
+  invoke<boolean>("export_article", { id, format, ...(options ? { options } : {}) })
+export const getArticleDetails = (id: string) => invoke<ArticleDetails>("get_article_details", { id })
+export const updateArticleDetails = (id: string, title: string | null, category: string | null) =>
+  invoke<Article>("update_article_details", { id, title, category })
+export const openVideo = (source: string) => invoke("open_video", { source })
+export const openExternal = (url: string) => invoke("open_external", { url })
+export const pickSubtitle = () => invoke<string | null>("pick_subtitle")
+export const openArticle = (id: string) => invoke("open_article", { id })
+export const revealArticle = (id: string) => invoke("reveal_article", { id })
+
+export const checkDuplicate = (source: string, localFile: boolean, resumePreview?: string) =>
+  invoke<Duplicate>("check_duplicate", { source, localFile, resumePreview })
+
+export const deleteArticle = (id: string) => invoke<void>("delete_article", { id })
+export const updateArticleState = (id: string, patch: ArticleStatePatch) =>
+  invoke<ArticleState>("update_article_state", { id, ...patch })
+export type PreparedArticle = { revision: string; readingKey: string }
+export const prepareArticle = (id: string) => invoke<PreparedArticle>("prepare_article", { id })
+export const refreshShownotes = (id: string) => invoke<PreparedArticle>("refresh_shownotes", { id })
+export const preparePreview = (id: string) => invoke<PreparedArticle & { article: Article }>("prepare_preview", { id })
+export const loadTaskJournal = () => invoke<unknown>("load_task_journal")
+export const saveTaskJournal = (journal: TaskJournal) => invoke<void>("save_task_journal", { journal })
+export const loadReadingPosition = (key: string) => invoke<unknown>("load_reading_position", { key })
+export const saveReadingPosition = (key: string, position: unknown) => invoke<void>("save_reading_position", { key, position })
+
+// Token lives in a private app-data file (mode 0600), not Keychain or localStorage.
+// It is only loaded into the Settings form on explicit navigation to that screen.
+export const loadApiToken = () => invoke<string | null>("load_api_token")
+export const saveApiToken = (token: string) => invoke<void>("save_api_token", { token })
+export const deleteApiToken = () => invoke<void>("delete_api_token")
+export const testApiConnection = (baseUrl: string, model: string, token: string) =>
+  invoke<{ ok: boolean; message: string }>("test_api_connection", { baseUrl, model, token })
+
+export const previewVideo = (source: string) => invoke<ArticleMetadata>("preview_video", { source })
+export type SourceCheck = {
+  source: string
+  status: "captions" | "needs_asr" | "blocked" | "unknown"
+  code: string
+  message: string
+  checkedAt: number
+  origin?: "check" | "generation"
+}
+export const checkSource = (source: string) => invoke<SourceCheck>("check_source", { source })
+export const loadAsrToken = () => invoke<string | null>("load_asr_token")
+export const saveAsrToken = (token: string) => invoke<void>("save_asr_token", { token })
+export const deleteAsrToken = () => invoke<void>("delete_asr_token")
+export const testAsrConnection = (options: AsrOptions, token: string) =>
+  invoke<{ ok: boolean; message: string }>("test_asr_connection", { options, token })
+
+export type FfmpegStatus = {
+  state: "ready" | "missing" | "invalid"
+  path: string | null
+  version: string | null
+  message: string
+}
+export const checkFfmpeg = (path = "") => invoke<FfmpegStatus>("check_ffmpeg", { path })
+export const locateFfmpeg = () => invoke<FfmpegStatus | null>("locate_ffmpeg")
+
+export const articleTranscriptPath = (id: string) => invoke<string>("article_transcript_path", { id })

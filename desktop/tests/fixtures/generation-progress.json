@@ -1,0 +1,289 @@
+[
+  {
+    "type": "progress",
+    "stage": "extract",
+    "message": "正在检查已归档的字幕"
+  },
+  {
+    "type": "progress",
+    "stage": "saved_transcript",
+    "message": "已保存原始字幕：<offline-fixture-library>/Offline fixture · read original while AI runs [youtube-1-Fo8McCD9w]/transcript.json",
+    "metadata": {
+      "title": "Offline fixture · read original while AI runs",
+      "platform": "youtube",
+      "sourceUrl": "https://www.youtube.com/watch?v=1-Fo8McCD9w",
+      "author": "Fixture publisher",
+      "publishedAt": null,
+      "durationMs": 8000,
+      "thumbnailUrl": "https://i.ytimg.com/vi/1-Fo8McCD9w/hqdefault.jpg"
+    },
+    "previewId": "6d9ccf3c61036928ab171e005e4b2676d106855f3d8b005385154c857ee26319"
+  },
+  {
+    "type": "progress",
+    "stage": "parallel_start",
+    "message": "提炼与正文校对同时开始，使用统一并发上限"
+  },
+  {
+    "type": "progress",
+    "stage": "polish_start",
+    "message": "开始全文标点校对：1 个阅读段落，1 批，并发 1",
+    "completed": 0,
+    "total": 1
+  },
+  {
+    "type": "progress",
+    "stage": "ai_start",
+    "message": "准备调用 api：1 个字幕分块，并发 1",
+    "completed": 0,
+    "total": 1
+  },
+  {
+    "type": "progress",
+    "stage": "polish_batch",
+    "message": "已调度校对批次 1/1（1 个文本片段）"
+  },
+  {
+    "type": "progress",
+    "stage": "polish_request",
+    "message": "模型请求已进入并发队列",
+    "request": {
+      "sequence": 1,
+      "id": "request-1",
+      "stage": "polish",
+      "phase": "queued",
+      "active": 0,
+      "queued": 1,
+      "validating": 0,
+      "completed": 0,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "polish_request",
+    "message": "模型请求已发出，等待完整返回",
+    "request": {
+      "sequence": 2,
+      "id": "request-1",
+      "stage": "polish",
+      "phase": "running",
+      "active": 1,
+      "queued": 0,
+      "validating": 0,
+      "completed": 0,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "polish_request",
+    "message": "本次模型请求未完成",
+    "request": {
+      "sequence": 3,
+      "id": "request-1",
+      "stage": "polish",
+      "phase": "failed",
+      "active": 0,
+      "queued": 0,
+      "validating": 0,
+      "completed": 0,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "ai_chunk",
+    "message": "已调度提炼批次 1/1（8 条字幕）"
+  },
+  {
+    "type": "progress",
+    "stage": "ai_request",
+    "message": "模型请求已进入并发队列",
+    "request": {
+      "sequence": 4,
+      "id": "request-2",
+      "stage": "analysis",
+      "phase": "queued",
+      "active": 0,
+      "queued": 1,
+      "validating": 0,
+      "completed": 0,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "ai_request",
+    "message": "模型请求已发出，等待完整返回",
+    "request": {
+      "sequence": 5,
+      "id": "request-2",
+      "stage": "analysis",
+      "phase": "running",
+      "active": 1,
+      "queued": 0,
+      "validating": 0,
+      "completed": 0,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "ai_request",
+    "message": "已收到模型结果",
+    "request": {
+      "sequence": 6,
+      "id": "request-2",
+      "stage": "analysis",
+      "phase": "received",
+      "active": 0,
+      "queued": 0,
+      "validating": 0,
+      "completed": 0,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "ai_request",
+    "message": "正在校验模型结果与原文约束",
+    "request": {
+      "sequence": 7,
+      "id": "request-2",
+      "stage": "analysis",
+      "phase": "validating",
+      "active": 0,
+      "queued": 0,
+      "validating": 1,
+      "completed": 0,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "ai_request",
+    "message": "模型结果已通过校验",
+    "request": {
+      "sequence": 8,
+      "id": "request-2",
+      "stage": "analysis",
+      "phase": "complete",
+      "active": 0,
+      "queued": 0,
+      "validating": 0,
+      "completed": 1,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "ai_done",
+    "message": "第 1/1 块提炼完成",
+    "completed": 1,
+    "total": 1
+  },
+  {
+    "type": "progress",
+    "stage": "ai_saved",
+    "message": "AI 提炼完成，已保存可复用的笔记"
+  },
+  {
+    "type": "progress",
+    "stage": "article_ai",
+    "message": "AI 正在生成简短摘要和编号目录、思维导图、金句卡片、书架分类和标签（一次调用）"
+  },
+  {
+    "type": "progress",
+    "stage": "publication_request",
+    "message": "模型请求已进入并发队列",
+    "request": {
+      "sequence": 9,
+      "id": "request-3",
+      "stage": "publication",
+      "phase": "queued",
+      "active": 0,
+      "queued": 1,
+      "validating": 0,
+      "completed": 1,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "publication_request",
+    "message": "模型请求已发出，等待完整返回",
+    "request": {
+      "sequence": 10,
+      "id": "request-3",
+      "stage": "publication",
+      "phase": "running",
+      "active": 1,
+      "queued": 0,
+      "validating": 0,
+      "completed": 1,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "publication_request",
+    "message": "已收到模型结果",
+    "request": {
+      "sequence": 11,
+      "id": "request-3",
+      "stage": "publication",
+      "phase": "received",
+      "active": 0,
+      "queued": 0,
+      "validating": 0,
+      "completed": 1,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "publication_request",
+    "message": "正在校验模型结果与原文约束",
+    "request": {
+      "sequence": 12,
+      "id": "request-3",
+      "stage": "publication",
+      "phase": "validating",
+      "active": 0,
+      "queued": 0,
+      "validating": 1,
+      "completed": 1,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "publication_request",
+    "message": "模型结果已通过校验",
+    "request": {
+      "sequence": 13,
+      "id": "request-3",
+      "stage": "publication",
+      "phase": "complete",
+      "active": 0,
+      "queued": 0,
+      "validating": 0,
+      "completed": 2,
+      "cacheHits": 0
+    }
+  },
+  {
+    "type": "progress",
+    "stage": "publication_done",
+    "message": "简短摘要和编号目录、思维导图、金句卡片、书架分类和标签已整理完成"
+  },
+  {
+    "type": "error",
+    "message": "Offline fixture: proofreading timed out",
+    "code": "model_timeout",
+    "stage": "polish",
+    "retryable": true,
+    "action": "retry"
+  }
+]

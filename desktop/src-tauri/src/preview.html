@@ -1,0 +1,66 @@
+<!-- Keep the exported HTML's original horizontal tabs and chapter TOC.
+     Desktop adds only native integrations, never replaces the reader layout. -->
+<style>
+/* The app toolbar already provides navigation back to the bookshelf. */
+.linkread-desktop .crumb { display: none; }
+.linkread-desktop [data-reading-actions] { display: none; }
+.linkread-desktop [data-refresh-shownotes] { display: inline-flex; }
+/* Old archives use margin:auto, which vertically centers short tabs in Grid. */
+.linkread-desktop .main { margin: 0 auto; align-self: start; padding-top: 30px; }
+.linkread-desktop .tabs { top: 0; }
+@media (max-width: 790px) {
+  .linkread-desktop .main { padding-top: 20px; }
+}
+</style>
+<script>
+(() => {
+  "use strict";
+  document.documentElement.classList.add("linkread-desktop");
+
+  const systemTheme = matchMedia("(prefers-color-scheme: dark)");
+  const themeKey = "linkread-desktop-theme";
+  let theme = null;
+  try { theme = localStorage.getItem(themeKey); } catch {}
+  function applyTheme() {
+    document.documentElement.dataset.theme =
+      theme === "light" || theme === "dark" ? theme : systemTheme.matches ? "dark" : "light";
+  }
+  applyTheme();
+  systemTheme.addEventListener("change", applyTheme);
+  window.addEventListener("message", event => {
+    if (event.source !== window.parent) return;
+    if (typeof event.data?.linkReadEscapeRequest === "string" && /^[0-9]{1,20}$/.test(event.data.linkReadEscapeRequest)) {
+      const handled = window.linkreadCloseReaderLayer?.() === true;
+      window.parent.postMessage({ linkReadEscapeResult: { id: event.data.linkReadEscapeRequest, handled } }, "*");
+      return;
+    }
+    if (event.data?.linkReadCommand !== "toggle-theme") return;
+    theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme();
+    try { localStorage.setItem(themeKey, theme); } catch {}
+  });
+
+  document.addEventListener("click", event => {
+    if (!event.isTrusted || !(event.target instanceof Element)) return;
+    const link = event.target.closest("a[href]");
+    if (!link) return;
+    if (link.protocol === "https:" || link.protocol === "http:") {
+      event.preventDefault();
+      window.parent.postMessage({ linkReadExternal: link.href }, "*");
+    } else if (link.hasAttribute("href") && !link.getAttribute("href").startsWith("#")
+      && !link.getAttribute("href").startsWith("mailto:")) {
+      // Relative bookshelf links cannot resolve inside the custom reader scheme.
+      event.preventDefault();
+      window.parent.postMessage({ linkReadGoBack: true }, "*");
+    }
+  });
+  document.addEventListener("keydown", event => {
+    const key = event.key.toLowerCase();
+    if (!event.isTrusted || event.defaultPrevented ||
+        event.isComposing || event.keyCode === 229 || event.altKey || (key === "escape" && event.repeat) ||
+        !(key === "escape" || ((event.metaKey || event.ctrlKey) && (key === "o" || key === "," || key === "k")))) return;
+    event.preventDefault();
+    window.parent.postMessage({ linkReadShortcut: key === "escape" ? "Escape" : key }, "*");
+  });
+})();
+</script>
