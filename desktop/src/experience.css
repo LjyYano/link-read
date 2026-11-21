@@ -4,18 +4,17 @@
 .article-card:has(.article-card-link:hover), .article-card:focus-within { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); box-shadow: 0 4px 16px #17273d08; }
 .article-card:has([aria-expanded="true"]) { z-index: 4; }
 .article-card-link { width: 100%; padding: 0; display: flex; flex-direction: column; gap: 0; text-align: left; border: 0; border-radius: 12px 12px 0 0; background: transparent; }
-.article-card-media { position:relative; display:grid; place-items:center; width:100%; aspect-ratio:2; overflow:hidden; border-radius:11px 11px 0 0; background:var(--surface); }
-.article-card-media .shelf-cover { position:absolute; inset:12px auto; width:auto; max-width:calc(100% - 24px); height:calc(100% - 24px); aspect-ratio:16 / 9; border:0; border-radius:8px; box-shadow:0 2px 8px #17273d10; }
-.article-card-media .shelf-cover > img { object-fit:contain; background:var(--surface); }
-.article-card-media .shelf-cover[data-platform="apple_podcasts"] { aspect-ratio:1; }
-.article-card .shelf-cover > svg { width: 40px; height: 40px; }
-.article-card-info { display: grid; gap: 8px; padding: 12px 14px 8px; width: 100%; }
-.article-card-title { min-height: 44px; font-size: 15px; font-weight: 650; line-height: 1.5; color: var(--ink); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.article-card-media { position:relative; display:block; width:100%; aspect-ratio:16 / 9; overflow:hidden; border-radius:11px 11px 0 0; }
+.article-card-media > .shelf-cover { position:absolute; inset:0; width:100%; height:100%; aspect-ratio:auto; border:0; border-radius:0; }
+.article-card-media .shelf-cover[data-platform="apple_podcasts"] > img { background:transparent; }
+.article-card-media .shelf-cover > .cover-backdrop { object-fit:cover; filter:blur(18px); transform:scale(1.2); opacity:.68; }
+.article-card-info { display: grid; gap: 5px; padding: 11px 14px 2px; width: 100%; }
+.article-card-title { min-height: 2.7em; font-size: 15px; font-weight: 650; line-height: 1.35; color: var(--ink); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .article-card-link:hover .article-card-title { color: var(--accent-dark); }
 .article-card .shelf-source { font-size: 12px; gap: 5px; }
-.article-card-footer { display: flex; gap: 8px; align-items: center; padding: 0 10px 10px 14px; margin-top:auto; }
-.article-card-footer .shelf-date { margin-left: auto; font-size: 11px; }
-.article-card .shelf-complete { font-size: 11px; min-height: 22px; padding: 2px 6px; gap: 3px; }
+.article-card-footer { display: flex; gap: 8px; align-items: center; padding: 0 10px 7px 14px; margin-top:auto; }
+.article-card-footer .shelf-date { font-size: 11px; }
+.article-card-footer .shelf-overflow { margin-inline-start: auto; }
 .article-card .shelf-overflow-panel { inset-block: auto calc(100% + 5px); z-index: 10; }
 .article-card .shelf-overflow-button { width: 28px; }
 .bookshelf-page { --shelf-media-width:116px; }

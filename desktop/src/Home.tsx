@@ -1,7 +1,7 @@
 import { normalizeVideoLink } from "./videoLinks"
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, CircleAlert, FolderOpen,
+  ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, Circle, CircleAlert, CircleCheck, FolderOpen,
   FileUp, Link2, LoaderCircle, MoreHorizontal, Pencil, Search, Tv, X, CircleHelp, Sparkles, Trash2, Captions, Podcast, RotateCw, CircleStop, CirclePause, Star,
 } from "lucide-react"
 import { exportArticle, openVideo, revealArticle, type Article, type ExportFormat, type Library, type GenerationFailure } from "./api"
@@ -13,7 +13,7 @@ import { useLinkPreview, type LinkPreview } from "./useLinkPreview"
 import { thumbnailSource } from "./coverSource"
 import { previewKey } from "./previewState"
 import { ReadingActions, type ChangeArticleState } from "./ReadingActions"
-import { filterArticles, searchArticles, shelfCounts, defaultShelfFilters, type ReadFilter, type ShelfFilters } from "./libraryState"
+import { articleState, filterArticles, searchArticles, shelfCounts, defaultShelfFilters, type ReadFilter, type ShelfFilters } from "./libraryState"
 import { continueLabel, type ContinueReading } from "./continueReading"
 import { selectRecentArticles, sourcePresentation, updatedDatePresentation } from "./homePresentation"
 
@@ -109,7 +109,7 @@ function PlatformIcon({ platform }: { platform?: Article["platform"] }) {
   return <Captions size={16} strokeWidth={1.7} className="shelf-local-icon" aria-hidden="true" />
 }
 
-function Cover({ platform, thumbnailUrl, title, sourceUrl }: ArticleIdentity) {
+function Cover({ platform, thumbnailUrl, title, sourceUrl, withBackdrop }: ArticleIdentity & { withBackdrop?: boolean }) {
   const text = coverText(title)
   const cover = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
@@ -151,6 +151,8 @@ function Cover({ platform, thumbnailUrl, title, sourceUrl }: ArticleIdentity) {
         <span className="cover-title" data-compact={text.compact}>{text.label}</span>
         <span className="cover-rule" />
       </span>
+      {withBackdrop && showCover && loaded === resolved &&
+        <img className="cover-backdrop" alt="" src={resolved} referrerPolicy="no-referrer" />}
       {showCover && <img alt="" src={resolved} referrerPolicy="no-referrer"
         hidden={loaded !== resolved} onLoad={() => setLoaded(resolved)}
         onError={() => setBroken(resolved)} />}
@@ -181,19 +183,19 @@ function ArticleUpdatedAt({ value }: { value: number }) {
   </time>
 }
 
-function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkdown }: {
+function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkdown, onStateChange }: {
   article: Article
   onDelete: (id: string) => Promise<void>
   onRegenerate: (article: Article) => Promise<void>
   onEdit?: (article: Article) => void
   onExportMarkdown?: (article: Article) => void
+  onStateChange?: ChangeArticleState
 }) {
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   const container = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
-  const firstItem = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const [menuLayout, setMenuLayout] = useState<CSSProperties>()
 
@@ -218,7 +220,7 @@ function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkd
 
   useEffect(() => {
     if (!open) return
-    firstItem.current?.focus({ preventScroll: true })
+    panel.current?.querySelector("button")?.focus({ preventScroll: true })
     function outside(event: PointerEvent) {
       if (event.target instanceof Node && !container.current?.contains(event.target)) setOpen(false)
     }
@@ -253,6 +255,8 @@ function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkd
   }
 
   const sourceUrl = article.sourceUrl
+  const { isRead, isStarred } = articleState(article)
+  const ReadIcon = isRead ? CircleCheck : Circle
   return (
     <div className="shelf-overflow" ref={container} onBlur={event => {
       if (!pending && event.relatedTarget && !container.current?.contains(event.relatedTarget)) setOpen(false)
@@ -268,7 +272,15 @@ function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkd
         <MoreHorizontal size={19} />
       </button>
       {open && <div ref={panel} style={menuLayout} className="shelf-overflow-panel" aria-label="文章操作" role="group" data-action-menu>
-        <button ref={firstItem} type="button" disabled={pending} onClick={() => void perform(() => onRegenerate(article))}>
+        {onStateChange && <>
+          <button type="button" disabled={pending} onClick={() => void perform(() => onStateChange(article.id, { isRead: !isRead }))}>
+            <ReadIcon size={15} aria-hidden="true" /> {isRead ? "标为未读" : "标为已读"}
+          </button>
+          <button type="button" disabled={pending} onClick={() => void perform(() => onStateChange(article.id, { isStarred: !isStarred }))}>
+            <Star size={15} fill={isStarred ? "currentColor" : "none"} aria-hidden="true" /> {isStarred ? "取消收藏" : "收藏"}
+          </button>
+        </>}
+        <button type="button" disabled={pending} onClick={() => void perform(() => onRegenerate(article))}>
           <Sparkles size={15} /> {article.hasAnalysis === false ? "AI 整理文章" : "重新整理"}
         </button>
         {onEdit && <button type="button" disabled={pending} onClick={() => { setOpen(false); trigger.current?.focus(); onEdit(article) }}>
@@ -329,16 +341,16 @@ function ArticleCard({ article, onRead, onDelete, onRegenerate, onStateChange, o
   return (
     <li className="article-card" data-platform={article.platform} data-article-id={article.id}>
       <button type="button" className="article-card-link" onClick={() => onRead(article)}>
-        <span className="article-card-media"><Cover {...article} /></span>
+        <span className="article-card-media"><Cover {...article} withBackdrop={article.platform === "apple_podcasts"} /></span>
         <span className="article-card-info">
           <span className="article-card-title" title={article.title}>{article.title}</span>
           <SourceDetails {...article} />
         </span>
       </button>
       <div className="article-card-footer">
-        <ReadingActions article={article} onChange={onStateChange} compact locale="zh" />
         <ArticleUpdatedAt value={article.updatedAt} />
-        <ArticleActions article={article} onDelete={onDelete} onRegenerate={onRegenerate} onEdit={onEdit} onExportMarkdown={onExportMarkdown} />
+        <ArticleActions article={article} onDelete={onDelete} onRegenerate={onRegenerate} onEdit={onEdit}
+          onExportMarkdown={onExportMarkdown} onStateChange={onStateChange} />
       </div>
     </li>
   )

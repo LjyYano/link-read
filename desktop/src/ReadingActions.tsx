@@ -7,23 +7,20 @@ import "./reading-actions.css"
 export type ChangeArticleState = (id: string, patch: ArticleStatePatch) => Promise<void>
 
 const labels = {
-  en: { unread: "Mark Unread", read: "Mark Complete", unstar: "Unstar", star: "Star", starred: "Starred",
-    saveError: "Could not save.", dismissError: "Dismiss error" },
-  zh: { unread: "标为未读", read: "标为已读", unstar: "取消收藏", star: "收藏", starred: "已收藏",
-    saveError: "保存失败。", dismissError: "关闭错误提示" },
+  unread: "Mark Unread", read: "Mark Complete", unstar: "Unstar", star: "Star", starred: "Starred",
+  saveError: "Could not save.", dismissError: "Dismiss error",
 } as const
 
-export function ReadingActions({ article, onChange, compact = false, className = "", locale = "en", nativeTooltips = true }: {
-  article: Article; onChange: ChangeArticleState; compact?: boolean; className?: string; locale?: keyof typeof labels
+export function ReadingActions({ article, onChange, compact = false, className = "", nativeTooltips = true }: {
+  article: Article; onChange: ChangeArticleState; compact?: boolean; className?: string
   nativeTooltips?: boolean
 }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   const inFlight = useRef(false)
   const state = articleState(article)
-  const copy = labels[locale]
-  const completeLabel = state.isRead ? copy.unread : copy.read
-  const starLabel = state.isStarred ? copy.unstar : copy.star
+  const completeLabel = state.isRead ? labels.unread : labels.read
+  const starLabel = state.isStarred ? labels.unstar : labels.star
 
   async function save(patch: ArticleStatePatch) {
     if (inFlight.current) return
@@ -41,7 +38,7 @@ export function ReadingActions({ article, onChange, compact = false, className =
   }
 
   return <div className={`reading-actions${compact ? " reading-actions-compact" : ""} ${className}`}
-    role="group" aria-label={locale === "zh" ? `阅读状态：${article.title}` : `Reading status: ${article.title}`} aria-busy={pending}>
+    role="group" aria-label={`Reading status: ${article.title}`} aria-busy={pending}>
     <button type="button" className="reading-state-button reading-complete-button" disabled={pending}
       aria-pressed={state.isRead} aria-label={completeLabel}
       title={nativeTooltips ? completeLabel : undefined} onClick={() => void save({ isRead: !state.isRead })}>
@@ -51,11 +48,11 @@ export function ReadingActions({ article, onChange, compact = false, className =
       aria-pressed={state.isStarred} aria-label={starLabel}
       title={nativeTooltips ? starLabel : undefined} onClick={() => void save({ isStarred: !state.isStarred })}>
       <Star size={17} fill={state.isStarred ? "currentColor" : "none"} aria-hidden="true" />
-      <span>{state.isStarred ? copy.starred : copy.star}</span>
+      <span>{state.isStarred ? labels.starred : labels.star}</span>
     </button>
     {error && <div className="reading-state-error" role="alert">
-      <span>{copy.saveError} {error}</span>
-      <button type="button" className="icon-button" aria-label={copy.dismissError} onClick={() => setError("")}><X size={13} /></button>
+      <span>{labels.saveError} {error}</span>
+      <button type="button" className="icon-button" aria-label={labels.dismissError} onClick={() => setError("")}><X size={13} /></button>
     </div>}
   </div>
 }
