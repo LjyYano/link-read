@@ -119,8 +119,6 @@
 
 .home-tool-warning button { margin-left: auto; }
 .home-recent { margin-top: 28px; }
-.home-library-access { margin-top: 16px; }
-.home-library-access > .text-button { display: flex; margin-inline-start: auto; }
 
 .home-section-title {
   display: flex;

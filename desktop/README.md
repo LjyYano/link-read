@@ -22,12 +22,11 @@ if [ ! -x .venv/bin/python ]; then
   python3 -m venv .venv
 fi
 .venv/bin/python -m pip install -e '.[youtube,test]'
-cd desktop
-npm ci
-npm run tauri -- dev
+npm ci --prefix desktop
+sh desktop/dev.sh
 ```
 
-开发模式会使用仓库的 `.venv/bin/python`。可以通过 `LINKREAD_PYTHON` 指定解释器的绝对路径。
+在仓库根目录运行 `sh desktop/dev.sh` 启动和验证桌面应用。脚本根据自身位置定位仓库，准备 Rust stable，并默认使用仓库的 `.venv/bin/python`。可以通过 `LINKREAD_PYTHON` 指定解释器的绝对路径。
 
 ## 构建本机架构的 App
 
@@ -81,7 +80,7 @@ Rust 启动 Python 核心，并使用 Tauri IPC 通道传递标准输出中的 J
 - 顶部「任务」在首页、书架和阅读页都可打开任务中心，分别显示处理中、等待中与需处理记录。首页只保留当前处理卡及紧凑的排队/待查看提示；打开抽屉不会打断阅读，Escape 只关闭抽屉。
 - 新失败与中断记录保留未查看提醒，只有实际滚动到可见区域后才记为已查看。「清理已查看记录」需确认并先保存任务日志，仅读取/移除已结束的记录，不删除字幕、阶段缓存或书架文章，不影响运行与排队任务。
 - 首页「继续阅读」从最近打开、尚未手动标记完成且仍在书架中的文章选取一条，以「昨天读到 Highlights」等文案显示真实保存的 Tab 与日期。使用轻量来源键查询既有阅读位置，不为此生成 HTML；点击恢复已有段落、Tab 和导图状态。
-- 最近文章排除上方续读文章，再按顺序补足最多 6 篇；只有续读文章时收起最近文章区域。卡片使用统一、紧凑的媒体区，播客方形封面完整显示；书架保留固定媒体列、搜索与紧凑列表。生成任务与已完成文章分开显示。
+- 最近文章按完成顺序显示最多 6 篇，并包含上方的续读文章。如果续读文章排在六篇之外，它会占用最后一个卡片位置。卡片使用统一、紧凑的媒体区，播客方形封面完整显示；书架保留固定媒体列、搜索与紧凑列表。生成任务与已完成文章分开显示。
 - 卡片优先展示已知节目名或作者，缺失时回退平台；「音频约 42 分钟」「视频约 29 分钟」表示原媒体时长。日期显示「昨天更新」或短月日，跨年显示年份，悬停可看完整更新时间。
 - 任务显示真实阶段、已完成批次、累计耗时；运行时进度条带移动高亮与条纹，等待动画不会改变完成比例，非运行状态停止动画。遵循系统「减少动态效果」偏好。超过 20 秒没有新事件时，显示等待响应的时长，不编造百分比或剩余时间。
 - 主卡片仅显示已完成批次数，不再将「第 3/3 批已调度」误读为「完成 3/3」；原始调度事件仍在处理详情中保留。
@@ -113,7 +112,7 @@ Escape 每次只处理最上层：应用对话框、阅读器菜单、导图全�
 
 - `zsh: command not found: python`：不要依赖系统 `python` 别名。回到仓库根目录，使用 `.venv/bin/python -m pip install -e '.[youtube,test]'`；没有 `.venv` 时先用 Python 3.11+ 的 `python3 -m venv .venv` 创建。无需激活也能使用这个解释器。
 - ASR 组件使用 `AsrSettingsPanel.tsx`，配置模块使用 `asrSettings.ts`。扩展名省略时，macOS 的大小写不敏感解析可能将同名 `.tsx` 错认成 `.ts`，因此禁止仅靠大小写区分模块名。
-- Vite 只扫描 `desktop/index.html`，不扫描 `src-tauri/target`、嵌入阅读模板或 `build/sidecar` 生成的 HTML。更新后停止旧开发进程，再重新运行 `npm ci` 和 `npm run tauri -- dev`。
+- Vite 只扫描 `desktop/index.html`，不扫描 `src-tauri/target`、嵌入阅读模板或 `build/sidecar` 生成的 HTML。更新后停止旧开发进程，在仓库根目录重新运行 `npm ci --prefix desktop` 和 `sh desktop/dev.sh`。
 - 本次修复已在 Linux 和 macOS 上验证前端构建及 Vite 启动；新增模块名冲突检查，避免仅在大小写敏感环境中漏检。原生 Rust 测试不替代前端测试。
 
 ## 本地字幕与旧文章升级

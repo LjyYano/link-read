@@ -118,13 +118,25 @@
     }
     return false;
   }
+  function fitMap() {
+    if (instance) {
+      const {x1, x2, y1, y2} = instance.state.rect;
+      const {width, height} = dimensions();
+      if (!(width > 0 && height > 0 && x2 > x1 && y2 > y1)) return;
+      const {fitRatio, maxInitialScale} = instance.options;
+      // Apply the fitted transform in one step so resize and position capture
+      // cannot pick up an intermediate zoom transform.
+      applyViewport({
+        engine: 'markmap', cx: (x1 + x2) / 2, cy: (y1 + y2) / 2,
+        scale: Math.min(width / (x2 - x1) * fitRatio, height / (y2 - y1) * fitRatio, maxInitialScale),
+      });
+    } else fallback?.fit();
+  }
   function fitView(save = true) {
     const current = ++operation;
-    requestAnimationFrame(() => requestAnimationFrame(async () => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!isVisible() || current !== operation) return;
-      if (instance) await instance.fit();
-      else fallback?.fit();
-      if (current !== operation) return;
+      fitMap();
       lastSize = dimensions();
       remember(save);
     }));
@@ -292,11 +304,6 @@
           initialExpandLevel: -1, maxWidth: 220, spacingHorizontal: 55,
           spacingVertical: 9, paddingX: 16, scrollForPan: true,
         });
-        const fit = instance.fit.bind(instance);
-        instance.fit = scale => {
-          const {x1, x2, y1, y2} = instance.state.rect, {width, height} = dimensions();
-          return width > 0 && height > 0 && x2 > x1 && y2 > y1 ? fit(scale) : Promise.resolve();
-        };
         const toggle = instance.toggleNode.bind(instance);
         instance.toggleNode = async (...args) => {
           const current = ++operation;
@@ -317,10 +324,10 @@
         svgEl.addEventListener('wheel', () => requestAnimationFrame(() => remember()), {passive: true});
         const current = ++operation;
         setMode(pendingSaved?.mode || 'overview');
-        void instance.setData(treeAtDepth(root, 0, false, 0, '0', pendingSaved)).then(async () => {
+        void instance.setData(treeAtDepth(root, 0, false, 0, '0', pendingSaved)).then(() => {
           if (current !== operation) return;
+          if (!applyViewport(pendingSaved?.viewport)) fitMap();
           ready = true;
-          if (!applyViewport(pendingSaved?.viewport)) await instance.fit();
           lastSize = dimensions();
           remember(false);
         });

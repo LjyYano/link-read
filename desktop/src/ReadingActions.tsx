@@ -13,14 +13,17 @@ const labels = {
     saveError: "保存失败。", dismissError: "关闭错误提示" },
 } as const
 
-export function ReadingActions({ article, onChange, compact = false, className = "", locale = "en" }: {
+export function ReadingActions({ article, onChange, compact = false, className = "", locale = "en", nativeTooltips = true }: {
   article: Article; onChange: ChangeArticleState; compact?: boolean; className?: string; locale?: keyof typeof labels
+  nativeTooltips?: boolean
 }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
   const inFlight = useRef(false)
   const state = articleState(article)
   const copy = labels[locale]
+  const completeLabel = state.isRead ? copy.unread : copy.read
+  const starLabel = state.isStarred ? copy.unstar : copy.star
 
   async function save(patch: ArticleStatePatch) {
     if (inFlight.current) return
@@ -40,13 +43,13 @@ export function ReadingActions({ article, onChange, compact = false, className =
   return <div className={`reading-actions${compact ? " reading-actions-compact" : ""} ${className}`}
     role="group" aria-label={locale === "zh" ? `阅读状态：${article.title}` : `Reading status: ${article.title}`} aria-busy={pending}>
     <button type="button" className="reading-state-button reading-complete-button" disabled={pending}
-      aria-pressed={state.isRead} aria-label={state.isRead ? copy.unread : copy.read}
-      title={state.isRead ? copy.unread : copy.read} onClick={() => void save({ isRead: !state.isRead })}>
+      aria-pressed={state.isRead} aria-label={completeLabel}
+      title={nativeTooltips ? completeLabel : undefined} onClick={() => void save({ isRead: !state.isRead })}>
       {state.isRead ? <CircleCheck className="reading-complete-icon" size={17} aria-hidden="true" /> : <Circle size={17} aria-hidden="true" />}
     </button>
     <button type="button" className="reading-state-button reading-star-button" disabled={pending}
-      aria-pressed={state.isStarred} aria-label={state.isStarred ? copy.unstar : copy.star}
-      title={state.isStarred ? copy.unstar : copy.star} onClick={() => void save({ isStarred: !state.isStarred })}>
+      aria-pressed={state.isStarred} aria-label={starLabel}
+      title={nativeTooltips ? starLabel : undefined} onClick={() => void save({ isStarred: !state.isStarred })}>
       <Star size={17} fill={state.isStarred ? "currentColor" : "none"} aria-hidden="true" />
       <span>{state.isStarred ? copy.starred : copy.star}</span>
     </button>

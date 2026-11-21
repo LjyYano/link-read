@@ -27,9 +27,8 @@ cd link-read-desktop
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[youtube,test]'
 
-cd desktop
-npm ci
-npm run tauri -- dev
+npm ci --prefix desktop
+sh desktop/dev.sh
 ```
 
 开发模式默认读取本仓库的 `.venv/bin/python`。需要其他解释器时，通过 `LINKREAD_PYTHON` 指定绝对路径。详见[桌面功能与开发说明](desktop/README.md)。
@@ -51,6 +50,8 @@ npm run app
 当前配置使用临时签名用于本机测试。公开分发须完成 Developer ID 签名、Apple 公证及实机安装验证；支付、激活和订阅系统尚未接入。
 
 # 4. 本地验证
+
+桌面应用的启动和界面验证统一在仓库根目录运行 `sh desktop/dev.sh`。离线测试和前端构建使用下列命令。
 
 ```bash
 .venv/bin/python -m pytest -q

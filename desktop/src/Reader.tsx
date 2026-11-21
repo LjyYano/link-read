@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowLeft, ArrowUpRight, ChevronDown, CircleAlert, Ellipsis, ExternalLink, FileText, FolderOpen, LoaderCircle, Pencil, Printer, RotateCw, Share, SunMoon, Sparkles, X } from "lucide-react"
+import { ArrowLeft, ArrowUpRight, CircleAlert, Ellipsis, ExternalLink, FileText, FolderOpen, LoaderCircle, Pencil, Printer, RotateCw, Share, SunMoon, Sparkles, X } from "lucide-react"
 import { exportArticle, openArticle, openExternal, openVideo, prepareArticle, preparePreview, refreshShownotes, revealArticle, loadReadingPosition, saveReadingPosition, type Article, type ExportFormat } from "./api"
 import { menuNavigation } from "./menu"
 import { ReadingActions, type ChangeArticleState } from "./ReadingActions"
@@ -223,15 +223,16 @@ export function Reader({ article, onBack, onRegenerate, onStateChange, preview, 
           // it mounted for the following click; outside pointer-down dismisses.
           if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setMenu(undefined)
         }}>
-          {!isPreview && <ReadingActions article={article} onChange={onStateChange} />}
           {!isPreview && <>
-          <button className="desktop-reader-action desktop-reader-open" type="button" title="Open in Browser" onClick={() => void open(() => openArticle(article.id))}>
-            <ExternalLink size={16} aria-hidden="true" /><span>Open in Browser</span>
+          <ReadingActions article={article} onChange={onStateChange} compact nativeTooltips={false} />
+          <button className="desktop-reader-action" type="button" aria-label="Open in Browser"
+            onClick={() => void open(() => openArticle(article.id))}>
+            <ExternalLink size={17} aria-hidden="true" />
           </button>
           <div className="desktop-reader-popover">
             <button className="desktop-reader-action" type="button" ref={exportButton} disabled={exporting}
-              aria-expanded={menu === "export"} onClick={() => toggle("export")}>
-              <Share size={16} aria-hidden="true" />Export<ChevronDown size={13} aria-hidden="true" />
+              aria-label="Export" aria-expanded={menu === "export"} onClick={() => toggle("export")}>
+              <Share size={17} aria-hidden="true" />
             </button>
             {menu === "export" && (
               <div className="desktop-reader-menu" role="group" aria-label="Export format" data-action-menu>
@@ -246,7 +247,7 @@ export function Reader({ article, onBack, onRegenerate, onStateChange, preview, 
             )}
           </div>
           <div className="desktop-reader-popover">
-            <button className="desktop-reader-action desktop-reader-more" type="button" ref={moreButton}
+            <button className="desktop-reader-action" type="button" ref={moreButton}
               aria-label="More actions" aria-expanded={menu === "more"} onClick={() => toggle("more")}>
               <Ellipsis size={20} aria-hidden="true" />
             </button>

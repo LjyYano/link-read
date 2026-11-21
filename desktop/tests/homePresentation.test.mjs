@@ -5,10 +5,11 @@ import { selectRecentArticles, sourcePresentation, updatedDatePresentation } fro
 
 const article = (id, extras = {}) => ({ id, title: id, ...extras })
 
-test('recent cards exclude the resumed article before taking six, and backfill in completion order', () => {
+test('recent cards include the resumed article once and keep completion order', () => {
   const library = Array.from({ length: 8 }, (_, i) => article(String(i)))
   const finished = [article('0'), article('new'), article('new')]
-  assert.deepEqual(selectRecentArticles(finished, library, '0').map(item => item.id), ['new', '1', '2', '3', '4', '5'])
+  assert.deepEqual(selectRecentArticles(finished, library, '0').map(item => item.id), ['0', 'new', '1', '2', '3', '4'])
+  assert.deepEqual(selectRecentArticles(finished, library, '7').map(item => item.id), ['0', 'new', '1', '2', '3', '7'])
   assert.deepEqual(finished.map(item => item.id), ['0', 'new', 'new'])
   assert.deepEqual(library.map(item => item.id), ['0', '1', '2', '3', '4', '5', '6', '7'])
 })
@@ -21,8 +22,8 @@ test('a finished job never hides newer library edits or reading state for the sa
   assert.equal(selectRecentArticles([old])[0], old)
 })
 
-test('a library containing only the resumed article has no redundant recent card', () => {
-  assert.deepEqual(selectRecentArticles([article('only')], [article('only')], 'only'), [])
+test('a library containing only the resumed article shows its recent card', () => {
+  assert.deepEqual(selectRecentArticles([article('only')], [article('only')], 'only'), [article('only')])
   assert.deepEqual(selectRecentArticles([], []), [])
   assert.deepEqual(selectRecentArticles([], [article('one')], undefined, 0), [])
 })

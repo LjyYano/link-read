@@ -4,7 +4,7 @@ const platformNames = {
   youtube: "YouTube", bilibili: "B 站", apple_podcasts: "Apple 播客", local: "本地字幕",
 } as const
 
-/** Keep completion order while using the library's latest edited metadata and reading state. */
+/** Keep completion order and reserve a card for the current resume article when needed. */
 export function selectRecentArticles(
   finished: readonly Article[], library: readonly Article[] = [], resumeId?: string, limit = 6,
 ): Article[] {
@@ -13,11 +13,13 @@ export function selectRecentArticles(
   const seen = new Set<string>()
   const selected: Article[] = []
   for (const article of [...finished, ...library]) {
-    if (article.id === resumeId || seen.has(article.id)) continue
+    if (seen.has(article.id)) continue
     seen.add(article.id)
     selected.push(current.get(article.id) ?? article)
     if (selected.length === limit) break
   }
+  const resume = resumeId === undefined ? undefined : current.get(resumeId)
+  if (resume && !seen.has(resume.id)) selected.splice(limit - 1, 1, resume)
   return selected
 }
 

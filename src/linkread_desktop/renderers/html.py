@@ -192,8 +192,7 @@ def render_html(
                         if toc else ""),
         "MOBILE_TOC": (f'<details class="mobile-toc"><summary>Contents</summary><nav>{toc}</nav></details>'
                        if toc else ""),
-        "READING_NOTICE": (('<p class="reading-notice">This transcript was generated from audio and may contain transcription errors. Check the original audio when needed.</p>'
-                            if transcript.transcript_source == "asr" else "") + _reading_notice(note)),
+        "READING_NOTICE": _reading_notice(note),
         "ARTICLE": article,
         "SUMMARY_PANEL": panels.get("summary", ""),
         "MINDMAP_PANEL": panels.get("mindmap", ""),

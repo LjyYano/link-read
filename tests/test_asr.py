@@ -155,7 +155,7 @@ def test_full_desktop_asr_to_article_and_saved_transcript(monkeypatch, tmp_path)
     note = load_document(article.with_name("note.json"))
     assert note.transcript.transcript_source == "asr"
     assert note.transcript.segments[0].start_ms == 125
-    assert "This transcript was generated from audio" in article.read_text()
+    assert "This transcript was generated from audio" not in article.read_text()
 
 
 def test_explicit_rejection_allows_user_to_retry_but_timeout_does_not(tmp_path, monkeypatch):

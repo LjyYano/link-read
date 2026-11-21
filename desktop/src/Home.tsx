@@ -669,7 +669,7 @@ export function Home({
           <span className="continue-reading-action" aria-hidden="true"><ArrowRight size={18} /></span>
         </button>
       </section>}
-      {(recent.length > 0 || !resume) ? <section aria-labelledby="home-recent-title" className="home-recent">
+      <section aria-labelledby="home-recent-title" className="home-recent">
         <div className="home-section-title">
           <h2 id="home-recent-title">最近文章</h2>
           <button className="text-button" type="button" onClick={onLibrary}>查看书架 <ArrowRight size={15} /></button>
@@ -681,10 +681,7 @@ export function Home({
           <BookOpen size={22} strokeWidth={1.5} /><span>还没有文章，粘贴链接开始阅读</span>
         </div>}
         <LibraryState library={library} error={error} onRefresh={onRefresh} />
-      </section> : <div className="home-library-access">
-        <button className="text-button" type="button" onClick={onLibrary}>查看书架 <ArrowRight size={15} /></button>
-        <LibraryState library={library} error={error} onRefresh={onRefresh} />
-      </div>}
+      </section>
     </div>
   )
 }
