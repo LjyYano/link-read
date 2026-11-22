@@ -1,6 +1,8 @@
 // Test transport only. App, hooks, task journal, queue, dialogs and reader bridge are real modules.
 const config = (window as any).__taskWorkspaceConfig || {}
 const clone = (value: any) => JSON.parse(JSON.stringify(value))
+type FileDragEvent = { payload: { type: "enter" | "leave" | "drop"; paths: string[] } }
+let dragHandler: ((event: FileDragEvent) => void) | undefined
 const fixture = {
   calls: [] as any[],
   library: clone(config.library || []),
@@ -11,6 +13,10 @@ const fixture = {
   pendingGenerations: [] as any[],
   pendingSourceChecks: [] as any[],
   holdSourceChecks: true,
+  emitFileDrag(type: FileDragEvent["payload"]["type"], paths: string[] = []) {
+    if (!dragHandler) throw Error('No file drag listener is registered')
+    dragHandler({ payload: { type, paths } })
+  },
   releaseSource(source: string, result: any) {
     const index = fixture.pendingSourceChecks.findIndex((pending: any) => pending.source === source)
     if (index < 0) throw Error('No source check waiting for ' + source)
@@ -36,8 +42,13 @@ export class Channel<T> {
   onmessage: (message: T) => void
   constructor(callback: (message: T) => void) { this.onmessage = callback }
 }
-export const isTauri = () => false
-export const getCurrentWebview = () => ({ onDragDropEvent: async () => () => {} })
+export const isTauri = () => Boolean(config.nativeDrag)
+export const getCurrentWebview = () => ({
+  onDragDropEvent: async (handler: (event: FileDragEvent) => void) => {
+    dragHandler = handler
+    return () => { dragHandler = undefined }
+  },
+})
 export const getCurrentWindow = () => ({})
 
 export async function invoke<T>(command: string, args: any = {}): Promise<T> {

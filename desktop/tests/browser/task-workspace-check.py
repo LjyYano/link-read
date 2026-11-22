@@ -85,7 +85,7 @@ async def routes(route):
         await route.fulfill(path=str(path), content_type={'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css'}.get(path.suffix))
 
 
-async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=1280):
+async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=1280, native_drag=False):
     context = await browser.new_context(viewport={'width': width, 'height': 980},
                                         color_scheme='dark' if dark else 'light', reduced_motion='reduce')
     await context.route('**/*', routes)
@@ -98,7 +98,7 @@ async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=128
         await dialog.accept()
 
     page.on('dialog', confirm)
-    config = {'library': ARTICLES, 'positions': POSITIONS,
+    config = {'library': ARTICLES, 'positions': POSITIONS, 'nativeDrag': native_drag,
               'journal': {'version': 1, 'tasks': [old_failure(index) for index in range(old_count)]}}
     seed = {'config': config, 'preferences': PREFS, 'recent': RECENT,
             'reviewed': [f'old-{index:02}' for index in range(old_count)] if reviewed else []}
@@ -117,6 +117,68 @@ async def check_no_overflow(page):
       .filter(element=>element.getBoundingClientRect().width>0&&element.scrollWidth>element.clientWidth+1)
       .map(element=>({className:element.className,width:element.clientWidth,scroll:element.scrollWidth}))''')
     assert not overflowing, overflowing
+
+
+async def verify_home_composer(browser, *, width, dark):
+    context, page, errors, _ = await open_app(browser, width=width, dark=dark, native_drag=True)
+    await page.set_viewport_size({'width': width, 'height': 640 if width > 720 else 580})
+    composer = page.locator('.home-dropzone')
+    field = composer.get_by_role('textbox', name='视频或播客链接')
+    upload = composer.get_by_role('button', name='导入字幕')
+    help_button = composer.get_by_role('button', name='查看支持的来源')
+    tooltip = composer.locator('.home-import-tooltip')
+    help_note = composer.get_by_role('note')
+    await expect(field).to_have_attribute('placeholder', '粘贴视频或播客链接')
+    await expect(upload).to_have_text('')
+    await expect(tooltip).to_have_count(0)
+    await expect(composer.get_by_role('button', name='生成文章')).to_be_disabled()
+    assert await field.evaluate("field => getComputedStyle(field, '::placeholder').fontWeight") == '400'
+    assert await field.evaluate("field => getComputedStyle(field, '::placeholder').color !== getComputedStyle(field).color")
+    await page.screenshot(path=str(OUT / f'{ENGINE}-composer-{width}-idle.png'))
+
+    idle_border = await composer.evaluate("element => getComputedStyle(element).borderTopColor")
+    await field.focus()
+    assert await composer.evaluate("element => getComputedStyle(element).borderTopColor") != idle_border
+    await upload.hover()
+    await expect(tooltip).to_have_text('导入字幕')
+    await tooltip.hover()
+    await expect(tooltip).to_be_visible()
+    await page.screenshot(path=str(OUT / f'{ENGINE}-composer-{width}-hover.png'))
+    await page.mouse.move(4, 45)
+    await expect(tooltip).to_have_count(0)
+    await upload.focus()
+    await expect(tooltip).to_be_visible()
+    await page.keyboard.press('Escape')
+    await expect(tooltip).to_have_count(0)
+    await expect(upload).to_be_focused()
+    await help_button.press('Enter')
+    await upload.hover()
+    await expect(help_note).to_contain_text('SRT、VTT、JSON')
+    await expect(tooltip).to_have_count(0)
+    await page.keyboard.press('Escape')
+    await expect(help_note).to_have_count(0)
+
+    await upload.click()
+    selected = composer.get_by_role('textbox', name='选中的字幕文件')
+    await expect(selected).to_have_value('imported-subtitles.srt')
+    await expect(tooltip).to_have_count(0)
+    await composer.get_by_role('button', name='移除字幕文件').click()
+    await expect(field).to_be_focused()
+    draft = 'https://www.youtube.com/watch?v=abcdefghij1'
+    await field.fill(draft)
+    await page.evaluate("window.taskWorkspaceFixture.emitFileDrag('enter', ['/fixture/dropped.vtt'])")
+    await expect(composer.get_by_role('status')).to_have_text('松开以导入字幕文件')
+    await expect(field).to_have_value(draft)
+    await page.evaluate("window.taskWorkspaceFixture.emitFileDrag('leave')")
+    await expect(composer.get_by_role('status')).to_have_count(0)
+    await expect(field).to_have_value(draft)
+    await page.evaluate("window.taskWorkspaceFixture.emitFileDrag('drop', ['/fixture/dropped.vtt'])")
+    await expect(selected).to_have_value('dropped.vtt')
+    await expect(composer.get_by_role('button', name='生成文章')).to_be_enabled()
+    await check_no_overflow(page)
+    assert not errors, errors
+    RESULTS.append({'check': f'Icon-only import, tooltip hover/focus/dismissal, help, file picker and drag feedback preserve interaction at width={width}, dark={dark}'})
+    await context.close()
 
 
 async def queue_video(page, index):
@@ -326,6 +388,8 @@ async def main():
     async with async_playwright() as playwright:
         browser = await getattr(playwright, ENGINE).launch()
         try:
+            await verify_home_composer(browser, width=1060, dark=False)
+            await verify_home_composer(browser, width=720, dark=True)
             await verify_tasks(browser)
             await verify_unseen_visibility(browser)
             await verify_continue(browser)

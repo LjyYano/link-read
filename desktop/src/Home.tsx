@@ -521,29 +521,35 @@ export function Home({
   const recent = selectRecentArticles(finished, library?.articles, resume?.article.id)
   const currentJobs = jobs.filter(task => task.job.status === "running" || task.job.status === "cancelling").slice(0, 1)
   const selectedFile = localPath && fileName(localPath)
-  const [helpOpen, setHelpOpen] = useState(false)
+  const [hint, setHint] = useState<"import" | "help" | "pinned-help">()
+  const helpOpen = hint === "help" || hint === "pinned-help"
+  const importRef = useRef<HTMLDivElement>(null)
   const helpRef = useRef<HTMLDivElement>(null)
-  const helpPinned = useRef(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const podcastPreview = previewKey(source)?.startsWith("apple_podcasts:")
   const existing = Boolean(existingArticle || existingTask)
+  const submitDisabled = (!existing && (journalLoading || sourceBlocked)) || (!localPath && !source.trim())
 
-  function closeHelp() {
-    helpPinned.current = false
-    setHelpOpen(false)
+  function showImportHint() {
+    setHint(current => current === "pinned-help" ? current : "import")
+  }
+
+  function hideImportHint() {
+    setHint(current => current === "import" ? undefined : current)
   }
 
   useEffect(() => {
-    if (!helpOpen) return
+    if (!hint) return
     const outside = (event: PointerEvent) => {
-      if (!helpRef.current?.contains(event.target as Node)) closeHelp()
+      const owner = hint === "import" ? importRef.current : helpRef.current
+      if (event.target instanceof Node && !owner?.contains(event.target)) setHint(undefined)
     }
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || event.repeat
         || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return
       event.preventDefault()
       event.stopPropagation()
-      closeHelp()
+      setHint(undefined)
     }
     document.addEventListener("pointerdown", outside)
     document.addEventListener("keydown", escape, true)
@@ -551,11 +557,11 @@ export function Home({
       document.removeEventListener("pointerdown", outside)
       document.removeEventListener("keydown", escape, true)
     }
-  }, [helpOpen])
+  }, [hint])
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if ((existing || !sourceBlocked) && (localPath || source.trim())) onStart()
+    if (!submitDisabled) onStart()
   }
 
   return (
@@ -564,12 +570,13 @@ export function Home({
         <div className={`home-dropzone${dragging ? " home-dropzone-active" : ""}`}>
           <div className="home-input-field">
             <span className="home-input-mark" aria-hidden="true">
-              {selectedFile ? <Captions size={25} className="home-input-icon" /> : <Link2 size={25} className="home-input-icon" />}
+              {dragging ? <FileUp size={20} /> : selectedFile ? <Captions size={20} /> : <Link2 size={20} />}
             </span>
-            <input ref={inputRef} aria-label={selectedFile ? "选中的字幕文件" : "视频或播客链接"} type="text" inputMode={selectedFile ? "text" : "url"}
-              readOnly={Boolean(selectedFile)} autoComplete="off" spellCheck={false} value={selectedFile || source}
-              title={selectedFile || undefined} placeholder={dragging ? "松开以导入字幕文件" : "粘贴视频或播客链接"}
-              onChange={event => setSource(event.target.value)}
+            <div className="home-input-content">
+              <input ref={inputRef} aria-label={selectedFile ? "选中的字幕文件" : "视频或播客链接"} type="text" inputMode={selectedFile ? "text" : "url"}
+                readOnly={Boolean(selectedFile)} autoComplete="off" spellCheck={false} value={selectedFile || source}
+                title={selectedFile || undefined} placeholder="粘贴视频或播客链接"
+                onChange={event => setSource(event.target.value)}
                 onPaste={event => {
                   if (localPath) return
                   try {
@@ -578,36 +585,47 @@ export function Home({
                     setSource(link)
                   } catch { /* Keep incomplete input editable; generation shows the validation error. */ }
                 }} />
+              {dragging && <span className="home-drop-hint" role="status">松开以导入字幕文件</span>}
+            </div>
             {(selectedFile || source) && <button className="icon-button home-inline-button" type="button"
               title={selectedFile ? "移除字幕文件" : "清空链接"} aria-label={selectedFile ? "移除字幕文件" : "清空链接"}
               onClick={() => { onClear(); inputRef.current?.focus() }}><X size={16} /></button>}
           </div>
           <div className="home-input-actions">
-            <button className="plain home-import-button" type="button" title="导入字幕" aria-label="导入字幕" onClick={onPick}>
-              <FileUp size={18} aria-hidden="true" /><span>导入字幕</span>
-            </button>
-            <div ref={helpRef} className="home-help" onMouseEnter={() => setHelpOpen(true)}
+            <div ref={importRef} className="home-import" onMouseEnter={showImportHint}
+              onMouseLeave={event => { if (!event.currentTarget.querySelector(":focus-visible")) hideImportHint() }}
+              onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) hideImportHint() }}>
+              <button className="icon-button home-inline-button" type="button" aria-label="导入字幕" onFocus={showImportHint}
+                onClick={() => { setHint(undefined); onPick() }}><FileUp size={18} aria-hidden="true" /></button>
+              {hint === "import" && <span className="home-import-tooltip" aria-hidden="true">导入字幕</span>}
+            </div>
+            <div ref={helpRef} className="home-help"
+              onMouseEnter={() => setHint(current => current === "pinned-help" ? current : "help")}
               onMouseLeave={event => {
-                if (!helpPinned.current && !event.currentTarget.contains(document.activeElement)) setHelpOpen(false)
+                if (!event.currentTarget.querySelector(":focus-visible")) {
+                  setHint(current => current === "help" ? undefined : current)
+                }
               }}
-              onBlur={event => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) closeHelp() }}>
+              onBlur={event => {
+                if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
+                  setHint(current => current === "import" ? current : undefined)
+                }
+              }}>
               <button className="icon-button home-inline-button" type="button" aria-label="查看支持的来源"
                 aria-expanded={helpOpen} aria-controls={helpOpen ? "home-help-content" : undefined}
                 onClick={event => {
                   event.currentTarget.focus({ preventScroll: true })
-                  helpPinned.current = !helpPinned.current
-                  setHelpOpen(helpPinned.current)
+                  setHint(current => current === "pinned-help" ? undefined : "pinned-help")
                 }}>
                 <CircleHelp size={19} aria-hidden="true" />
               </button>
               {helpOpen && <div id="home-help-content" className="home-help-popover" role="note">
-                支持 YouTube、B 站视频、Apple 播客单集，以及 SRT / VTT / JSON 字幕文件。
-                <span>文件可选择或拖入，生成时会调用所选 AI 整理。无字幕时可在设置中开启语音识别。</span>
+                支持 YouTube、B 站视频和 Apple 播客单集。
+                <span>可选择或拖入 SRT、VTT、JSON 字幕。无字幕时可在设置中开启语音识别。</span>
               </div>}
             </div>
-            <button className="primary home-primary" type="submit" disabled={(!existing && (journalLoading || sourceBlocked)) || (!localPath && !source.trim())}
+            <button className="primary home-primary" type="submit" disabled={submitDisabled}
               onClick={event => event.currentTarget.focus({ preventScroll: true })}>
-              {existingArticle ? <BookOpen size={17} /> : existingTask ? <CirclePause size={17} /> : <Sparkles size={17} />}
               {existingArticle ? "打开文章" : existingTask ? "查看任务" : sourceBlocked ? "暂不支持此来源" : sourceNeedsAsr ? "设置语音识别" : busy ? "加入队列" : "生成文章"}
             </button>
           </div>
