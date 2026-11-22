@@ -1,8 +1,8 @@
 import { normalizeVideoLink } from "./videoLinks"
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import {
-  ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, Check, Circle, CircleAlert, CircleCheck, FolderOpen,
-  FileUp, Link2, LoaderCircle, MoreHorizontal, Pencil, Search, Tv, X, CircleHelp, Sparkles, Trash2, Captions, Podcast, RotateCw, CircleStop, CirclePause, Star,
+  ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, Circle, CircleAlert, CircleCheck, FolderOpen,
+  FileUp, Link2, LoaderCircle, MoreHorizontal, Pencil, Plus, Search, Tv, X, CircleHelp, Sparkles, Trash2, Captions, Podcast, RotateCw, CircleStop, CirclePause, Star,
 } from "lucide-react"
 import { exportArticle, openVideo, revealArticle, type Article, type ExportFormat, type Library, type GenerationFailure } from "./api"
 import { menuNavigation } from "./menu"
@@ -12,7 +12,7 @@ import "./home.css"
 import { useLinkPreview, type LinkPreview } from "./useLinkPreview"
 import { thumbnailSource } from "./coverSource"
 import { previewKey } from "./previewState"
-import { ReadingActions, type ChangeArticleState } from "./ReadingActions"
+import type { ChangeArticleState } from "./ReadingActions"
 import { articleState, filterArticles, searchArticles, shelfCounts, defaultShelfFilters, type ReadFilter, type ShelfFilters } from "./libraryState"
 import { continueLabel, type ContinueReading } from "./continueReading"
 import { selectRecentArticles, sourcePresentation, updatedDatePresentation } from "./homePresentation"
@@ -85,14 +85,6 @@ const stages = ["提取字幕", "AI 提炼", "校对与整理", "生成文章"]
 
 function fileName(path: string) {
   return path.split("/").at(-1) || path
-}
-
-function dateLabel(updatedAt: number) {
-  const date = new Date(updatedAt)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
-  return `${year}-${month}-${day}`
 }
 
 function PlatformIcon({ platform }: { platform?: Article["platform"] }) {
@@ -284,7 +276,7 @@ function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkd
           <Sparkles size={15} /> {article.hasAnalysis === false ? "AI 整理文章" : "重新整理"}
         </button>
         {onEdit && <button type="button" disabled={pending} onClick={() => { setOpen(false); trigger.current?.focus(); onEdit(article) }}>
-          <Pencil size={15} /> Edit details
+          <Pencil size={15} /> 编辑详情
         </button>}
         <button type="button" disabled={pending} onClick={() => save("html")}><ArrowDownToLine size={15} /> 导出 HTML</button>
         <button type="button" disabled={pending} onClick={() => save("markdown")}><ArrowDownToLine size={15} /> 导出 Markdown</button>
@@ -312,19 +304,32 @@ function ArticleRow({ article, onRead, onDelete, onRegenerate, onStateChange, on
   onEdit?: (article: Article) => void
   onExportMarkdown?: (article: Article) => void
 }) {
+  const { isRead, isStarred } = articleState(article)
   return (
     <li className="shelf-row" data-platform={article.platform} data-article-id={article.id}>
       <button type="button" className="shelf-article-link" onClick={() => onRead(article)}>
         <span className="shelf-media"><Cover {...article} /></span>
         <span className="shelf-article-info">
-          <span className="shelf-article-title" title={article.title}>{article.title}</span>
-          <SourceDetails {...article} />
-          {article.hasAnalysis === false && <span className="shelf-raw">Raw transcript</span>}
+          <span className="shelf-article-heading">
+            <span className="shelf-article-title" title={article.title}>{article.title}</span>
+            {(isRead || isStarred) && <span className="shelf-article-status">
+              {isRead && <span className="shelf-status-read" role="img" aria-label="已读" title="已读">
+                <CircleCheck size={14} aria-hidden="true" />
+              </span>}
+              {isStarred && <span className="shelf-status-star" role="img" aria-label="已收藏" title="已收藏">
+                <Star size={13} fill="currentColor" aria-hidden="true" />
+              </span>}
+            </span>}
+          </span>
+          <span className="shelf-article-meta">
+            <SourceDetails {...article} />
+            <ArticleUpdatedAt value={article.updatedAt} />
+            {article.hasAnalysis === false && <span className="shelf-raw">原文字幕</span>}
+          </span>
         </span>
       </button>
-      <ReadingActions article={article} onChange={onStateChange} className="shelf-reading-actions" />
-      <time className="shelf-date" dateTime={dateLabel(article.updatedAt)}>{dateLabel(article.updatedAt)}</time>
-      <ArticleActions article={article} onDelete={onDelete} onRegenerate={onRegenerate} onEdit={onEdit} onExportMarkdown={onExportMarkdown} />
+      <ArticleActions article={article} onDelete={onDelete} onRegenerate={onRegenerate} onEdit={onEdit}
+        onExportMarkdown={onExportMarkdown} onStateChange={onStateChange} />
     </li>
   )
 }
@@ -704,50 +709,58 @@ export function Bookshelf({
   onCreate: () => void; search: string; onSearch: (text: string) => void
   filters: ShelfFilters; onFilters: (filters: ShelfFilters) => void
 }) {
+  const searchField = useRef<HTMLInputElement>(null)
   const matching = searchArticles(library?.articles ?? [], search)
   const articles = filterArticles(matching, filters)
   const counts = shelfCounts(matching, filters.starred)
   const filtered = Boolean(search.trim() || filters.read !== "all" || filters.starred)
   const readFilters: { key: ReadFilter; label: string }[] = [
-    { key: "all", label: "All" }, { key: "unread", label: "Unread" }, { key: "completed", label: "Completed" },
+    { key: "all", label: "全部" }, { key: "unread", label: "未读" }, { key: "completed", label: "已读" },
   ]
 
-  function resetFilters() {
+  function clearSearch() {
     onSearch("")
+    searchField.current?.focus()
+  }
+
+  function resetFilters() {
+    clearSearch()
     onFilters(defaultShelfFilters)
   }
 
   return (
     <section className="bookshelf-page" aria-labelledby="bookshelf-title">
-      <button className="plain shelf-back" type="button" onClick={onCreate}><ArrowLeft size={17} /> New Article</button>
-      <div className="home-section-title bookshelf-title">
-        <h1 id="bookshelf-title">Library</h1>
-        {library && library.articles.length > 0 && <span className="shelf-search">
-          <Search size={17} aria-hidden="true" />
-          <input aria-label="Search library" type="search" value={search} placeholder="Search library" onChange={event => onSearch(event.target.value)} />
-          {search && <button className="icon-button" type="button" aria-label="Clear search" title="Clear search" onClick={() => onSearch("")}><X size={15} /></button>}
-        </span>}
-      </div>
-      {library && library.articles.length > 0 && <div className="shelf-filters" role="group" aria-label="Filter library">
-        <div className="shelf-read-filters" role="group" aria-label="Reading progress">
-          {readFilters.map(filter => <button key={filter.key} type="button" aria-pressed={filters.read === filter.key}
-            onClick={() => onFilters({ ...filters, read: filter.key })}>
-            {filter.label}<span>{counts[filter.key]}</span>
-          </button>)}
+      <header className="bookshelf-title">
+        <h1 id="bookshelf-title">书架</h1>
+        <button className="primary" type="button" onClick={onCreate}><Plus size={16} aria-hidden="true" />新建文章</button>
+      </header>
+      {library && library.articles.length > 0 && <div className="shelf-toolbar">
+        <div className="shelf-filters" role="group" aria-label="筛选文章">
+          <div className="shelf-read-filters" role="group" aria-label="阅读状态">
+            {readFilters.map(filter => <button key={filter.key} type="button" aria-pressed={filters.read === filter.key}
+              onClick={() => onFilters({ ...filters, read: filter.key })}>
+              {filter.label}<span>{counts[filter.key]}</span>
+            </button>)}
+          </div>
+          <button className="shelf-star-filter" type="button" aria-pressed={filters.starred}
+            onClick={() => onFilters({ ...filters, starred: !filters.starred })}>
+            <Star size={14} aria-hidden="true" fill={filters.starred ? "currentColor" : "none"} />收藏<span>{counts.starred}</span>
+          </button>
         </div>
-        <button className="shelf-star-filter" type="button" aria-pressed={filters.starred}
-          onClick={() => onFilters({ ...filters, starred: !filters.starred })}>
-          <Star size={14} aria-hidden="true" fill={filters.starred ? "currentColor" : "none"} />Starred<span>{counts.starred}</span>
-        </button>
-        <span className="shelf-filter-result" aria-live="polite">{articles.length} {articles.length === 1 ? "article" : "articles"}</span>
+        <span className="shelf-search">
+          <Search size={16} aria-hidden="true" />
+          <input ref={searchField} aria-label="搜索书架" type="search" value={search} placeholder="搜索标题、作者、分类或来源"
+            onChange={event => onSearch(event.target.value)} />
+          {search && <button className="icon-button" type="button" aria-label="清空搜索" title="清空搜索" onClick={clearSearch}><X size={15} /></button>}
+        </span>
+        <span className="sr-only" aria-live="polite">显示 {articles.length} 篇文章</span>
       </div>}
       {articles.length > 0 ? <ul className="shelf-list">
         {articles.map(article => <ArticleRow key={article.id} article={article} onRead={onRead} onDelete={onDelete} onRegenerate={onRegenerate} onStateChange={onStateChange} onEdit={onEdit} onExportMarkdown={onExportMarkdown} />)}
       </ul> : library && !error && <div className="shelf-state bookshelf-empty" role="status">
-        {filtered ? <><Search size={20} /><span>No articles match these filters.</span>
-          <button className="text-button" type="button" onClick={resetFilters}>Clear filters</button>
-        </> : <><BookOpen size={24} strokeWidth={1.5} />
-          <button className="text-button" onClick={onCreate} type="button">New Article <ArrowRight size={15} /></button>
+        {filtered ? <><Search size={20} aria-hidden="true" /><span>没有符合条件的文章</span>
+          <button className="text-button" type="button" onClick={resetFilters}>清除搜索和筛选</button>
+        </> : <><BookOpen size={24} strokeWidth={1.5} aria-hidden="true" /><span>书架还没有文章</span>
         </>}
       </div>}
       <LibraryState library={library} error={error} onRefresh={onRefresh} />

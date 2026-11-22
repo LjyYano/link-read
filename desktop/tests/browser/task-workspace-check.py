@@ -199,12 +199,16 @@ async def verify_continue(browser):
     loaded = await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='load_reading_position').map(call=>call.args.key)")
     assert loaded == ['qa-workspace-qa-corrupt', 'qa-workspace-qa-resume'], loaded
     assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='prepare_article').length") == 0
-    await expect(page.locator('.article-card[data-article-id="qa-resume"]')).to_have_count(0)
+    await expect(page.locator('.article-card[data-article-id="qa-resume"]')).to_have_count(1)
     await page.get_by_role('button', name='查看书架', exact=True).click()
     row = page.locator('.shelf-row[data-article-id="qa-resume"]')
-    await row.get_by_role('button', name='Mark Complete', exact=True).click()
-    await expect(row.get_by_role('button', name='Mark Unread', exact=True)).to_have_attribute('aria-pressed', 'true')
-    await page.get_by_role('button', name='New Article', exact=True).click()
+    more = row.get_by_role('button', name=ARTICLES[2]['title'] + '的更多操作', exact=True)
+    await expect(row.get_by_role('button')).to_have_count(2)
+    await more.click()
+    await row.get_by_role('button', name='标为已读', exact=True).click()
+    await expect(more).to_have_attribute('aria-expanded', 'false')
+    await expect(row.get_by_role('img', name='已读', exact=True)).to_be_visible()
+    await page.get_by_role('button', name='新建文章', exact=True).click()
     await expect(page.locator('.home-page')).to_be_visible()
     await expect(resume).to_have_count(0)
     assert await page.evaluate("window.taskWorkspaceFixture.library.find(article=>article.id==='qa-resume').isRead")
@@ -212,19 +216,19 @@ async def verify_continue(browser):
     await context.close()
 
     context, page, errors, confirmations = await open_app(browser)
-    await expect(page.locator('.article-card[data-article-id="qa-resume"]')).to_have_count(0)
+    await expect(page.locator('.article-card[data-article-id="qa-resume"]')).to_have_count(1)
     await page.get_by_role('button', name='查看书架', exact=True).click()
     row = page.locator('.shelf-row[data-article-id="qa-resume"]')
     await row.get_by_role('button', name=ARTICLES[2]['title'] + '的更多操作', exact=True).click()
     await row.get_by_role('button', name='删除文章', exact=True).click()
     await expect(row).to_have_count(0)
-    await page.get_by_role('button', name='New Article', exact=True).click()
+    await page.get_by_role('button', name='新建文章', exact=True).click()
     await expect(page.locator('.home-page')).to_be_visible()
     await expect(page.locator('.continue-reading')).to_have_count(0)
     assert not await page.evaluate("window.taskWorkspaceFixture.library.some(article=>article.id==='qa-resume')")
     assert confirmations and '确认永久删除' in confirmations[-1]
     assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='generate').length") == 0
-    RESULTS.append({'check': 'Continue uses current unread membership, exact reading keys and valid saved positions; recent cards omit the continued article; completing or deleting it in the bookshelf removes the continuation on returning home without generation or reader preparation'})
+    RESULTS.append({'check': 'Continue uses current unread membership, exact reading keys and valid saved positions; recent cards include the continued article once; completing or deleting it through the bookshelf menu removes the continuation without generation or reader preparation'})
     assert not errors, errors
     await context.close()
 
