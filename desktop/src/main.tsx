@@ -119,13 +119,13 @@ function TitleBar({ screen, taskCount, unreadTasks, onTasks, onSettings, onQuick
         <span>LinkRead</span>
       </div>
       <div className="titlebar-tools">
-      <button className="titlebar-tasks" type="button" aria-label={`任务中心${taskCount ? `，${taskCount} 个活动任务` : ""}${unreadTasks ? `，${unreadTasks} 条未查看` : ""}`}
+      <button className="icon-button titlebar-tasks" type="button" aria-label={`任务中心${taskCount ? `，${taskCount} 个活动任务` : ""}${unreadTasks ? `，${unreadTasks} 条未查看` : ""}`}
         title={`任务中心${unreadTasks ? ` · ${unreadTasks} 条记录需要查看` : ""}`} onClick={event => {
           // WebKit does not focus buttons on pointer clicks by default. Make
           // this trigger the dialog's explicit return point before mounting it.
           event.currentTarget.focus({ preventScroll: true }); onTasks()
         }}>
-        <ListTodo size={15} aria-hidden="true" /><span>任务</span>
+        <ListTodo size={16} aria-hidden="true" />
         {taskCount > 0 && <span className="titlebar-task-count">{taskCount}</span>}
         {unreadTasks > 0 && <span className="titlebar-task-alert" aria-hidden="true">!</span>}
       </button>
