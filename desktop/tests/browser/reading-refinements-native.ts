@@ -60,7 +60,8 @@ export async function invoke<T>(command: string, args: any = {}): Promise<T> {
   if (command === 'load_task_journal') result = clone(fixture.journal)
   else if (command === 'save_task_journal') { fixture.journal = clone(args.journal); result = null }
   else if (command === 'list_articles') result = { articles: clone(fixture.library), unavailable: 0 }
-  else if (command === 'check_tool') result = { executable: fixture.missingTool ? null : '/fixture/codex', keyAvailable: !fixture.missingTool }
+  else if (command === 'check_tool') result = { executable: fixture.missingTool ? null : '/fixture/codex',
+    keyAvailable: !fixture.missingTool && !config.missingKey }
   else if (command === 'preview_video') result = metadata(args.source)
   else if (command === 'check_source') result = { source: args.source, status: 'blocked', code: 'protected_media',
     message: 'This source is currently unavailable for transcription.', checkedAt: Date.now() }

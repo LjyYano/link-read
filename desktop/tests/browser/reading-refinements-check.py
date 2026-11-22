@@ -73,7 +73,7 @@ async def routes(route):
         await route.fulfill(path=str(path), content_type={'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css'}.get(path.suffix))
 
 
-async def open_app(browser, *, hold=False, missing_tool=False, dark=False, width=1280):
+async def open_app(browser, *, hold=False, missing_tool=False, missing_key=False, provider='codex', dark=False, width=1280):
     context = await browser.new_context(viewport={'width': width, 'height': 920},
                                         color_scheme='dark' if dark else 'light', reduced_motion='reduce')
     await context.route('**/*', routes)
@@ -87,10 +87,10 @@ async def open_app(browser, *, hold=False, missing_tool=False, dark=False, width
 
     page.on('dialog', confirm)
     config = {'library': [article()], 'positions': {article()['readingKey']: POSITION},
-              'holdDuplicates': hold, 'missingTool': missing_tool}
+              'holdDuplicates': hold, 'missingTool': missing_tool, 'missingKey': missing_key}
     await page.add_init_script('''if(window===window.top){window.__readingRefinementsConfig=CONFIG;
       localStorage.setItem('linkread-preferences',JSON.stringify(PREFS));}'''
-                              .replace('CONFIG', json.dumps(config)).replace('PREFS', json.dumps(PREFS)))
+                              .replace('CONFIG', json.dumps(config)).replace('PREFS', json.dumps({**PREFS, 'provider': provider})))
     await page.goto(BASE)
     await page.wait_for_function("window.readingRefinementsFixture?.calls.some(call=>call.command==='save_task_journal')")
     await expect(page.locator('.article-card')).to_have_count(1)
@@ -195,11 +195,41 @@ async def verify_read_during_regeneration(browser):
     assert len(confirmations) == 1 and '成功后才替换旧文章' in confirmations[0]
     assert await page.evaluate("window.readingRefinementsFixture.calls.find(call=>call.command==='generate').args.replace") is True
     await page.locator('.home-primary').click()
-    await expect(page.locator('.desktop-reader-frame')).to_have_attribute('title', article()['title'])
-    assert await count_calls(page, 'generate') == 1
+    frame = page.locator('.desktop-reader-frame')
+    await expect(frame).to_have_attribute('title', article()['title'])
+    await page.evaluate("window.originalReadingFrame=document.querySelector('.desktop-reader-frame')")
+    await page.evaluate("""saved=>{
+      const fixture = window.readingRefinementsFixture;
+      fixture.finishGeneration(fixture.pendingGenerations[0].args.requestId,saved);
+    }""", article())
+    await expect(page.get_by_text('A new version is ready.', exact=True)).to_be_visible()
+    assert await page.evaluate("window.originalReadingFrame===document.querySelector('.desktop-reader-frame')")
+    await page.get_by_role('button', name='Open updated article', exact=True).click()
+    await page.wait_for_function("document.querySelector('.desktop-reader-frame') && window.originalReadingFrame!==document.querySelector('.desktop-reader-frame')")
+    await page.get_by_role('button', name='More actions', exact=True).click()
+    await page.get_by_role('button', name='Regenerate', exact=True).click()
+    await expect(page.get_by_text('Reprocessing in the background.', exact=True)).to_be_visible()
+    await expect(frame).to_be_visible()
+    await page.wait_for_function("window.readingRefinementsFixture.calls.filter(call=>call.command==='generate').length===2")
     assert not errors, errors
-    RESULTS.append({'check': 'Regeneration remains an explicit secondary action with confirmation; the archived article remains readable while its replacement is running'})
+    RESULTS.append({'check': 'Regeneration in Home and Reader is explicit; the old iframe stays loaded until the reader opens the replacement; another regeneration stays in the Reader'})
     await context.close()
+
+
+async def verify_setup_entry(browser):
+    for provider, field in (('codex', '#codex-path'), ('claude', '#claude-auth-status'), ('api', '#api-url')):
+        context, page, errors, _ = await open_app(browser, provider=provider,
+                                                   missing_tool=provider == 'codex', missing_key=provider == 'claude')
+        link = page.get_by_role('textbox', name='视频或播客链接')
+        await link.fill(SOURCE_B)
+        await page.get_by_role('button', name='配置 AI 工具', exact=True).click()
+        await expect(page.locator(field)).to_be_focused()
+        await page.keyboard.press('Escape')
+        await expect(link).to_have_value(SOURCE_B)
+        assert await count_calls(page, 'generate') == 0
+        assert not errors, errors
+        await context.close()
+    RESULTS.append({'check': 'Missing Codex path, Claude key and API URL open focused setup with the original draft retained'})
 
 
 async def open_shelf_menu(page, title):
@@ -343,6 +373,7 @@ async def main():
         browser = await getattr(playwright, ENGINE).launch()
         try:
             await verify_saved_source(browser)
+            await verify_setup_entry(browser)
             await verify_lookup_races_and_tasks(browser)
             await verify_read_during_regeneration(browser)
             await verify_details_and_export(browser)

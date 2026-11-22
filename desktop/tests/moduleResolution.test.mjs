@@ -33,7 +33,7 @@ test("all source module stems are unambiguous on macOS", () => {
   const paths = files(join(root, "src")).map(path => relative(root, path))
   assert.deepEqual(ambiguousNames(paths), [], "Do not distinguish importable modules by case or extension alone")
   const main = readFileSync(join(root, "src/main.tsx"), "utf8")
-  assert.match(main, /import \{ Settings \} from "\.\/Settings"/)
+  assert.match(main, /import \{ Settings\b[^}]*\} from "\.\/Settings"/)
   const settings = readFileSync(join(root, "src/Settings.tsx"), "utf8")
   assert.match(settings, /import \{ AsrSettingsPanel \} from "\.\/AsrSettingsPanel"/)
   assert.match(settings, /<AsrSettingsPanel\s/)

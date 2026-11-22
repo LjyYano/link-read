@@ -16,12 +16,15 @@ import {
 } from "./settingsState"
 import "./settings.css"
 
-export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGuard }: {
+export type SettingsTarget = "ai" | "asr"
+
+export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGuard, target }: {
   preferences: Preferences
   onSave: (preferences: Preferences) => void
   onBack: () => void
   onTokenChanged: () => void
   leaveGuard: RefObject<(() => boolean) | null>
+  target?: SettingsTarget
 }) {
   const [draft, setDraft] = useState<SettingsDraft>(() => ({ preferences, apiToken: "", asrToken: "" }))
   const [baseline, setBaseline] = useState(draft)
@@ -48,6 +51,31 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
   const closing = useRef(false)
   const { provider, paths, api, asr } = draft.preferences
   const disabled = loading || saving || Boolean(loadError)
+  const pendingTarget = useRef(target)
+
+  useLayoutEffect(() => {
+    const destination = pendingTarget.current
+    if (disabled || !destination) return
+    let field = "asr-enabled"
+    if (destination === "ai") {
+      if (provider === "api") {
+        field = "api-token"
+        try { validateApiConfiguration(api, draft.apiToken) } catch (failure) {
+          if (failure instanceof SettingsValidationError) field = failure.field
+        }
+      } else {
+        if (provider === "claude" && !toolInfo && !toolError) return
+        field = provider === "claude" && toolInfo?.executable && !toolInfo.keyAvailable
+          ? "claude-auth-status" : `${provider}-path`
+      }
+    }
+    const element = document.getElementById(field) ?? document.getElementById(`${field}-change`)
+    if (element) {
+      pendingTarget.current = undefined
+      element.focus({ preventScroll: true })
+      element.scrollIntoView({ block: "nearest" })
+    }
+  }, [disabled, provider, api, draft.apiToken, toolInfo, toolError])
 
   // Bind results to the exact configuration at render time as well as at edit
   // time. A late native response must never certify a different draft.
@@ -334,6 +362,8 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
               {toolInfo?.executable ? <span className="settings-recognized" title="仅表示已找到可执行文件，不代表已登录">
                 <span className="settings-green-dot" aria-hidden="true" />已检测到 {providerNames[provider]}
               </span> : toolError || (toolInfo ? `未检测到 ${providerNames[provider]}，请填写程序路径` : "正在查找本机工具…")}
+              {provider === "claude" && toolInfo?.executable && !toolInfo.keyAvailable &&
+                <p id="claude-auth-status" tabIndex={-1}>请为本机 Claude Code 配置 ANTHROPIC_API_KEY。</p>}
             </div>
           </>}
         </div>

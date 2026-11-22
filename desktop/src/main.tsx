@@ -19,7 +19,7 @@ import { useSourceDuplicate } from "./useSourceDuplicate"
 import { QuickOpen } from "./QuickOpen"
 import { TaskCenter } from "./TaskCenter"
 import { groupTasks, activeTaskCount, unreviewedTaskIds, reviewedTerminalTaskIds,
-  loadReviewedTasks, saveReviewedTasks, reviewTasks } from "./taskCenterState"
+  loadReviewedTasks, saveReviewedTasks, reviewTasks, loadCompletedArticleIds, rememberCompletedArticle, completedArticles } from "./taskCenterState"
 import { loadRecentArticles, rememberArticle } from "./quickOpenState"
 import { useContinueReading } from "./useContinueReading"
 import { useSourceReadiness, rememberSourceFailure, forgetSourceReadiness } from "./useSourceReadiness"
@@ -33,7 +33,7 @@ import { recordProgress } from "./taskProgress"
 import { mergeArticleMetadata } from "./coverSource"
 import { normalizeVideoLink } from "./videoLinks"
 import { useLinkPreview } from "./useLinkPreview"
-import { Settings } from "./Settings"
+import { Settings, type SettingsTarget } from "./Settings"
 import type { Preferences } from "./settingsState"
 import { defaultAsr, loadAsrOptions } from "./asrSettings"
 import { ArticleStateChanges, ArticleStateWrites, defaultShelfFilters, withArticleState, type ShelfFilters } from "./libraryState"
@@ -41,6 +41,8 @@ import "./styles.css"
 import "./source-preview.css"
 
 type Screen = "create" | "library" | "settings" | "reader"
+type ReadingOrigin = { screen: Exclude<Screen, "reader">; scroll: number; tasks: boolean; completedArticleId?: string; taskId?: string }
+type ActiveGeneration = GenerationInput & { replacementArticleId?: string }
 const storageKey = "linkread-preferences"
 const subtitleExtension = /\.(srt|vtt|json)$/i
 
@@ -145,6 +147,7 @@ function TitleBar({ screen, taskCount, unreadTasks, onTasks, onSettings, onQuick
 function App() {
   const [screen, setScreen] = useState<Screen>("create")
   const [previousScreen, setPreviousScreen] = useState<Exclude<Screen, "settings">>("create")
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>()
   const [source, setSource] = useState("")
   const [localPath, setLocalPath] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -161,13 +164,20 @@ function App() {
   const [quickOpen, setQuickOpen] = useState(false)
   const [taskCenterOpen, setTaskCenterOpen] = useState(false)
   const [taskCenterFocusId, setTaskCenterFocusId] = useState<string>()
+  const [taskCenterCompletedId, setTaskCenterCompletedId] = useState<string>()
   const [reviewedTasks, setReviewedTasks] = useState(loadReviewedTasks)
+  const [completedArticleIds, setCompletedArticleIds] = useState(loadCompletedArticleIds)
   const reviewedTasksRef = useRef(reviewedTasks)
   reviewedTasksRef.current = reviewedTasks
   const [recentArticles, setRecentArticles] = useState(loadRecentArticles)
   const resume = useContinueReading(library?.articles, recentArticles, screen === "create")
   const [shelfFilters, setShelfFilters] = useState<ShelfFilters>(defaultShelfFilters)
   const [article, setArticle] = useState<Article>()
+  const [openedCompletion, setOpenedCompletion] = useState<string>()
+  const [readerSession, setReaderSession] = useState(0)
+  const [readerTheme, setReaderTheme] = useState<"light" | "dark">()
+  const readingOrigin = useRef<ReadingOrigin>({ screen: "library", scroll: 0, tasks: false })
+  const returnScroll = useRef<number | undefined>(undefined)
   const [detailsArticle, setDetailsArticle] = useState<Article>()
   const [exportArticle, setExportArticle] = useState<Article>()
   const [detailsRevisions, setDetailsRevisions] = useState<Record<string, number>>({})
@@ -176,7 +186,7 @@ function App() {
   const [jobs, setJobs] = useState<TaskJob[]>([])
   const jobsRef = useRef<TaskJob[]>([])
   const taskQueue = useRef(new SerialTaskQueue<Article>())
-  const taskInputs = useRef(new Map<string, GenerationInput>())
+  const taskInputs = useRef(new Map<string, ActiveGeneration>())
   const taskTimes = useRef(new Map<string, { createdAt: number; updatedAt: number }>())
   const journalWriter = useRef(new TaskJournalWriter(saveTaskJournal))
   const journalReady = useRef(false)
@@ -246,6 +256,7 @@ function App() {
     beginNavigation()
     setQuickOpen(false)
     setTaskCenterFocusId(taskId)
+    setTaskCenterCompletedId(undefined)
     setTaskCenterOpen(true)
   }
 
@@ -362,8 +373,19 @@ function App() {
     return () => window.clearTimeout(timeout)
   }, [completionNotice])
   useLayoutEffect(() => {
-    if (workspace.current) workspace.current.scrollTop = screen === "library" ? shelfScroll.current : 0
+    if (workspace.current) workspace.current.scrollTop = returnScroll.current ?? (screen === "library" ? shelfScroll.current : 0)
+    returnScroll.current = undefined
   }, [screen])
+  useLayoutEffect(() => {
+    const system = window.matchMedia("(prefers-color-scheme: dark)")
+    function applyTheme() {
+      document.documentElement.dataset.theme =
+        (screen === "reader" && readerTheme) || (system.matches ? "dark" : "light")
+    }
+    applyTheme()
+    system.addEventListener("change", applyTheme)
+    return () => system.removeEventListener("change", applyTheme)
+  }, [screen, readerTheme])
   useEffect(() => {
     let active = true
     setToolStatus(undefined)
@@ -400,13 +422,14 @@ function App() {
     }
   }, [screen])
 
-  async function showSettings() {
+  async function showSettings(target?: SettingsTarget) {
     if (screen === "settings") return
     const isCurrent = beginNavigation()
     if (screen === "reader") await flushReadingPositions()
     if (!isCurrent()) return
     if (screen === "library") shelfScroll.current = workspace.current?.scrollTop ?? 0
     setPreviousScreen(screen)
+    setSettingsTarget(target)
     setDragging(false)
     setScreen("settings")
   }
@@ -461,7 +484,7 @@ function App() {
   }
 
   /** Capture source and settings on submission; run jobs one at a time. */
-  function enqueueTask(spec: GenerationInput, replaceId?: string) {
+  function enqueueTask(spec: ActiveGeneration, replaceId?: string) {
     if (!journalReady.current) throw new Error("请先恢复任务记录，再开始生成")
     const id = crypto.getRandomValues(new Uint32Array(4)).join("-")
     const inputs = new Map(taskInputs.current), times = new Map(taskTimes.current)
@@ -505,6 +528,7 @@ function App() {
         updateTask(id, () => ({ status: "done", article: generated }))
         taskInputs.current.delete(id)
         taskTimes.current.delete(id)
+        setCompletedArticleIds(current => rememberCompletedArticle(current, generated.id))
         setCompletionNotice(current => [generated, ...current.filter(item => item.id !== generated.id)].slice(0, 5))
         void refreshLibrary()
       },
@@ -557,8 +581,8 @@ function App() {
       if (!localFile && sourceReadiness.blocked) {
         setInputError("此来源已确认暂不支持处理，请导入字幕、查看来源或重新检查。"); return
       }
-      if (!localFile && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled) { void showSettings(); return }
-      if (toolWarning) { void showSettings(); return }
+      if (!localFile && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled) { void showSettings("asr"); return }
+      if (toolWarning) { void showSettings("ai"); return }
       enqueueTask({
         input,
         localFile,
@@ -699,20 +723,16 @@ function App() {
       const title = selected.hasAnalysis === false ? "AI 整理" : "重新整理"
       if (!window.confirm(title + "《" + selected.title + "》？\n使用 " + providerNames[preferences.provider]
         + " 处理已保存的字幕，可能产生模型费用。新版本成功后才替换旧文章。")) return
-      const isCurrent = beginNavigation()
       const input = await articleTranscriptPath(selected.id)
       const duplicate = await checkDuplicate(input, true)
+      if (matchingTask(duplicate.key)) throw new Error("该文章已在处理或排队，可在任务中心查看。")
       enqueueTask({
         input, localFile: true, provider: preferences.provider,
         executable: preferences.provider === "api" ? "" : preferences.paths[preferences.provider],
         baseUrl: preferences.api.baseUrl, model: preferences.api.model,
         sourceKey: duplicate.key, replace: true, asr: { ...preferences.asr },
-        identity: selected,
+        identity: selected, replacementArticleId: selected.id,
       })
-      if (isCurrent()) {
-        if (screen === "reader") await flushReadingPositions()
-        if (isCurrent()) setScreen("create")
-      }
     } finally {
       submitting.current = false
     }
@@ -757,17 +777,43 @@ function App() {
     } finally { submitting.current = false }
   }
 
+  function rememberReadingOrigin(completedArticleId?: string, taskId?: string) {
+    if (screen === "reader") return
+    const scroll = workspace.current?.scrollTop ?? 0
+    readingOrigin.current = { screen, scroll, tasks: taskCenterOpen, completedArticleId, taskId }
+    if (screen === "library") shelfScroll.current = scroll
+  }
+
+  function returnFromReader() {
+    const origin = readingOrigin.current
+    returnScroll.current = origin.scroll
+    if (origin.screen === "settings") setSettingsTarget(undefined)
+    setScreen(origin.screen)
+    if (origin.tasks) {
+      setTaskCenterFocusId(origin.taskId)
+      setTaskCenterCompletedId(origin.completedArticleId)
+      setTaskCenterOpen(true)
+    }
+    if (origin.screen === "library") void refreshLibrary()
+  }
+
+  function latestCompletion(id: string) {
+    const current = jobsRef.current
+    for (let index = current.length - 1; index >= 0; index--) {
+      const task = current[index]
+      if (task.job.status === "done" && task.job.article.id === id) return { id: task.id, article: task.job.article }
+    }
+  }
+
   async function read(selected: Article, positionFlushed = false) {
     if (!allowSettingsNavigation()) return
     const isCurrent = beginNavigation()
     if (screen === "reader" && !positionFlushed) await flushReadingPositions()
     if (!isCurrent()) return
-    if (screen === "library") shelfScroll.current = workspace.current?.scrollTop ?? 0
-    else {
-      shelfScroll.current = 0
-      setShelfSearch("")
-      setShelfFilters(defaultShelfFilters)
-    }
+    rememberReadingOrigin(taskCenterOpen ? selected.id : undefined)
+    setTaskCenterOpen(false)
+    setOpenedCompletion(latestCompletion(selected.id)?.id)
+    if (screen === "reader" && article?.id === selected.id) setReaderSession(current => current + 1)
     setPreviewTaskId(undefined)
     setCompletionNotice(current => current.filter(item => item.id !== selected.id))
     setArticle(articleStateChanges.current.reconcile([selected], 0)[0])
@@ -788,6 +834,8 @@ function App() {
     if (task.job.status === "done") { void read(task.job.article, true); return }
     const previewId = task.job.previewId
     if (!previewId) return
+    rememberReadingOrigin(undefined, taskCenterOpen ? id : undefined)
+    setTaskCenterOpen(false)
     const identity = { ...taskInputs.current.get(id)?.identity, ...task.job }
     setPreviewTaskId(id)
     setArticle({ id: "preview-" + previewId, previewId, title: identity.title || "Transcript preview",
@@ -849,14 +897,22 @@ function App() {
     article: previewJob.status === "done" ? previewJob.article : undefined,
     onOpenComplete: () => { if (previewJob.status === "done") void read(previewJob.article, true) },
   } : undefined
-  const readyArticle = completionNotice[0]
-  const showCompletionNotice = readyArticle && !(screen === "reader" && preview?.article?.id === readyArticle.id)
+  const readerTask = screen === "reader" && article && !article.previewId
+    ? jobs.find(task => taskInputs.current.get(task.id)?.replacementArticleId === article.id
+      && ["queued", "running", "cancelling"].includes(task.job.status)) : undefined
+  const completion = screen === "reader" && article && !article.previewId ? latestCompletion(article.id) : undefined
+  const readerUpdate = completion && completion.id !== openedCompletion ? completion.article : undefined
+  const suppressedId = screen === "reader" ? (preview?.article ?? readerUpdate)?.id : undefined
+  const visibleCompletions = completionNotice.filter(item => item.id !== suppressedId)
+  const readyArticle = visibleCompletions[0]
+  const origin = readingOrigin.current
+  const backLabel = origin.tasks ? "Tasks" : origin.screen === "create" ? "Home" : origin.screen === "settings" ? "Settings" : "Library"
   const groupedTasks = groupTasks(jobs)
   const unreadTaskIds = unreviewedTaskIds(jobs, reviewedTasks)
 
   return (
     <div className="app-shell">
-      <TitleBar screen={screen} taskCount={activeTaskCount(jobs)} unreadTasks={unreadTaskIds.length} onTasks={showTasks} onSettings={showSettings}
+      <TitleBar screen={screen} taskCount={activeTaskCount(jobs)} unreadTasks={unreadTaskIds.length} onTasks={showTasks} onSettings={() => void showSettings()}
         onQuickOpen={showQuickOpen} />
       <main ref={workspace} className={screen === "reader" ? "workspace workspace-reader" : "workspace"}>
         {screen === "create" && (
@@ -870,28 +926,34 @@ function App() {
             sourceBlocked={sourceReadiness.blocked} sourceNeedsAsr={sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled}
             sourceReadiness={<SourceReadinessPanel state={sourceReadiness}
               onImport={pick} onOpenSource={() => { void openVideo(sourceReadiness.source).catch(error => setInputError(String(error))) }}
-              onSettings={showSettings} asrEnabled={preferences.asr.enabled} />}
-            onSettings={showSettings} onLibrary={goToLibrary} dragging={dragging} />
+              onSettings={() => void showSettings("asr")} asrEnabled={preferences.asr.enabled} />}
+            onSettings={() => void showSettings("ai")} onLibrary={goToLibrary} dragging={dragging} />
         )}
         {screen === "library" && (
           <Bookshelf {...shelfActions} search={shelfSearch} onSearch={setShelfSearch} filters={shelfFilters}
             onFilters={setShelfFilters} onCreate={() => navigateTo("create")} />
         )}
         {screen === "settings" && (
-          <Settings preferences={preferences} onSave={configure} leaveGuard={settingsLeaveGuard}
+          <Settings preferences={preferences} onSave={configure} leaveGuard={settingsLeaveGuard} target={settingsTarget}
             onTokenChanged={() => setApiTokenVersion(current => current + 1)}
             onBack={() => navigateTo(previousScreen)} />
         )}
-        {screen === "reader" && article && <Reader key={article.id} article={article} onBack={goToLibrary}
+        {screen === "reader" && article && <Reader key={`${article.id}:${readerSession}`} article={article} onBack={returnFromReader} backLabel={backLabel}
           onRegenerate={regenerate} onStateChange={changeArticleState} preview={preview} onNavigationStart={beginNavigation}
+          onThemeChange={setReaderTheme}
+          onViewRegeneration={readerTask ? () => openTasks(readerTask.id) : undefined}
+          onOpenUpdated={readerUpdate ? () => void read(readerUpdate, true) : undefined}
           onEdit={shelfActions.onEdit} onExportMarkdown={shelfActions.onExportMarkdown} detailsRevision={detailsRevisions[article.id]} />}
       </main>
       {detailsArticle && <ArticleDetailsDialog key={detailsArticle.id} article={detailsArticle} onSaved={articleDetailsSaved} onClose={() => setDetailsArticle(undefined)} />}
       {exportArticle && <MarkdownExportDialog key={exportArticle.id} article={exportArticle} onClose={() => setExportArticle(undefined)} />}
       {taskCenterOpen && <TaskCenter jobs={jobs} reviewedIds={reviewedTasks} onReviewed={markReviewed}
+        completed={completedArticles(library?.articles ?? [], completedArticleIds)}
         initialTaskId={taskCenterFocusId}
+        initialCompletedArticleId={taskCenterCompletedId}
         onClose={() => setTaskCenterOpen(false)} onCancel={cancel} onRetry={retry} onRemove={removeJob}
-        onPreview={id => { setTaskCenterOpen(false); void readPreview(id) }}
+        onPreview={id => void readPreview(id)}
+        onOpenArticle={selected => void read(selected)}
         onSettings={() => { setTaskCenterOpen(false); void showSettings() }} onClearReviewed={clearReviewed}
         journalError={journalError} onRetryJournal={retryJournal} />}
       {quickOpen && <QuickOpen library={library} error={libraryError} recent={recentArticles}
@@ -910,13 +972,13 @@ function App() {
             setScreen("library")
           })()
         }} />}
-      {showCompletionNotice && <div className="completion-toast" role="status" aria-live="polite">
+      {readyArticle && <div className="completion-toast" role="status" aria-live="polite">
         <CircleCheck size={18} aria-hidden="true" />
-        <div className="completion-toast-content"><strong>Ready to read</strong>
-          <span>{readyArticle.title}{completionNotice.length > 1 ? ` · ${completionNotice.length - 1} more completed` : ""}</span>
+        <div className="completion-toast-content"><strong>文章已生成</strong>
+          <span>{readyArticle.title}{visibleCompletions.length > 1 ? ` · 另有 ${visibleCompletions.length - 1} 篇已完成` : ""}</span>
         </div>
-        <button className="text-button" type="button" onClick={() => read(readyArticle)}>Open</button>
-        <button className="icon-button" type="button" aria-label="Dismiss notification" onClick={() => setCompletionNotice([])}><X size={15} /></button>
+        <button className="text-button" type="button" onClick={() => read(readyArticle)}>打开文章</button>
+        <button className="icon-button" type="button" aria-label="关闭完成提示" onClick={() => setCompletionNotice([])}><X size={15} /></button>
       </div>}
     </div>
   )

@@ -164,7 +164,7 @@ export function AsrSettingsPanel({ value, onChange, token, onToken, apiToken, sa
   return <section className="settings-card asr-settings" aria-labelledby="asr-heading">
     <div className="settings-card-header">
       <h2 id="asr-heading">无字幕时转写</h2>
-      <input className="settings-toggle" type="checkbox" role="switch" aria-labelledby="asr-heading"
+      <input id="asr-enabled" className="settings-toggle" type="checkbox" role="switch" aria-labelledby="asr-heading"
         aria-controls={value.enabled ? "asr-settings-body" : undefined} checked={value.enabled} disabled={disabled || testing}
         onChange={event => update({ ...value, enabled: event.target.checked })} />
     </div>

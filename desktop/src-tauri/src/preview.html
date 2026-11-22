@@ -22,8 +22,9 @@
   let theme = null;
   try { theme = localStorage.getItem(themeKey); } catch {}
   function applyTheme() {
-    document.documentElement.dataset.theme =
-      theme === "light" || theme === "dark" ? theme : systemTheme.matches ? "dark" : "light";
+    const effectiveTheme = theme === "light" || theme === "dark" ? theme : systemTheme.matches ? "dark" : "light";
+    document.documentElement.dataset.theme = effectiveTheme;
+    window.parent.postMessage({ linkReadTheme: effectiveTheme }, "*");
   }
   applyTheme();
   systemTheme.addEventListener("change", applyTheme);

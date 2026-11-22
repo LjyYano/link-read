@@ -2,11 +2,14 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ChevronDown, CircleCheck, Clock3, ListTodo, Trash2, X } from "lucide-react"
 import { JobRow, type TaskJob } from "./Home"
 import { groupTasks, reviewedTerminalTaskIds, unreviewedTaskIds } from "./taskCenterState"
+import type { Article } from "./api"
 import "./task-center.css"
 
 export type TaskCenterProps = {
   jobs: TaskJob[]
+  completed: Article[]
   initialTaskId?: string
+  initialCompletedArticleId?: string
   reviewedIds: readonly string[]
   onReviewed: (ids: string[]) => void
   onClose: () => void
@@ -14,14 +17,15 @@ export type TaskCenterProps = {
   onRetry: (id: string) => void
   onRemove: (id: string) => void
   onPreview?: (id: string) => void
+  onOpenArticle: (article: Article) => void
   onSettings: () => void
   onClearReviewed: (ids: string[]) => Promise<void> | void
   journalError?: string
   onRetryJournal?: () => void
 }
 
-export function TaskCenter({ jobs, initialTaskId, reviewedIds, onReviewed, onClose, onCancel, onRetry, onRemove,
-  onPreview, onSettings, onClearReviewed, journalError, onRetryJournal }: TaskCenterProps) {
+export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArticleId, reviewedIds, onReviewed, onClose, onCancel, onRetry, onRemove,
+  onPreview, onOpenArticle, onSettings, onClearReviewed, journalError, onRetryJournal }: TaskCenterProps) {
   const id = useId()
   const dialog = useRef<HTMLDialogElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
@@ -31,6 +35,7 @@ export function TaskCenter({ jobs, initialTaskId, reviewedIds, onReviewed, onClo
   const unseen = useMemo(() => unreviewedTaskIds(jobs, reviewedIds), [jobs, reviewedIds])
   const removable = useMemo(() => reviewedTerminalTaskIds(jobs, reviewedIds), [jobs, reviewedIds])
   const [attentionOpen, setAttentionOpen] = useState(unseen.length > 0 || groups.attention.some(task => task.id === initialTaskId))
+  const [completedOpen, setCompletedOpen] = useState(Boolean(initialCompletedArticleId))
   const [clearing, setClearing] = useState(false)
   const [clearError, setClearError] = useState("")
   const announced = useRef(new Set(unseen))
@@ -60,6 +65,13 @@ export function TaskCenter({ jobs, initialTaskId, reviewedIds, onReviewed, onClo
     })
     return () => cancelAnimationFrame(frame)
   }, [initialTaskId])
+
+  useEffect(() => {
+    if (!initialCompletedArticleId) return
+    const button = Array.from(dialog.current?.querySelectorAll<HTMLButtonElement>("[data-completed-article]") ?? [])
+      .find(element => element.dataset.completedArticle === initialCompletedArticleId)
+    button?.focus()
+  }, [initialCompletedArticleId])
 
   useEffect(() => {
     // Reveal new failures arriving while the drawer is already open. A user's
@@ -196,7 +208,25 @@ export function TaskCenter({ jobs, initialTaskId, reviewedIds, onReviewed, onClo
           {groups.attention.map(record)}
         </ul>
       </section>}
-      {!groups.active.length && !groups.queued.length && !groups.attention.length && <div className="task-center-empty" role="status">
+      {completed.length > 0 && <section className="task-center-section task-center-completed" aria-labelledby={`${id}-completed`}>
+        <h3 id={`${id}-completed`}>
+          <button className="task-center-disclosure" type="button" aria-expanded={completedOpen}
+            aria-controls={`${id}-completed-list`} onClick={() => setCompletedOpen(open => !open)}>
+            <span>最近完成<span className="task-center-count">{completed.length}</span></span>
+            <ChevronDown size={16} aria-hidden="true" />
+          </button>
+        </h3>
+        <ul id={`${id}-completed-list`} className="task-center-queue" hidden={!completedOpen}>
+          {completed.map(article => <li key={article.id}>
+            <span className="task-center-queue-icon"><CircleCheck size={16} aria-hidden="true" /></span>
+            <span className="task-center-queue-copy"><strong title={article.title}>{article.title}</strong></span>
+            <button className="text-button" type="button" aria-label={`打开文章《${article.title}》`}
+              data-completed-article={article.id}
+              onClick={() => onOpenArticle(article)}>打开文章</button>
+          </li>)}
+        </ul>
+      </section>}
+      {!groups.active.length && !groups.queued.length && !groups.attention.length && !completed.length && <div className="task-center-empty" role="status">
         <CircleCheck size={26} strokeWidth={1.5} aria-hidden="true" />
         <strong>没有待处理任务</strong><p>完成的文章保留在书架中。</p>
       </div>}

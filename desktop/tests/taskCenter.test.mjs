@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { activeTaskCount, groupTasks, loadReviewedTasks, reviewTasks,
+import { activeTaskCount, groupTasks, loadReviewedTasks, reviewTasks, completedArticles, loadCompletedArticleIds, rememberCompletedArticle,
   reviewedTerminalTaskIds, saveReviewedTasks, unreviewedTaskIds } from '../src/taskCenterState.ts'
 
 const tasks = [
@@ -55,4 +55,13 @@ test('acknowledgement stays bounded and malformed local history cannot supply ar
   globalThis.localStorage = { getItem: () => { throw Error('blocked') }, setItem: () => { throw Error('blocked') } }
   assert.deepEqual(loadReviewedTasks(), [])
   assert.deepEqual(saveReviewedTasks(['error']), ['error'])
+})
+
+test('recent completions survive reload and show only live archives in completion order', () => {
+  let stored = JSON.stringify(['older', 'old', '../outside', 'older'])
+  globalThis.localStorage = { getItem: () => stored, setItem: (_, value) => { stored = value } }
+  const ids = rememberCompletedArticle(loadCompletedArticleIds(), 'old')
+  assert.deepEqual(loadCompletedArticleIds(), ['old', 'older'])
+  assert.deepEqual(completedArticles([{ id: 'other' }, { id: 'older' }], ids), [{ id: 'older' }])
+  assert.equal(rememberCompletedArticle(Array.from({ length: 20 }, (_, number) => `item-${number}`), 'new').length, 8)
 })

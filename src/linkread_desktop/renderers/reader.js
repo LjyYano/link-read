@@ -2,8 +2,32 @@
 (()=>{'use strict';
 const $=(q,r=document)=>r.querySelector(q), $$=(q,r=document)=>Array.from(r.querySelectorAll(q));
 const tabNames=$$('.tab').map(b=>b.dataset.tab);
+const tabList=$('.tabs-scroll'),tabStrip=$('.reader-tab-strip');
+const tabsLeft=$('#reader-tabs-left'),tabsRight=$('#reader-tabs-right');
 let activeTab='transcript', readingPosition=null,navigationVersion=0;
-function showTab(name,changeHash=true,restorePosition=true){navigationVersion++;if(!tabNames.includes(name))name='transcript';readingPosition?.beforeTab();activeTab=name;$$('.tab').forEach(b=>{const v=b.dataset.tab===name;b.classList.toggle('active',v);b.setAttribute('aria-selected',String(v));b.tabIndex=v?0:-1});$$('.panel').forEach(p=>{const v=p.dataset.panel===name;p.classList.toggle('active',v);p.hidden=!v});if(changeHash){if(readingPosition)readingPosition.updateHash(name);else history.replaceState(null,'','#'+name)}readingPosition?.afterTab(name,restorePosition);if(name==='keywords')requestAnimationFrame(layoutKeywords);}
+function revealSelectedTab(){
+  const selected=$('.tab.active',tabList);
+  if(!selected)return;
+  const tab=selected.getBoundingClientRect(),list=tabList.getBoundingClientRect();
+  if(tab.left<list.left)tabList.scrollLeft+=tab.left-list.left;
+  else if(tab.right>list.right)tabList.scrollLeft+=tab.right-list.right;
+}
+function updateTabArrows(){
+  const overflow=tabList.scrollWidth>tabStrip.clientWidth+1;
+  tabsLeft.hidden=tabsRight.hidden=!overflow;
+  tabsLeft.disabled=tabList.scrollLeft<=1;
+  tabsRight.disabled=tabList.scrollLeft+tabList.clientWidth>=tabList.scrollWidth-1;
+}
+function fitTabs(){updateTabArrows();revealSelectedTab();updateTabArrows();}
+if(tabStrip&&tabList&&tabsLeft&&tabsRight){
+  tabList.addEventListener('scroll',updateTabArrows,{passive:true});
+  tabsLeft.addEventListener('click',()=>tabList.scrollBy({left:-tabList.clientWidth*.75,behavior:smooth()}));
+  tabsRight.addEventListener('click',()=>tabList.scrollBy({left:tabList.clientWidth*.75,behavior:smooth()}));
+  window.addEventListener('resize',fitTabs);
+  document.fonts?.ready.then(fitTabs);
+  fitTabs();
+}
+function showTab(name,changeHash=true,restorePosition=true){navigationVersion++;if(!tabNames.includes(name))name='transcript';readingPosition?.beforeTab();activeTab=name;$$('.tab').forEach(b=>{const v=b.dataset.tab===name;b.classList.toggle('active',v);b.setAttribute('aria-selected',String(v));b.tabIndex=v?0:-1});$$('.panel').forEach(p=>{const v=p.dataset.panel===name;p.classList.toggle('active',v);p.hidden=!v});if(tabList)revealSelectedTab();if(changeHash){if(readingPosition)readingPosition.updateHash(name);else history.replaceState(null,'','#'+name)}readingPosition?.afterTab(name,restorePosition);if(name==='keywords')requestAnimationFrame(layoutKeywords);}
 function applyHash(initial=false){
   const hash=location.hash.slice(1);
   if(initial&&(!hash||readingPosition?.ownHash(hash)))return false;
@@ -28,7 +52,7 @@ $$('.tab').forEach(button=>{
     const next=event.key==='ArrowRight'?(index+1)%tabNames.length:event.key==='ArrowLeft'?(index+tabNames.length-1)%tabNames.length:event.key==='Home'?0:event.key==='End'?tabNames.length-1:-1;
     if(next<0)return;
     event.preventDefault();showTab(tabNames[next]);
-    const target=$(`[data-tab="${tabNames[next]}"]`);target.focus({preventScroll:true});target.scrollIntoView({block:'nearest',inline:'nearest'});
+    const target=$(`[data-tab="${tabNames[next]}"]`);target.focus({preventScroll:true});
   });
 });
 window.addEventListener('hashchange',()=>applyHash());

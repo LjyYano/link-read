@@ -35,7 +35,7 @@ function mapFrame() {
     addEventListener(name, callback) { const list = listeners.get(name) || []; list.push(callback); listeners.set(name, list) },
     async exitFullscreen() { this.fullscreenElement = null; dispatch('fullscreenchange') },
   }
-  const parent = { postMessage: value => messages.push(value) }
+  const parent = { postMessage: value => { if (value.linkReadShortcut) messages.push(value) } }
   const window = { parent, addEventListener() {}, LinkReadReadingPosition: { fingerprint: () => 'map', visibleCenter: x => x } }
   const sandbox = createContext({ document, window, localStorage: { getItem: () => null },
     matchMedia: () => ({ matches: false, addEventListener() {} }),

@@ -16,9 +16,14 @@ type ShownotesRefresh = { status: "idle" } | { status: "loading" } | { status: "
 
 export type PreviewTask = { id: string; status: Job["status"]; message?: string; activity?: TaskActivity; article?: Article; onOpenComplete: () => void }
 
-export function Reader({ article, onBack, onRegenerate, onStateChange, preview, onNavigationStart, onEdit, onExportMarkdown, detailsRevision = 0 }: {
+export function Reader({ article, onBack, backLabel = "Library", onRegenerate, onStateChange, preview,
+  onNavigationStart, onEdit, onExportMarkdown, detailsRevision = 0, onThemeChange, onViewRegeneration, onOpenUpdated }: {
   article: Article; onBack: () => void; onRegenerate: (article: Article) => Promise<void>; onStateChange: ChangeArticleState
   preview?: PreviewTask
+  backLabel?: string
+  onThemeChange?: (theme: "light" | "dark") => void
+  onViewRegeneration?: () => void
+  onOpenUpdated?: () => void
   onNavigationStart?: () => () => boolean
   onEdit?: (article: Article) => void
   onExportMarkdown?: (article: Article) => void
@@ -150,10 +155,12 @@ export function Reader({ article, onBack, onRegenerate, onStateChange, preview, 
     return () => window.removeEventListener("keydown", back, true)
   }, [onBack, menu, onNavigationStart, prepared.status])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     function handleFrameMessage(event: MessageEvent) {
       if (event.source !== frame.current?.contentWindow) return
       escapeBridge.current.receive(event.data)
+      const theme = event.data?.linkReadTheme
+      if (theme === "light" || theme === "dark") onThemeChange?.(theme)
       if (event.data?.linkReadGoBack === true && !readerShortcutsBlocked()) void leave(onBack)
       if (typeof event.data?.linkReadVideo === "string") {
         setError("")
@@ -171,7 +178,7 @@ export function Reader({ article, onBack, onRegenerate, onStateChange, preview, 
     }
     window.addEventListener("message", handleFrameMessage)
     return () => window.removeEventListener("message", handleFrameMessage)
-  }, [onBack, prepare, isPreview, onNavigationStart])
+  }, [onBack, prepare, isPreview, onNavigationStart, onThemeChange])
 
   useEffect(() => {
     if (!menu) return
@@ -216,7 +223,7 @@ export function Reader({ article, onBack, onRegenerate, onStateChange, preview, 
     <section className="desktop-reader" aria-label="Article reader">
       <header className="desktop-reader-toolbar">
         <button className="desktop-reader-action desktop-reader-back" type="button" onClick={() => void leave(onBack)}>
-          <ArrowLeft size={17} aria-hidden="true" />Library
+          <ArrowLeft size={17} aria-hidden="true" />{backLabel}
         </button>
         <div className="desktop-reader-actions" ref={actions} onKeyDown={menuNavigation} onBlur={event => {
           // Safari can blur a focused menu button to null on mouse-down. Keep
@@ -256,7 +263,10 @@ export function Reader({ article, onBack, onRegenerate, onStateChange, preview, 
                 {onEdit && <button type="button" onClick={() => { setMenu(undefined); moreButton.current?.focus(); onEdit(article) }}>
                   <Pencil size={15} aria-hidden="true" />Edit details
                 </button>}
-                <button type="button" onClick={() => void open(() => onRegenerate(article))}>
+                <button type="button" disabled={Boolean(onViewRegeneration)} onClick={() => {
+                  moreButton.current?.focus({ preventScroll: true })
+                  void open(() => onRegenerate(article))
+                }}>
                   <Sparkles size={15} aria-hidden="true" />{article.hasAnalysis === false ? "Enrich with AI" : "Regenerate"}
                 </button>
                 <button type="button" onClick={() => {
@@ -280,6 +290,16 @@ export function Reader({ article, onBack, onRegenerate, onStateChange, preview, 
           </>}
         </div>
       </header>
+      {onOpenUpdated ? <div className="reader-update-notice" role="status">
+        <span>A new version is ready.</span>
+        <button className="text-button" type="button" onClick={() => void leave(onOpenUpdated)}>Open updated article</button>
+      </div> : onViewRegeneration && <div className="reader-update-notice" role="status">
+        <span>Reprocessing in the background.</span>
+        <button className="text-button" type="button" onClick={event => {
+          event.currentTarget.focus({ preventScroll: true })
+          onViewRegeneration()
+        }}>View task</button>
+      </div>}
       {isPreview && <div className="reader-preview-notice" role="status" data-status={preview?.status ?? "interrupted"}>
         {preview?.status === "running" && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
         <span>{preview?.status === "done" ? "Your finished article is ready."
@@ -296,7 +316,7 @@ export function Reader({ article, onBack, onRegenerate, onStateChange, preview, 
       </div>}
       {!isPreview && article.hasAnalysis === false && <div className="reader-raw-notice">
         <span>Original transcript. AI analysis has not been added.</span>
-        <button className="text-button" type="button" onClick={() => void open(() => onRegenerate(article))}>
+        <button className="text-button" type="button" disabled={Boolean(onViewRegeneration)} onClick={() => void open(() => onRegenerate(article))}>
           <Sparkles size={14} aria-hidden="true" />Enrich with AI
         </button>
       </div>}

@@ -35,6 +35,7 @@ def main():
         ])
         note = NoteDocument.model_validate({"transcript": raw, "provider": "codex", "analysis": {
             "summary": "Check the source and keep your reading context.",
+            "keywords": ["source", "context", "reading"],
             "reading_paragraphs": [{"start_segment_index": i, "end_segment_index": i, "text": cue.text}
                                    for i, cue in enumerate(raw.segments)],
             "chapters": [{"start_segment_index": i, "start_ms": i * 10000, "title": title, "summary": "Original source."}

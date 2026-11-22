@@ -1,7 +1,10 @@
 import type { TaskJob } from "./Home"
+import type { Article } from "./api"
 
 const reviewedKey = "linkread-reviewed-tasks-v1"
 const reviewedLimit = 100
+const completedKey = "linkread-recently-completed-v1"
+const completedLimit = 8
 
 function validId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 255
@@ -22,6 +25,27 @@ export function saveReviewedTasks(ids: readonly string[]): string[] {
     // Optional acknowledgement storage never prevents reading or task recovery.
   }
   return next
+}
+
+export function loadCompletedArticleIds(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(completedKey) || "[]")
+    return Array.isArray(value) ? [...new Set(value.filter(validId))].slice(0, completedLimit) : []
+  } catch { return [] }
+}
+
+export function rememberCompletedArticle(ids: readonly string[], id: string): string[] {
+  const next = [...new Set([id, ...ids].filter(validId))].slice(0, completedLimit)
+  try { localStorage.setItem(completedKey, JSON.stringify(next)) } catch { /* History is optional. */ }
+  return next
+}
+
+export function completedArticles(articles: readonly Article[], ids: readonly string[]): Article[] {
+  const archived = new Map(articles.map(article => [article.id, article]))
+  return ids.flatMap(id => {
+    const article = archived.get(id)
+    return article ? [article] : []
+  })
 }
 
 export function groupTasks(jobs: readonly TaskJob[]) {

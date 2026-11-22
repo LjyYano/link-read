@@ -259,6 +259,22 @@ async def run():
             assert bounds and bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 560 and bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 760, bounds
             assert await page.evaluate("document.documentElement.scrollWidth<=innerWidth")
             CHECKS.append("appearance and copy menus fit a narrow dark viewport without horizontal overflow")
+            await page.keyboard.press("Escape")
+            await page.locator("#reader-tab-list").evaluate("list => { list.scrollLeft = 0; }")
+            right = page.get_by_role("button", name="Scroll tabs right")
+            for _ in range(3):
+                if await right.is_disabled():
+                    break
+                await right.click()
+                await settled(page)
+            await expect(right).to_be_disabled()
+            shownotes = page.get_by_role("tab", name="Shownotes")
+            await shownotes.click()
+            await expect(shownotes).to_have_attribute("aria-selected", "true")
+            await shownotes.press("Home")
+            await expect(page.get_by_role("tab", name="Summary")).to_have_attribute("aria-selected", "true")
+            await expect(page.get_by_role("button", name="Scroll tabs left")).to_be_disabled()
+            CHECKS.append("visible tab arrows expose Shownotes and keyboard navigation brings Summary back into view")
             assert not ERRORS, ERRORS
         except Exception as error:
             ERRORS.append(str(error))

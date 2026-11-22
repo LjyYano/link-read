@@ -221,12 +221,28 @@ function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkd
   }, [open])
 
   async function perform(action: () => Promise<unknown>) {
+    const menu = container.current
+    const button = trigger.current
+    const row = button?.closest(".shelf-row")
+    const bookshelf = row?.closest(".bookshelf-page")
+    const neighbors = [row?.nextElementSibling, row?.previousElementSibling]
     setPending(true)
     setError("")
     try {
       await action()
       setOpen(false)
-      trigger.current?.focus()
+      requestAnimationFrame(() => {
+        if (document.activeElement !== document.body && !menu?.contains(document.activeElement)) return
+        if (button?.isConnected) {
+          button.focus({ preventScroll: true })
+        } else if (bookshelf?.isConnected) {
+          const next = neighbors.find(element => element?.isConnected)?.querySelector<HTMLButtonElement>(".shelf-article-link")
+          const filter = bookshelf.querySelector<HTMLButtonElement>(".shelf-star-filter[aria-pressed='true']")
+            ?? bookshelf.querySelector<HTMLButtonElement>(".shelf-read-filters [aria-pressed='true']")
+            ?? bookshelf.querySelector<HTMLButtonElement>(".bookshelf-title button")
+          ;(next ?? filter)?.focus()
+        }
+      })
     } catch (failure) {
       setError(String(failure))
     } finally {
@@ -526,9 +542,11 @@ export function Home({
   const importRef = useRef<HTMLDivElement>(null)
   const helpRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const podcastPreview = previewKey(source)?.startsWith("apple_podcasts:")
+  const sourceKey = previewKey(source)
+  const podcastPreview = sourceKey?.startsWith("apple_podcasts:")
   const existing = Boolean(existingArticle || existingTask)
   const submitDisabled = (!existing && (journalLoading || sourceBlocked)) || (!localPath && !source.trim())
+  const configureAI = !existing && !sourceNeedsAsr && !submitDisabled && Boolean(toolWarning && (sourceKey || localPath))
 
   function showImportHint() {
     setHint(current => current === "pinned-help" ? current : "import")
@@ -626,7 +644,7 @@ export function Home({
             </div>
             <button className="primary home-primary" type="submit" disabled={submitDisabled}
               onClick={event => event.currentTarget.focus({ preventScroll: true })}>
-              {existingArticle ? "打开文章" : existingTask ? "查看任务" : sourceBlocked ? "暂不支持此来源" : sourceNeedsAsr ? "设置语音识别" : busy ? "加入队列" : "生成文章"}
+              {existingArticle ? "打开文章" : existingTask ? "查看任务" : sourceBlocked ? "暂不支持此来源" : sourceNeedsAsr ? "设置语音识别" : configureAI ? "配置 AI 工具" : busy ? "加入队列" : "生成文章"}
             </button>
           </div>
         </div>
@@ -669,7 +687,7 @@ export function Home({
         {inputError && <p className="home-tool-warning" role="alert"><CircleAlert size={15} /><span>{inputError}</span></p>}
         {!existing && toolWarning && !inputError && <div className="home-tool-warning" role="status">
           <CircleAlert size={15} /><span>{toolWarning}</span>
-          <button className="text-button" type="button" onClick={onSettings}>检查设置 <ArrowUpRight size={13} /></button>
+          {!configureAI && <button className="text-button" type="button" onClick={onSettings}>检查设置 <ArrowUpRight size={13} /></button>}
         </div>}
       </form>
       {journalLoading && <p className="task-journal-notice" role="status"><LoaderCircle size={14} className="spin" />正在恢复任务记录…</p>}

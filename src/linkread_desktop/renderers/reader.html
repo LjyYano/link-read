@@ -34,7 +34,14 @@
 .tab{display:inline-flex;align-items:center;gap:7px;font-size:14px;line-height:1.45;padding:14px 13px;transition:color .15s,border-color .15s}
 .tab.active{border-bottom-color:#8b5cf6}.tab .reader-icon{width:17px;height:17px}
 .reader-tab-row{display:flex;align-items:stretch;gap:8px;min-width:0}
+.reader-tab-strip{display:flex;align-items:center;flex:1;min-width:0}
 .reader-tab-row .tabs-scroll{flex:1;min-width:0}
+.tab-scroll-button{display:grid;place-items:center;flex:0 0 28px;width:28px;height:32px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted)}
+.tab-scroll-button[hidden]{display:none}
+.tab-scroll-button:disabled{opacity:.38;cursor:default}
+.tab-scroll-button:hover:not(:disabled){background:var(--hover);color:var(--fg)}
+.tab-scroll-button svg{width:16px;height:16px}
+@media (min-width:791px) and (max-width:1000px){.shell{display:block}.sidebar{display:none}.mobile-toc{display:block}}
 .reader-tool-buttons{display:flex;align-items:center;gap:2px;flex:none;padding-left:5px;border-left:1px solid var(--line);margin:9px 0}
 .reader-tool{position:relative;display:flex;align-items:center}
 .reader-tool-button,.reader-search button,.reader-popover button{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:12px;line-height:1.4;min-width:32px;min-height:32px;padding:6px}
@@ -128,7 +135,11 @@
     <header class="hero"><h1><!--LR:TITLE--></h1><!--LR:METADATA--><!--LR:READING_ACTIONS--></header>
     <div class="tabs">
       <div class="reader-tab-row">
-        <div class="tabs-scroll" role="tablist" aria-label="Article views"><!--LR:TABS--></div>
+        <div class="reader-tab-strip">
+          <button class="tab-scroll-button" id="reader-tabs-left" type="button" aria-label="Scroll tabs left" title="Scroll tabs left" aria-controls="reader-tab-list" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+          <div class="tabs-scroll" id="reader-tab-list" role="tablist" aria-label="Article views"><!--LR:TABS--></div>
+          <button class="tab-scroll-button" id="reader-tabs-right" type="button" aria-label="Scroll tabs right" title="Scroll tabs right" aria-controls="reader-tab-list" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+        </div>
         <div class="reader-tool-buttons" role="group" aria-label="Reading tools">
           <button class="reader-tool-button" id="reader-search-toggle" type="button" aria-label="Search article" title="Search article (⌘F / Ctrl+F)" aria-controls="reader-search" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
           <div class="reader-tool">
