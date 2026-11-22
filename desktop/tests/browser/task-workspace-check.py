@@ -256,8 +256,8 @@ async def verify_tasks(browser):
 async def verify_continue(browser):
     context, page, errors, _ = await open_app(browser)
     resume = page.locator('.continue-reading')
-    await expect(resume).to_contain_text(ARTICLES[2]['title'])
-    await expect(resume).to_contain_text('Transcript')
+    await expect(resume.locator('.continue-reading-copy strong')).to_have_text(ARTICLES[2]['title'])
+    await expect(resume.locator('.continue-reading-copy > span')).to_have_count(0)
     loaded = await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='load_reading_position').map(call=>call.args.key)")
     assert loaded == ['qa-workspace-qa-corrupt', 'qa-workspace-qa-resume'], loaded
     assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='prepare_article').length") == 0

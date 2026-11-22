@@ -256,16 +256,14 @@ export function AsrSettingsPanel({ value, onChange, token, onToken, apiToken, sa
                 </select>
                 <ChevronDown size={15} aria-hidden="true" />
               </span>
-              <p className="settings-field-hint">分片使用本地 FFmpeg，失败重试会复用已完成片段。</p>
             </div>
           </div>
           <div className="settings-field">
             <label className="settings-label" htmlFor="asr-max-minutes">时长上限</label>
             <div className="settings-field-control">
               <input id="asr-max-minutes" type="number" min={1} max={720} step={1} aria-label="单次转写上限（分钟）"
-                value={value.maxMinutes} disabled={disabled} aria-describedby="asr-duration-hint"
+                value={value.maxMinutes} disabled={disabled}
                 onChange={event => update({ ...value, maxMinutes: Number(event.target.value) })} />
-              <p id="asr-duration-hint" className="settings-field-hint">每次最多 1–720 分钟。</p>
             </div>
           </div>
         </div>

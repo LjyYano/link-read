@@ -22,7 +22,6 @@ export function SourceReadinessPanel({ state, onImport, onOpenSource, onSettings
       <div className="source-readiness-title"><Icon size={15} aria-hidden="true" className={checking ? "spin" : undefined} />
         <span>{title}</span></div>
       {!checking && result && <p>{result.message}</p>}
-      {checking && <p>仅读取公开字幕与来源信息，不调用 AI 或语音识别。</p>}
     </div>
     <div className="source-readiness-actions">
       {result && !checking && <time dateTime={new Date(result.checkedAt).toISOString()}>

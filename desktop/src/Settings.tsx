@@ -377,7 +377,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
       <footer className="settings-actions">
         <span className="settings-save-status" role="status" data-state={savedNotice && !dirty ? "saved" : undefined}>
           {loading ? "正在读取配置…" : saving ? "正在保存…" : asrTesting ? "正在测试转写…" : testing ? "正在测试连接…"
-            : dirty ? "有未保存的修改" : savedNotice ? "设置已保存" : "没有未保存的修改"}
+            : dirty ? "有未保存的修改" : savedNotice ? "设置已保存" : ""}
         </span>
         <div className="settings-action-buttons">
           <button className="plain" type="button" disabled={saving} onClick={onBack}>取消</button>

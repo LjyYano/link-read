@@ -51,7 +51,6 @@
 .task-center-unseen { color: #8b5918; background: #fff4df; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: 500; white-space: nowrap; }
 .task-center-empty { display: grid; justify-items: center; gap: 12px; margin: 50px 0; color: var(--muted); text-align: center; }
 .task-center-empty strong { color: var(--ink); font-size: 14px; font-weight: 550; }
-.task-center-empty p { font-size: 12px; }
 .task-center-footer { flex-shrink: 0; border-top: 1px solid var(--line); padding: 10px 16px; }
 .task-center-footer .text-button { font-size: 12px; }
 .task-center-footer .text-button:disabled { color: var(--muted); opacity: .65; text-decoration: none; }

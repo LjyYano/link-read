@@ -14,7 +14,7 @@ import { thumbnailSource } from "./coverSource"
 import { previewKey } from "./previewState"
 import type { ChangeArticleState } from "./ReadingActions"
 import { articleState, filterArticles, searchArticles, shelfCounts, defaultShelfFilters, type ReadFilter, type ShelfFilters } from "./libraryState"
-import { continueLabel, type ContinueReading } from "./continueReading"
+import type { ContinueReading } from "./continueReading"
 import { selectRecentArticles, sourcePresentation, updatedDatePresentation } from "./homePresentation"
 
 type ArticleIdentity = {
@@ -48,7 +48,6 @@ type ArticleListProps = {
 
 type HomeProps = ArticleListProps & {
   linkPreview: LinkPreview
-  providerLabel: string
   source: string
   setSource: (source: string) => void
   localPath: string | null
@@ -528,7 +527,7 @@ function LibraryState({ library, error, onRefresh }: Pick<ArticleListProps, "lib
 
 export function Home({
   source, setSource, localPath, onPick, onClear, onStart, busy, dragging, jobs, onCancel, onRetry, onRemove, linkPreview,
-  toolWarning, inputError, onSettings, onLibrary, library, error, onRead, onRefresh, onDelete, onRegenerate, onStateChange, providerLabel,
+  toolWarning, inputError, onSettings, onLibrary, library, error, onRead, onRefresh, onDelete, onRegenerate, onStateChange,
   onPreview, journalLoading, journalError, onRetryJournal,
   onTasks, taskSummary, resume, sourceReadiness, sourceBlocked, sourceNeedsAsr, existingArticle, existingTask, onViewExistingTask, onEdit, onExportMarkdown,
 }: HomeProps) {
@@ -679,11 +678,7 @@ export function Home({
           <span>{linkPreview.timedOut ? "来源预览等待超时" : "暂未获取到标题与封面"}</span>
           <button className="text-button" type="button" onClick={linkPreview.retry}><RotateCw size={12} aria-hidden="true" />重试预览</button>
         </div>}
-        {existingTask && !existingArticle && <p className="existing-source-status" role="status"><CirclePause size={14} />该内容正在生成或排队，可直接查看任务。</p>}
         {!existing && !selectedFile && sourceReadiness}
-        {!existing && selectedFile && <p className="local-import-hint"><Sparkles size={13} aria-hidden="true" />
-          使用 {providerLabel} 整理正文、摘要与导图
-        </p>}
         {inputError && <p className="home-tool-warning" role="alert"><CircleAlert size={15} /><span>{inputError}</span></p>}
         {!existing && toolWarning && !inputError && <div className="home-tool-warning" role="status">
           <CircleAlert size={15} /><span>{toolWarning}</span>
@@ -717,7 +712,7 @@ export function Home({
         <button type="button" className="continue-reading-link" onClick={() => onRead(resume.article)}>
           <span className="continue-reading-cover"><Cover {...resume.article} /></span>
           <span className="continue-reading-copy"><small>继续阅读</small>
-            <strong title={resume.article.title}>{resume.article.title}</strong><span>{continueLabel(resume)}</span>
+            <strong title={resume.article.title}>{resume.article.title}</strong>
           </span>
           <span className="continue-reading-action" aria-hidden="true"><ArrowRight size={18} /></span>
         </button>

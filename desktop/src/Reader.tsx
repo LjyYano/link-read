@@ -120,7 +120,7 @@ export function Reader({ article, onBack, backLabel = "Library", onRegenerate, o
     // document. Keep its session; real iframe reloads announce a fresh one.
     const bridge = new ReadingPositionBridge({ key: readingKey, load: loadReadingPosition, save: saveReadingPosition,
       send: data => frame.current?.contentWindow?.postMessage(data, "*"),
-      onError: () => setPositionError("Could not save or restore reading position. You can keep reading."),
+      onError: () => setPositionError("Could not save or restore reading position."),
     })
     positionBridge.current = bridge
     const message = (event: MessageEvent) => {
@@ -302,10 +302,10 @@ export function Reader({ article, onBack, backLabel = "Library", onRegenerate, o
       </div>}
       {isPreview && <div className="reader-preview-notice" role="status" data-status={preview?.status ?? "interrupted"}>
         {preview?.status === "running" && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
-        <span>{preview?.status === "done" ? "Your finished article is ready."
-          : preview?.status === "running" ? "Original transcript is ready. AI is still refining."
-          : preview?.status === "queued" ? "Original transcript is ready. AI is queued."
-          : "Original transcript is saved. AI processing has stopped."}</span>
+        <span>{preview?.status === "done" ? "Finished article ready"
+          : preview?.status === "running" ? "Original transcript · AI in progress"
+          : preview?.status === "queued" ? "Original transcript · AI queued"
+          : "Original transcript · AI stopped"}</span>
         {preview?.status === "done" && preview.article && <button className="text-button" type="button" onClick={() => void leave(preview.onOpenComplete)}>
           View finished article<ArrowUpRight size={13} aria-hidden="true" />
         </button>}
@@ -315,7 +315,7 @@ export function Reader({ article, onBack, backLabel = "Library", onRegenerate, o
         <button className="icon-button" type="button" aria-label="Dismiss position notice" onClick={() => setPositionError("")}><X size={14} /></button>
       </div>}
       {!isPreview && article.hasAnalysis === false && <div className="reader-raw-notice">
-        <span>Original transcript. AI analysis has not been added.</span>
+        <span>Original transcript</span>
         <button className="text-button" type="button" disabled={Boolean(onViewRegeneration)} onClick={() => void open(() => onRegenerate(article))}>
           <Sparkles size={14} aria-hidden="true" />Enrich with AI
         </button>
@@ -324,7 +324,7 @@ export function Reader({ article, onBack, backLabel = "Library", onRegenerate, o
       {shownotesRefresh.status !== "idle" && <div className="reader-shownotes-refresh"
         role={shownotesRefresh.status === "error" ? "alert" : "status"} data-state={shownotesRefresh.status}>
         {shownotesRefresh.status === "loading"
-          ? <><LoaderCircle size={14} className="spin" aria-hidden="true" /><span>Fetching Shownotes… You can keep reading.</span></>
+          ? <><LoaderCircle size={14} className="spin" aria-hidden="true" /><span>Fetching Shownotes…</span></>
           : <><CircleAlert size={14} aria-hidden="true" /><span>Could not fetch Shownotes. {shownotesRefresh.message}</span>
             <button className="text-button" type="button" onClick={() => void prepare(true)}><RotateCw size={13} />Retry</button>
             <button className="icon-button" type="button" aria-label="Dismiss Shownotes error" onClick={() => setShownotesRefresh({ status: "idle" })}><X size={14} /></button>

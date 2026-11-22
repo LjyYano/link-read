@@ -1,10 +1,7 @@
 import type { Article } from "./api"
 
-const tabNames = {
-  summary: "Summary", mindmap: "Mindmap", transcript: "Transcript",
-  keywords: "Keywords", highlights: "Highlights", shownotes: "Shownotes",
-} as const
-type ReadingTab = keyof typeof tabNames
+const readingTabs = ["summary", "mindmap", "transcript", "keywords", "highlights", "shownotes"] as const
+type ReadingTab = typeof readingTabs[number]
 export type ContinueReading = { article: Article; tab: ReadingTab; updatedAt: number }
 
 /** Membership and manual completion come from the live library, never history. */
@@ -19,7 +16,7 @@ export function readingSummary(value: unknown): { tab: ReadingTab; updatedAt: nu
   const saved = value as Record<string, unknown>
   if (saved.version !== 1 || !Number.isSafeInteger(saved.updatedAt) || (saved.updatedAt as number) <= 0
       || (saved.updatedAt as number) > 8_640_000_000_000_000
-      || typeof saved.activeTab !== "string" || !Object.hasOwn(tabNames, saved.activeTab)
+      || !readingTabs.some(tab => tab === saved.activeTab)
       || !saved.tabs || typeof saved.tabs !== "object" || Array.isArray(saved.tabs)) return null
   const tab = saved.activeTab as ReadingTab
   const position = (saved.tabs as Record<string, unknown>)[tab]
@@ -28,8 +25,7 @@ export function readingSummary(value: unknown): { tab: ReadingTab; updatedAt: nu
   if (typeof signature !== "string" || !/^p1-[0-9a-f]{16}-[0-9]+$/.test(signature)
       || !anchor || typeof anchor !== "object" || !("kind" in anchor)
       || !["top", "cue", "block"].includes(String(anchor.kind))) return null
-  // The native layer validates the full record. This is display metadata only;
-  // the reader still restores its own verified anchors and map state on open.
+  // The reader restores its verified anchors and map state separately on open.
   return { tab, updatedAt: saved.updatedAt as number }
 }
 
@@ -44,14 +40,4 @@ export async function findContinueReading(articles: Article[], recent: string[],
     } catch { /* One unreadable record must not prevent another article from resuming. */ }
   }
   return undefined
-}
-
-export function continueLabel(resume: ContinueReading, now = new Date()): string {
-  const saved = new Date(resume.updatedAt)
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1)
-  const day = saved >= today && saved <= now ? "今天"
-    : saved >= yesterday && saved < today ? "昨天"
-    : `${saved.getFullYear() === now.getFullYear() ? "" : `${saved.getFullYear()} 年 `}${saved.getMonth() + 1} 月 ${saved.getDate()} 日`
-  return `${day}读到 ${tabNames[resume.tab]}`
 }

@@ -916,7 +916,7 @@ function App() {
         onQuickOpen={showQuickOpen} />
       <main ref={workspace} className={screen === "reader" ? "workspace workspace-reader" : "workspace"}>
         {screen === "create" && (
-          <Home {...shelfActions} providerLabel={providerNames[preferences.provider]} linkPreview={linkPreview} source={source} setSource={setLink} localPath={localPath}
+          <Home {...shelfActions} linkPreview={linkPreview} source={source} setSource={setLink} localPath={localPath}
             onPick={pick} onClear={() => setLink("")} onStart={start} busy={busy} jobs={jobs}
             onCancel={cancel} onRetry={retry} onRemove={removeJob} toolWarning={toolWarning} inputError={inputError}
             onPreview={readPreview} journalLoading={journalLoading} journalError={journalError} onRetryJournal={retryJournal}

@@ -92,7 +92,6 @@
 .article-card-media .shelf-cover[data-platform="apple_podcasts"] .cover-rule { display:none; }
 .shelf-cover[data-cover-loaded="true"] .cover-typography { visibility: hidden; }
 .shelf-local-icon { color: var(--muted); flex-shrink: 0; }
-.local-import-hint { display: flex; gap: 6px; align-items: center; color: var(--muted); margin: 10px 2px 0; font-size: 12px; line-height: 1.5; }
 .reader-raw-notice { flex: 0 0 auto; display: flex; gap: 12px; align-items: center; justify-content: center; background: var(--surface); color: var(--muted); border-bottom: 1px solid var(--line); padding: 9px 20px; font-size: 12px; }
 .reader-raw-notice .text-button { font-size: 12px; white-space: nowrap; }
 @media (prefers-color-scheme: dark) {

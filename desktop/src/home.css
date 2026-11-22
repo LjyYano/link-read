@@ -519,7 +519,7 @@ button.shelf-article-link:focus-visible { outline-offset: 1px; }
 .home-task-summary .text-button { display:inline-flex; align-items:center; gap:6px; font-size:12px; white-space:nowrap; }
 .home-task-summary[data-unread="true"] { color:#99651c; }
 .continue-reading { margin-top:24px; border:1px solid var(--line); border-radius:11px; background:var(--paper); }
-.continue-reading-link { display:flex; align-items:center; gap:12px; width:100%; min-height:76px; padding:10px 14px; border:0; border-radius:10px; color:var(--ink); background:transparent; text-align:start; }
+.continue-reading-link { display:flex; align-items:center; gap:12px; width:100%; min-height:68px; padding:10px 14px; border:0; border-radius:10px; color:var(--ink); background:transparent; text-align:start; }
 .continue-reading-link:hover { background:var(--surface); }
 .continue-reading-cover { width:64px; flex:0 0 64px; display:flex; justify-content:center; }
 .continue-reading-cover .shelf-cover { width:64px; }
@@ -527,7 +527,6 @@ button.shelf-article-link:focus-visible { outline-offset: 1px; }
 .continue-reading-copy { display:grid; gap:3px; flex:1; min-width:0; }
 .continue-reading-copy small { color:var(--muted); font-size:11px; font-weight:550; line-height:1.25; }
 .continue-reading-copy strong { font-size:15px; font-weight:650; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.continue-reading-copy > span { color:var(--muted); font-size:12px; line-height:1.35; }
 .continue-reading-action { display:flex; align-items:center; flex-shrink:0; color:var(--accent-dark); }
 @media(max-width:650px) {
   .continue-reading-link { padding:10px 12px; gap:10px; }
@@ -542,6 +541,5 @@ button.shelf-article-link:focus-visible { outline-offset: 1px; }
 .completion-toast button { flex-shrink:0; }
 .existing-source-preview{overflow:visible;position:relative}.existing-source-preview .source-preview-info{flex:1;min-width:0}
 .existing-source-status{display:flex!important;align-items:center;gap:5px;color:#327446!important;font-size:12px;line-height:1.6}
-.home-form>p.existing-source-status{margin:9px 3px 0}
 @media(prefers-color-scheme:dark){.existing-source-status{color:#9bd3ad!important}}
 @media(max-width:560px){.existing-source-preview{flex-wrap:wrap}.existing-source-preview>.text-button{margin-left:auto}.existing-source-preview .source-preview-info{flex-basis:calc(100% - 105px)}}

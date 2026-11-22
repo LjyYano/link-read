@@ -242,18 +242,26 @@ function layoutKeywords(){
   cloud.style.height='';
   const words=$$('.cloud-word',cloud);
   words.forEach(word=>{word.style.left='';word.style.top='';word.style.maxWidth=''});
-  if(words.length>80)return;
-  words.forEach(word=>word.style.maxWidth=Math.max(1,width-12)+'px');
+  // Scale the text on hover without moving the button's pointer hit area.
+  const fitHover=()=>{
+    const widths=words.map(word=>word.offsetWidth);
+    words.forEach((word,index)=>word.style.setProperty('--cloud-zoom',Math.min(1.18,1+24/Math.max(1,widths[index])).toFixed(3)));
+  };
+  if(words.length>52){fitHover();return}
+  const margin=6,gap=8;
+  words.forEach(word=>word.style.maxWidth=Math.max(1,width-2*margin)+'px');
   cloud.classList.add('is-positioned');
-  const sizes=words.map(word=>({w:Math.ceil(word.getBoundingClientRect().width),h:Math.ceil(word.getBoundingClientRect().height)}));
-  const initialHeight=Math.max(300,Math.min(440,Math.round(width*.62)));
-  for(let attempt=0;attempt<7;attempt++){
-    const height=initialHeight+attempt*80, placed=[];
+  const sizes=words.map(word=>({w:word.offsetWidth,h:word.offsetHeight}));
+  const area=sizes.reduce((sum,{w,h})=>sum+(w+gap)*(h+gap),0);
+  const initialHeight=Math.max(Math.min(320,112+words.length*6),Math.ceil(area/(width*.6)),
+    Math.max(...sizes.map(({h})=>h))+2*margin);
+  for(let attempt=0;attempt<6;attempt++){
+    const height=initialHeight+attempt*60, placed=[];
     for(let index=0;index<words.length;index++){
       const {w,h}=sizes[index];
       let box=null;
-      const fits=(x,y)=>x>=4&&y>=4&&x+w<=width-4&&y+h<=height-4&&
-        !placed.some(p=>x<p.x+p.w+6&&x+w+6>p.x&&y<p.y+p.h+6&&y+h+6>p.y);
+      const fits=(x,y)=>x>=margin&&y>=margin&&x+w<=width-margin&&y+h<=height-margin&&
+        !placed.some(p=>x<p.x+p.w+gap&&x+w+gap>p.x&&y<p.y+p.h+gap&&y+h+gap>p.y);
       for(let step=0;step<1800;step++){
         const angle=step*.34+index*2.399963, radius=step*.42;
         const x=Math.round(width/2+Math.cos(angle)*radius*1.4-w/2);
@@ -264,8 +272,8 @@ function layoutKeywords(){
       // A spiral can skip narrow gaps on phones. Try the free edges of
       // existing words before growing the canvas or falling back to flex.
       if(!box){
-        const xs=[4,width-w-4,Math.round((width-w)/2),...placed.flatMap(p=>[p.x-w-6,p.x+p.w+6])];
-        const ys=[4,height-h-4,Math.round((height-h)/2),...placed.flatMap(p=>[p.y-h-6,p.y+p.h+6])];
+        const xs=[margin,width-w-margin,Math.round((width-w)/2),...placed.flatMap(p=>[p.x-w-gap,p.x+p.w+gap])];
+        const ys=[margin,height-h-margin,Math.round((height-h)/2),...placed.flatMap(p=>[p.y-h-gap,p.y+p.h+gap])];
         let best=Infinity;
         for(const x of xs)for(const y of ys){
           if(!fits(x,y))continue;
@@ -277,14 +285,20 @@ function layoutKeywords(){
       placed.push(box);
     }
     if(placed.length!==words.length)continue;
-    // Center the occupied area, which may be asymmetric for longer phrases.
+    const left=Math.min(...placed.map(p=>p.x)),right=Math.max(...placed.map(p=>p.x+p.w));
     const top=Math.min(...placed.map(p=>p.y)),bottom=Math.max(...placed.map(p=>p.y+p.h));
-    const offset=Math.round((height-bottom-top)/2);
-    cloud.style.height=height+'px';
-    words.forEach((word,index)=>{word.style.left=placed[index].x+'px';word.style.top=(placed[index].y+offset)+'px'});
+    const fittedHeight=Math.max(initialHeight,bottom-top+2*margin);
+    const offsetX=Math.round((width-right-left)/2),offsetY=Math.round((fittedHeight-bottom-top)/2);
+    cloud.style.height=fittedHeight+'px';
+    words.forEach((word,index)=>{
+      word.style.left=(placed[index].x+offsetX)+'px';
+      word.style.top=(placed[index].y+offsetY)+'px';
+    });
+    fitHover();
     return;
   }
   cloud.classList.remove('is-positioned');
+  fitHover();
 }
 if(cloud){
   const schedule=()=>{cancelAnimationFrame(cloudFrame);cloudFrame=requestAnimationFrame(layoutKeywords)};

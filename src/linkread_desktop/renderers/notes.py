@@ -39,15 +39,18 @@ def note_fragments(note: NoteDocument) -> dict[str, str]:
     if words:
         # These are editorial topics, not literal word-frequency measurements.
         # Use their existing order for typographic hierarchy without inventing counts.
-        keywords = "".join(
-            f'<button type="button" class="cloud-word cloud-tone-{index % 4}" '
-            f'style="--weight:{1 / (1 + index * .28):.3f}" data-keyword="{escape(word, quote=True)}" '
-            f'title="Search transcript: {escape(word, quote=True)}">{escape(word)}</button>'
-            for index, word in enumerate(words)
-        )
+        keywords = []
+        for index, word in enumerate(words):
+            rank_weight = (1 + index * .44) ** -.85
+            weight = rank_weight * min(1, 24 / len(word))
+            keywords.append(
+                f'<button type="button" class="cloud-word cloud-tone-{index % 6}" '
+                f'style="--weight:{weight:.3f}" data-keyword="{escape(word, quote=True)}" '
+                f'title="Search article"><span class="cloud-label">{escape(word)}</span></button>'
+            )
         content = (
             '<div class="keyword-atlas">'
-            f'<div class="keyword-cloud" role="group" aria-label="Keywords">{keywords}</div>'
+            f'<div class="keyword-cloud" role="group" aria-label="Keywords">{"".join(keywords)}</div>'
             '</div>'
         )
         panels["keywords"] = _panel("keywords", content)

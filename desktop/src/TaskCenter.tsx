@@ -228,7 +228,7 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
       </section>}
       {!groups.active.length && !groups.queued.length && !groups.attention.length && !completed.length && <div className="task-center-empty" role="status">
         <CircleCheck size={26} strokeWidth={1.5} aria-hidden="true" />
-        <strong>没有待处理任务</strong><p>完成的文章保留在书架中。</p>
+        <strong>没有待处理任务</strong>
       </div>}
     </div>
     <footer className="task-center-footer">

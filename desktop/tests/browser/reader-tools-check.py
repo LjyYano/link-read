@@ -275,6 +275,23 @@ async def run():
             await expect(page.get_by_role("tab", name="Summary")).to_have_attribute("aria-selected", "true")
             await expect(page.get_by_role("button", name="Scroll tabs left")).to_be_disabled()
             CHECKS.append("visible tab arrows expose Shownotes and keyboard navigation brings Summary back into view")
+            keyword_tab = page.get_by_role("tab", name="Keywords")
+            await keyword_tab.click()
+            await expect(page.locator(".keyword-cloud.is-positioned")).to_be_visible()
+            word = page.get_by_role("button", name="reading", exact=True)
+            await word.hover()
+            assert await word.locator(".cloud-label").evaluate("element => getComputedStyle(element).transform") == "none"
+            await page.emulate_media(reduced_motion="no-preference")
+            await page.wait_for_function("""() => {
+              const label = document.querySelector('.cloud-word:hover .cloud-label');
+              return label && new DOMMatrix(getComputedStyle(label).transform).a > 1.08;
+            }""")
+            await word.focus()
+            await expect(word).to_be_focused()
+            await word.press("Enter")
+            await expect(page.locator("#text-search")).to_have_value("reading")
+            await expect(page.get_by_role("tab", name="Transcript")).to_have_attribute("aria-selected", "true")
+            CHECKS.append("keyword cloud animates on hover, respects reduced motion and opens search from the keyboard")
             assert not ERRORS, ERRORS
         except Exception as error:
             ERRORS.append(str(error))

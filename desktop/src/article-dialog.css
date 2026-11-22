@@ -9,14 +9,12 @@
 .article-original{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;font-size:11px;line-height:1.6;color:var(--muted);margin-top:-6px}
 .article-original>span{overflow-wrap:anywhere;min-width:0}.article-original button{flex-shrink:0;font-size:11px;min-height:20px;padding:0}
 .article-original button:disabled{color:var(--muted);opacity:.65;text-decoration:none}
-.article-dialog-hint{font-size:12px;line-height:1.7;color:var(--muted)}
 .article-dialog footer{display:flex;justify-content:flex-end;gap:9px;padding:15px 24px;border-top:1px solid var(--line)}
 .article-dialog .error-line{font-size:12px;line-height:1.6}.article-dialog-loading{padding:15px 24px 26px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;color:var(--muted);font-size:13px}
 .article-dialog-loading p{flex-basis:100%}
 .export-content-options{padding:0;margin:0;border:0;display:grid;gap:11px;min-width:0}.export-content-options legend{font-size:13px;font-weight:600;margin-bottom:12px}
 .export-content-options label,.export-transcript-option{display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:13px;line-height:1.6}
 .export-content-options label input,.export-transcript-option input{accent-color:var(--accent);margin:4px 0 0;flex-shrink:0}
-.export-content-options strong{font-weight:580}.export-content-options small,.export-transcript-option small,.export-contents-preview small{display:block;font-size:12px;color:var(--muted);line-height:1.65}
-.export-transcript-option{padding-top:10px}.export-contents-preview{display:flex;align-items:flex-start;gap:10px;padding:12px;border-radius:7px;background:var(--surface);font-size:12px;line-height:1.7;margin-top:4px}
-.export-contents-preview svg{margin-top:2px;color:var(--muted)}
+.export-content-options strong{font-weight:580}.export-content-options small{display:block;font-size:12px;color:var(--muted);line-height:1.65}
+.export-transcript-option{padding-top:10px}
 @media(max-width:520px){.article-dialog header{padding:18px 18px 14px}.article-dialog-body{padding:0 18px 18px}.article-dialog footer{padding:14px 18px}.article-original{flex-direction:column;gap:3px}.article-dialog{max-height:calc(100dvh - 24px)}}

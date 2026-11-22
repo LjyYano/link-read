@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react"
-import { ArrowDown, ArrowUp, BookOpen, CircleCheck, CornerDownLeft, LoaderCircle, Search, Star, X } from "lucide-react"
+import { BookOpen, CircleCheck, CornerDownLeft, LoaderCircle, Search, Star, X } from "lucide-react"
 import { platformNames, type Article, type Library } from "./api"
 import { quickOpenArticles } from "./quickOpenState"
 import "./quick-open.css"
@@ -91,7 +91,6 @@ export function QuickOpen({ library, error, recent, onClose, onRead, onLibrary, 
       <button type="button" className="text-button" onClick={onRefresh}>重新加载</button>
     </div>}
     <footer className="quick-open-footer">
-      <span className="quick-open-hints"><ArrowUp size={12} aria-hidden="true" /><ArrowDown size={12} aria-hidden="true" /> 选择 <CornerDownLeft size={13} aria-hidden="true" /> 打开</span>
       <button type="button" className="text-button" onClick={() => onLibrary(query)}>
         {matches.length > visible.length ? `查看全部 ${matches.length} 篇` : "查看书架"}
       </button>

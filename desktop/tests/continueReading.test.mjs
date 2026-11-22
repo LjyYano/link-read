@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { continueCandidates, findContinueReading, readingSummary, continueLabel } from '../src/continueReading.ts'
+import { continueCandidates, findContinueReading, readingSummary } from '../src/continueReading.ts'
 
 const article = (id, extras = {}) => ({ id, title: id, readingKey: `source:${id}`, isRead: false, ...extras })
 const position = (tab = 'transcript') => ({ version: 1, updatedAt: new Date(2026, 10, 17, 15).getTime(), activeTab: tab,
@@ -37,19 +37,4 @@ test('a late lookup after a library or navigation change cannot continue scannin
   release(position())
   assert.equal(await promise, undefined)
   assert.deepEqual(calls, ['source:one'])
-})
-
-test('continue labels describe the saved tab and date without inventing chapters or percentages', () => {
-  const resume = { article: article('one'), tab: 'transcript', updatedAt: position().updatedAt }
-  assert.equal(continueLabel(resume, new Date(2026, 10, 18, 12)), '昨天读到 Transcript')
-  assert.equal(continueLabel(resume, new Date(2026, 10, 17, 18)), '今天读到 Transcript')
-  assert.equal(continueLabel({ ...resume, tab: 'highlights' }, new Date(2026, 10, 20, 12)), '11 月 17 日读到 Highlights')
-  assert.equal(continueLabel(resume, new Date(2027, 0, 1, 12)), '2026 年 11 月 17 日读到 Transcript')
-})
-
-test('continue labels use calendar boundaries at midnight and across the year', () => {
-  const resume = { article: article('one'), tab: 'highlights', updatedAt: new Date(2026, 11, 31, 23, 59).getTime() }
-  assert.equal(continueLabel(resume, new Date(2027, 0, 1, 0, 1)), '昨天读到 Highlights')
-  assert.equal(continueLabel({ ...resume, updatedAt: new Date(2027, 0, 1, 0).getTime() }, new Date(2027, 0, 1, 0, 1)), '今天读到 Highlights')
-  assert.equal(continueLabel({ ...resume, updatedAt: new Date(2026, 11, 30, 23, 59).getTime() }, new Date(2027, 0, 1, 0, 1)), '2026 年 12 月 30 日读到 Highlights')
 })

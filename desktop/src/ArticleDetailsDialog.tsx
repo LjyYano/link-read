@@ -65,7 +65,6 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
           </label>
           <div className="article-original"><span>Original category: {details.originalCategory || "None"}</span>
             <button className="text-button" type="button" disabled={saving || resetCategory} onClick={() => { setCategory(details.originalCategory); setResetCategory(true) }}>Reset to original</button></div>
-          <p className="article-dialog-hint">Changes appear in Library, reader and exports. Your original transcript is preserved.</p>
           {error && <p className="error-line" role="alert">{error}</p>}
         </div>
         <footer><button className="secondary" type="button" disabled={saving} onClick={onClose}>Cancel</button>

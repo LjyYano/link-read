@@ -56,7 +56,6 @@
     if (panel.hidden) return;
     window.dispatchEvent(new CustomEvent('linkread-source-jump', {detail: {cue}}));
   });
-  if (sourceLinks.size) wrap.querySelector('.mindmap-hint').textContent = 'Select a linked idea to read · Use circles to expand · Drag to move';
   function setMode(value) {
     mode = value;
     wrap.querySelector('[data-mindmap-overview]')?.setAttribute('aria-pressed', String(mode === 'overview'));
