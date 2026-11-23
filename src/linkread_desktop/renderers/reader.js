@@ -1,6 +1,8 @@
 // Article interactions from LjyYano/html-library, pages/charlie-munger-etf-trap/index.html.
 (()=>{'use strict';
 const $=(q,r=document)=>r.querySelector(q), $$=(q,r=document)=>Array.from(r.querySelectorAll(q));
+const labels=JSON.parse($('#linkread-reader-labels')?.textContent||'{}');
+const t=(label,values={})=>(Object.hasOwn(labels,label)?labels[label]:label).replace(/\{(\w+)\}/g,(_,key)=>values[key]??`{${key}}`);
 const tabNames=$$('.tab').map(b=>b.dataset.tab);
 const tabList=$('.tabs-scroll'),tabStrip=$('.reader-tab-strip');
 const tabsLeft=$('#reader-tabs-left'),tabsRight=$('#reader-tabs-right');
@@ -141,7 +143,9 @@ function searchBlocks(){
   const blocks=[];
   for(const element of $$('.reading-paragraph,.transcript-section h2,.transcript-section h3')){
     const nodes=[],walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
-    while(walker.nextNode())nodes.push(walker.currentNode);
+    while(walker.nextNode()){
+      if(!walker.currentNode.parentElement.closest('[data-transcript-version][hidden]'))nodes.push(walker.currentNode);
+    }
     blocks.push({nodes,panel:'transcript'});
   }
   for(const root of $$('.shownotes-copy')){
@@ -185,7 +189,9 @@ function highlight(query){
 }
 function paintSearch(){
   const current=hits[hit];
-  $('#match-count').textContent=!lastQuery?'':!hits.length?'No matches':`${hit+1} of ${hits.length} · ${current?.panel==='shownotes'?'Shownotes':'Transcript'}`;
+  $('#match-count').textContent=!lastQuery?'':!hits.length?t('No matches'):t('{current} of {total} · {section}',{
+    current:hit+1,total:hits.length,section:t(current?.panel==='shownotes'?'Shownotes':'Transcript')
+  });
   $('#search-prev').disabled=$('#search-next').disabled=hits.length===0;
 }
 function selectHit(index){
@@ -225,9 +231,20 @@ inp.addEventListener('compositionend',()=>{composing=false;scheduleSearch()});
 inp.addEventListener('input',event=>{if(!event.isComposing)scheduleSearch()});
 inp.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.isComposing){event.preventDefault();step(event.shiftKey?-1:1)}});
 $('#search-prev').addEventListener('click',()=>step(-1));$('#search-next').addEventListener('click',()=>step(1));$('#search-close').addEventListener('click',closeSearch);
+const transcriptToggles=$$('[data-select-transcript]');
+function selectTranscript(version){
+  if(!transcriptToggles.length)return;
+  const restore=readingPosition?.preserveLayout();
+  $$('[data-transcript-version]').forEach(span=>span.hidden=span.dataset.transcriptVersion!==version);
+  transcriptToggles.forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.selectTranscript===version)));
+  if(!searchBar.hidden)search(false);
+  restore?.();
+}
+transcriptToggles.forEach(button=>button.addEventListener('click',()=>selectTranscript(button.dataset.selectTranscript)));
 $$('[data-keyword]').forEach(button=>button.addEventListener('click',()=>{
+  selectTranscript('translation');
   openSearch(button.dataset.keyword);
-  if(!hits.length)toast('No matches in Transcript or Shownotes');
+  if(!hits.length)toast(t('No matches in Transcript or Shownotes'));
 }));
 // Measure actual text instead of guessing CJK widths. The static flex layout
 // remains readable without JS and is also the fallback for unusually large lists.
@@ -346,10 +363,10 @@ $$('[data-copy-side]').forEach(button=>button.addEventListener('click',async()=>
     }
     rich+=source.outerHTML;closePopovers(true);
   }else if(!isFront){
-    const time=document.createElement('p');time.textContent=`Time: ${stamp}`;rich+=time.outerHTML;plain+=`\nTime: ${stamp}`;
+    const time=document.createElement('p');time.textContent=`${t('Time')}: ${stamp}`;rich+=time.outerHTML;plain+=`\n${time.textContent}`;
   }
-  try{await copyRich(rich,plain);toast('Copied')}
-  catch(e){toast('Could not copy. Check clipboard permissions.')}
+  try{await copyRich(rich,plain);toast(t('Copied'))}
+  catch(e){toast(t('Could not copy. Check clipboard permissions.'))}
 }));
 // Standalone HTML and the static shelf share browser-local reading flags.
 // Embedded desktop readers hide these controls and use the app's durable toolbar.
@@ -368,14 +385,14 @@ if(actions){
     paint();
   }
   function paint(){
-    const complete=$('[data-reading-complete]',actions),label=state.isRead?'Mark Unread':'Mark Complete';
+    const complete=$('[data-reading-complete]',actions),label=t(state.isRead?'Mark Unread':'Mark Complete');
     complete.setAttribute('aria-pressed',String(state.isRead));complete.setAttribute('aria-label',label);complete.title=label;
-    const star=$('[data-reading-star]',actions);star.setAttribute('aria-pressed',String(state.isStarred));$('span',star).textContent=state.isStarred?'Starred':'Star';
+    const star=$('[data-reading-star]',actions);star.setAttribute('aria-pressed',String(state.isStarred));$('span',star).textContent=t(state.isStarred?'Starred':'Star');
   }
   function toggle(key){
     const next={...state,[key]:!state[key]};
     try{const all=storedMap();localStorage.setItem(stateStore,JSON.stringify({...all,[stateKey]:next}));state=next;paint();window.dispatchEvent(new CustomEvent('linkread-reading-state-change',{detail:{key:stateKey,...next}}))}
-    catch(e){toast('Could not save reading status in this browser.')}
+    catch(e){toast(t('Could not save reading status in this browser.'))}
   }
   $('[data-reading-complete]',actions).addEventListener('click',()=>toggle('isRead'));
   $('[data-reading-star]',actions).addEventListener('click',()=>toggle('isStarred'));
@@ -402,7 +419,7 @@ function parseAppearance(raw){
 let appearance=parseAppearance(null);
 function appearanceStatus(saved){
   const status=$('#appearance-status');
-  status.textContent=saved?'Transcript & Shownotes · Saved across articles':'Applies here; preferences could not be saved.';
+  status.textContent=t(saved?'Transcript & Shownotes · Saved across articles':'Applies here; preferences could not be saved.');
   if(saved)delete status.dataset.error;else status.dataset.error='true';
 }
 try{appearance=parseAppearance(localStorage.getItem(preferencesKey))}catch{appearanceStatus(false)}
@@ -426,7 +443,7 @@ function changeAppearance(patch){
     appearanceStatus(true);
   }catch{
     appearanceStatus(false);
-    toast('Reading appearance could not be saved in this browser.');
+    toast(t('Reading appearance could not be saved in this browser.'));
   }
   restore?.();
 }

@@ -16,7 +16,7 @@ use std::{
     os::{fd::AsRawFd, unix::{fs::{OpenOptionsExt, PermissionsExt}, process::CommandExt}},
     path::{Component, Path, PathBuf},
     process::Stdio,
-    sync::Mutex,
+    sync::{Mutex, atomic::{AtomicBool, Ordering}},
     time::Duration,
 };
 
@@ -323,6 +323,24 @@ fn stop_process(active: &mut ActiveProcess) -> AppResult<()> {
 struct Locations {
     data: PathBuf,
     library: PathBuf,
+    english: AtomicBool,
+}
+
+impl Locations {
+    fn language(&self) -> &'static str {
+        if self.english.load(Ordering::Relaxed) { "en" } else { "zh-CN" }
+    }
+}
+
+#[tauri::command]
+fn set_ui_language(locations: State<'_, Locations>, language: String) -> AppResult<()> {
+    if !matches!(language.as_str(), "en" | "zh-CN") { return Err("Unsupported interface language".into()); }
+    locations.english.store(language == "en", Ordering::Relaxed);
+    Ok(())
+}
+
+fn translated<'a>(language: Option<&str>, chinese: &'a str, english: &'a str) -> &'a str {
+    if language == Some("en") { english } else { chinese }
 }
 
 #[derive(Serialize)]
@@ -644,6 +662,7 @@ fn sidecar(locations: &Locations) -> AppResult<Command> {
         ])
         .current_dir(&locations.data)
         .env("PYTHONUTF8", "1")
+        .env("LINKREAD_UI_LANGUAGE", locations.language())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -672,13 +691,13 @@ fn subtitle_file(source: &Path) -> AppResult<()> {
 }
 
 #[tauri::command]
-async fn pick_subtitle(app: AppHandle, window: tauri::WebviewWindow) -> AppResult<Option<PathBuf>> {
+async fn pick_subtitle(app: AppHandle, window: tauri::WebviewWindow, ui_language: Option<String>) -> AppResult<Option<PathBuf>> {
     let (send, receive) = oneshot::channel();
     app.dialog()
         .file()
         .set_parent(&window)
-        .set_title("导入字幕文件")
-        .add_filter("字幕文件", &["srt", "vtt", "json"])
+        .set_title(translated(ui_language.as_deref(), "导入字幕文件", "Import subtitles"))
+        .add_filter(translated(ui_language.as_deref(), "字幕文件", "Subtitle files"), &["srt", "vtt", "json"])
         .pick_file(move |file| {
             let _ = send.send(file);
         });
@@ -701,9 +720,9 @@ async fn check_ffmpeg(path: String) -> environment::FfmpegStatus {
 }
 
 #[tauri::command]
-async fn locate_ffmpeg(app: AppHandle, window: tauri::WebviewWindow) -> AppResult<Option<environment::FfmpegStatus>> {
+async fn locate_ffmpeg(app: AppHandle, window: tauri::WebviewWindow, ui_language: Option<String>) -> AppResult<Option<environment::FfmpegStatus>> {
     let (send, receive) = oneshot::channel();
-    app.dialog().file().set_parent(&window).set_title("选择 FFmpeg 可执行程序")
+    app.dialog().file().set_parent(&window).set_title(translated(ui_language.as_deref(), "选择 FFmpeg 可执行程序", "Choose the FFmpeg executable"))
         .pick_file(move |file| { let _ = send.send(file); });
     let Some(file) = receive.await.map_err(|_| "无法打开文件选择窗口".to_owned())? else { return Ok(None) };
     let path = file.into_path().map_err(|_| "无法访问所选程序".to_owned())?;
@@ -728,13 +747,18 @@ async fn generate(
     replace: Option<bool>,
     asr: Option<AsrOptions>,
     resume_preview: Option<String>,
+    page_language: Option<String>,
+    ui_language: Option<String>,
 ) -> GenerationResult<Article> {
     state.begin(&request_id).map_err(|error| if error == "已取消生成" { GenerationFailure::cancelled() } else { GenerationFailure::core(error) })?;
     let command = generation_command(&locations, &source, provider, &executable,
         base_url.as_deref(), model.as_deref(), replace.unwrap_or(false),
-        local_file.unwrap_or(false), asr.as_ref(), resume_preview.as_deref());
+        local_file.unwrap_or(false), asr.as_ref(), resume_preview.as_deref(), page_language.as_deref());
     let result = match command {
-        Ok(mut command) => run_generation(&state, &request_id, &mut command, progress).await,
+        Ok(mut command) => {
+            if let Some(language @ ("en" | "zh-CN")) = ui_language.as_deref() { command.env("LINKREAD_UI_LANGUAGE", language); }
+            run_generation(&state, &request_id, &mut command, progress).await
+        }
         Err(error) => Err(error),
     };
     if state.finish(&request_id) {
@@ -754,6 +778,7 @@ fn generation_command(
     local_file: bool,
     asr: Option<&AsrOptions>,
     resume_preview: Option<&str>,
+    page_language: Option<&str>,
 ) -> GenerationResult<Command> {
     if let Some(id) = resume_preview { preview_id(id).map_err(|e| GenerationFailure::context(e, "source", "source"))?; }
     if local_file {
@@ -762,7 +787,7 @@ fn generation_command(
     } else { video_url(source).map_err(|e| GenerationFailure::context(e, "source", "source"))?; }
     let command = sidecar(locations).map_err(|e| GenerationFailure::context(e, "core_setup", "setup"))?;
     configure_generation_with_resume(command, locations, source, provider, executable,
-                         base_url, model, replace, local_file, asr, resume_preview)
+                         base_url, model, replace, local_file, asr, resume_preview, page_language)
         .map_err(|e| GenerationFailure::context(e, "configuration", "settings"))
 }
 
@@ -778,12 +803,13 @@ fn configure_generation(
     local_file: bool,
     asr: Option<&AsrOptions>,
 ) -> AppResult<Command> {
-    configure_generation_with_resume(command, locations, source, provider, executable, base_url, model, replace, local_file, asr, None)
+    configure_generation_with_resume(command, locations, source, provider, executable, base_url, model, replace, local_file, asr, None, None)
 }
 
 fn configure_generation_with_resume(
     mut command: Command, locations: &Locations, source: &str, provider: Provider, executable: &str,
     base_url: Option<&str>, model: Option<&str>, replace: bool, local_file: bool, asr: Option<&AsrOptions>, resume_preview: Option<&str>,
+    page_language: Option<&str>,
 ) -> AppResult<Command> {
     // Validate the source independently from configuring the selected provider.
     // File imports must carry the same API/Codex/Claude options as videos.
@@ -799,6 +825,10 @@ fn configure_generation_with_resume(
     }
     let mut paths = command_paths();
     command.args(["generate", "--provider", provider.command()]);
+    if let Some(language) = page_language {
+        if !matches!(language, "original" | "en" | "zh-CN") { return Err("Unsupported generated page language".into()); }
+        command.args(["--page-language", language]);
+    }
     if let Some(id) = resume_preview { preview_id(id)?; command.args(["--resume-preview", id]); }
     if replace { command.arg("--replace"); }
     if local_file { command.arg("--local-file"); }
@@ -1120,7 +1150,9 @@ fn preview_response(locations: &Locations, uri: &http::Uri) -> http::Response<Ve
         });
     let (status, html) = match html {
         Some(html) => (http::StatusCode::OK, preview_document(html)),
-        None => (http::StatusCode::NOT_FOUND, "<!doctype html><html lang=zh-CN><meta charset=utf-8><p>无法读取这篇文章，请刷新书架。</p>".into()),
+        None => (http::StatusCode::NOT_FOUND, format!(
+            "<!doctype html><html lang={}><meta charset=utf-8><p>{}</p>", locations.language(),
+            translated(Some(locations.language()), "无法读取这篇文章，请刷新书架。", "Could not read this article. Reload the library and try again."))),
     };
     http::Response::builder()
         .status(status)
@@ -1179,6 +1211,7 @@ async fn export_article(
     id: String,
     format: ExportFormat,
     options: Option<MarkdownExportOptions>,
+    ui_language: Option<String>,
 ) -> AppResult<bool> {
     #[derive(Deserialize)]
     struct Markdown {
@@ -1196,7 +1229,7 @@ async fn export_article(
     app.dialog()
         .file()
         .set_parent(&window)
-        .set_title(format!("导出 {kind}"))
+        .set_title(format!("{} {kind}", translated(ui_language.as_deref(), "导出", "Export")))
         .add_filter(kind, &[extension])
         .set_file_name(format!("{title}.{extension}"))
         .save_file(move |file| {
@@ -1337,10 +1370,11 @@ fn main() {
                 .map(PathBuf::from)
                 .filter(|path| path.is_absolute())
                 .unwrap_or_else(|| data.join("library"));
-            app.manage(Locations { data, library });
+            app.manage(Locations { data, library, english: AtomicBool::new(false) });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            set_ui_language,
             get_article_details,
             update_article_details,
             update_article_state,
@@ -1390,12 +1424,13 @@ fn main() {
 mod tests {
     use super::{article_file, fs, preview_document, validated_api_base_url, remove_article_files, saved_transcript_file, configure_generation, Locations, Provider, Generation, SidecarEvent};
     use std::{path::Path, process::Stdio, time::{Duration, Instant}};
+    use std::sync::atomic::AtomicBool;
     use tokio::process::Command;
 
     #[test]
     fn asr_test_uses_the_explicit_draft_and_never_falls_back_from_an_empty_draft() {
         let dir = tempfile::tempdir().unwrap();
-        let locations = Locations { data: dir.path().join("data"), library: dir.path().join("library") };
+        let locations = Locations { data: dir.path().join("data"), library: dir.path().join("library"), english: AtomicBool::new(false) };
         super::credentials::store(&locations.data, "saved-chat-key").unwrap();
         super::credentials::store_asr(&locations.data, "saved-asr-key").unwrap();
         let mut options = super::AsrOptions {
@@ -1419,7 +1454,7 @@ mod tests {
     #[test]
     fn an_explicit_asr_test_key_does_not_read_the_saved_credential() {
         let dir = tempfile::tempdir().unwrap();
-        let locations = Locations { data: dir.path().join("data"), library: dir.path().join("library") };
+        let locations = Locations { data: dir.path().join("data"), library: dir.path().join("library"), english: AtomicBool::new(false) };
         fs::create_dir_all(locations.data.join("api-token")).unwrap();
         let options = super::AsrOptions {
             enabled: true, reuse_token: true,
@@ -1591,7 +1626,7 @@ mod tests {
     #[test]
     fn local_generation_passes_api_configuration_without_token_in_arguments() {
         let root = tempfile::tempdir().unwrap();
-        let locations = Locations { data: root.path().to_path_buf(), library: root.path().join("library") };
+        let locations = Locations { data: root.path().to_path_buf(), library: root.path().join("library"), english: AtomicBool::new(false) };
         let source = root.path().join("captions.srt");
         fs::write(&source, "1\n00:00:00,000 --> 00:00:01,000\nhello\n").unwrap();
         super::credentials::store(&locations.data, "private-test-token").unwrap();
@@ -1610,7 +1645,7 @@ mod tests {
     #[test]
     fn generation_passes_the_selected_ffmpeg_path_as_one_argument() {
         let root = tempfile::tempdir().unwrap();
-        let locations = Locations { data: root.path().to_path_buf(), library: root.path().join("library") };
+        let locations = Locations { data: root.path().to_path_buf(), library: root.path().join("library"), english: AtomicBool::new(false) };
         super::credentials::store(&locations.data, "private-test-token").unwrap();
         let options: super::AsrOptions = serde_json::from_value(serde_json::json!({
             "enabled":true,"reuseToken":false,"baseUrl":"https://dashscope.aliyuncs.com/api/v1",

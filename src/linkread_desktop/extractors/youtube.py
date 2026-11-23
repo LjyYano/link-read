@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from ..errors import ExtractionError, SubtitleUnavailableError
 from ..models import SourceInfo, TranscriptDocument
@@ -65,16 +66,25 @@ def _language_rank(language: str) -> int:
 
 def _choose_caption(info: dict) -> tuple[str, dict, bool] | None:
     candidates = []
+    declared = info.get("language")
+    source = declared.lower().split("-")[0] if isinstance(declared, str) else ""
     for is_auto, field in enumerate(("subtitles", "automatic_captions")):
         for language, tracks in (info.get(field) or {}).items():
             for track in tracks:
                 ext = track.get("ext", "").lower()
                 if ext in {"vtt", "srt"} and track.get("url"):
-                    candidates.append((_language_rank(language), is_auto, 0 if ext == "vtt" else 1, language, track))
+                    code = language.removesuffix("-orig")
+                    query = parse_qs(urlsplit(track["url"]).query)
+                    translated = bool(query.get("tlang")) and query.get("tlang") != query.get("lang")
+                    original = language.endswith("-orig") or (source and code.lower().split("-")[0] == source)
+                    # Keep the previous preference where there is no original
+                    # language signal. A known machine-translated track is last.
+                    rank = (translated, not original, _language_rank(code), is_auto, ext != "vtt")
+                    candidates.append((rank, code, track, bool(is_auto)))
     if not candidates:
         return None
-    _, is_auto, _, language, track = sorted(candidates, key=lambda item: item[:3])[0]
-    return language, track, bool(is_auto)
+    _, language, track, is_auto = min(candidates, key=lambda item: item[0])
+    return language, track, is_auto
 
 
 def _source_info(info: dict, url: str) -> SourceInfo:

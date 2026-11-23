@@ -1,6 +1,18 @@
-import { Channel, invoke } from "@tauri-apps/api/core"
+import { tr, locale, localizedDetail, type PageLanguage, type Locale } from "./language.ts"
+import { Channel, invoke as invokeNative, type InvokeArgs } from "@tauri-apps/api/core"
 import type { AsrOptions } from "./asrSettings"
 import type { TaskJournal } from "./taskJournal"
+
+function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
+  return invokeNative<T>(command, args).catch(error => {
+    if (typeof error === "string" && locale() === "en") {
+      throw localizedDetail(error, "The operation could not be completed. Check settings or try again.")
+    }
+    throw error
+  })
+}
+
+export const setNativeLanguage = (language: Locale) => invoke<void>("set_ui_language", { language })
 
 export type Provider = "codex" | "claude" | "api"
 export type ExportFormat = "html" | "markdown"
@@ -31,7 +43,7 @@ export type Article = {
 }
 
 export type RequestActivity = {
-  sequence: number; id: string; stage: "analysis" | "polish" | "publication" | null
+  sequence: number; id: string; stage: "analysis" | "polish" | "publication" | "translation" | null
   phase: "queued" | "running" | "received" | "validating" | "complete" | "cache" | "failed"
   active: number; queued: number; validating: number; completed: number; cacheHits: number
 }
@@ -70,8 +82,8 @@ export type Library = { articles: Article[]; unavailable: number }
 export type Duplicate = { key: string | null; article: Article | null }
 export type ToolStatus = { executable: string | null; keyAvailable: boolean }
 
-export const providerNames = { codex: "Codex", claude: "Claude Code", api: "自定义 API" }
-export const platformNames = { youtube: "YouTube", bilibili: "Bilibili", apple_podcasts: "Apple 播客", local: "本地字幕" }
+export const providerNames = { codex: "Codex", claude: "Claude Code", get api() { return tr("自定义 API") } }
+export const platformNames = { youtube: "YouTube", bilibili: "Bilibili", get apple_podcasts() { return tr("Apple 播客") }, get local() { return tr("本地字幕") } }
 
 export function generateArticle(
   source: string,
@@ -85,9 +97,11 @@ export function generateArticle(
   model = "",
   asr?: AsrOptions,
   resumePreview?: string,
+  pageLanguage: PageLanguage = "original",
 ) {
   const progress = new Channel<Progress>(onProgress)
-  return invoke<Article>("generate", { source, provider, executable, progress, requestId, localFile, replace, baseUrl, model, asr, resumePreview })
+  return invoke<Article>("generate", { source, provider, executable, progress, requestId, localFile, replace, baseUrl, model, asr,
+    resumePreview, pageLanguage, uiLanguage: locale() })
 }
 
 export const cancelGeneration = (requestId: string) => invoke("cancel_generation", { requestId })
@@ -95,13 +109,13 @@ export const listArticles = () => invoke<Library>("list_articles")
 export const checkTool = (provider: Provider, executable: string) =>
   invoke<ToolStatus>("check_tool", { provider, executable })
 export const exportArticle = (id: string, format: ExportFormat, options?: MarkdownExportOptions) =>
-  invoke<boolean>("export_article", { id, format, ...(options ? { options } : {}) })
+  invoke<boolean>("export_article", { id, format, uiLanguage: locale(), ...(options ? { options } : {}) })
 export const getArticleDetails = (id: string) => invoke<ArticleDetails>("get_article_details", { id })
 export const updateArticleDetails = (id: string, title: string | null, category: string | null) =>
   invoke<Article>("update_article_details", { id, title, category })
 export const openVideo = (source: string) => invoke("open_video", { source })
 export const openExternal = (url: string) => invoke("open_external", { url })
-export const pickSubtitle = () => invoke<string | null>("pick_subtitle")
+export const pickSubtitle = () => invoke<string | null>("pick_subtitle", { uiLanguage: locale() })
 export const openArticle = (id: string) => invoke("open_article", { id })
 export const revealArticle = (id: string) => invoke("reveal_article", { id })
 
@@ -151,6 +165,6 @@ export type FfmpegStatus = {
   message: string
 }
 export const checkFfmpeg = (path = "") => invoke<FfmpegStatus>("check_ffmpeg", { path })
-export const locateFfmpeg = () => invoke<FfmpegStatus | null>("locate_ffmpeg")
+export const locateFfmpeg = () => invoke<FfmpegStatus | null>("locate_ffmpeg", { uiLanguage: locale() })
 
 export const articleTranscriptPath = (id: string) => invoke<string>("article_transcript_path", { id })

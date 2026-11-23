@@ -1,3 +1,4 @@
+import { tr } from "./language.ts"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ChevronDown, CircleCheck, Clock3, ListTodo, Trash2, X } from "lucide-react"
 import { JobRow, type TaskJob } from "./Home"
@@ -130,7 +131,7 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
   async function clearReviewed() {
     if (clearing || !removable.length) return
     const selected = [...removable]
-    if (!window.confirm(`清理 ${selected.length} 条已查看的任务记录？\n仅移除这些已结束的记录，已保存的字幕和处理缓存不会删除。`)) return
+    if (!window.confirm(tr("清理 {0} 条已查看的任务记录？\n仅移除这些已结束的记录，已保存的字幕和处理缓存不会删除。", selected.length))) return
     setClearing(true)
     setClearError("")
     try { await onClearReviewed(selected) } catch (error) { setClearError(String(error)) }
@@ -166,30 +167,30 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
       if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose()
     }}>
     <header className="task-center-header">
-      <h2 id={`${id}-title`}><ListTodo size={19} aria-hidden="true" />任务</h2>
-      <button ref={closeButton} className="icon-button" type="button" aria-label="关闭任务中心" title="关闭 (Esc)" onClick={onClose}>
+      <h2 id={`${id}-title`}><ListTodo size={19} aria-hidden="true" />{tr("任务")}</h2>
+      <button ref={closeButton} className="icon-button" type="button" aria-label={tr("关闭任务中心")} title={tr("关闭 (Esc)")} onClick={onClose}>
         <X size={18} aria-hidden="true" />
       </button>
     </header>
-    <p id={`${id}-description`} className="sr-only">查看处理进度、排队与待处理记录。任务在后台继续运行。</p>
+    <p id={`${id}-description`} className="sr-only">{tr("查看处理进度、排队与待处理记录。任务在后台继续运行。")}</p>
     <div ref={scrollArea} className="task-center-body">
       {journalError && <div className="task-center-error" role="alert">
         <p>{journalError}</p>
-        {onRetryJournal && <button type="button" className="text-button" onClick={onRetryJournal}>重试任务记录</button>}
+        {onRetryJournal && <button type="button" className="text-button" onClick={onRetryJournal}>{tr("重试任务记录")}</button>}
       </div>}
       {groups.active.length > 0 && <section className="task-center-section" aria-labelledby={`${id}-active`}>
-        <h3 id={`${id}-active`}>处理中<span>{groups.active.length}</span></h3>
+        <h3 id={`${id}-active`}>{tr("处理中")}<span>{groups.active.length}</span></h3>
         <ul className="task-list">{groups.active.map(record)}</ul>
       </section>}
       {groups.queued.length > 0 && <section className="task-center-section" aria-labelledby={`${id}-queued`}>
-        <h3 id={`${id}-queued`}>等待中<span>{groups.queued.length}</span></h3>
+        <h3 id={`${id}-queued`}>{tr("等待中")}<span>{groups.queued.length}</span></h3>
         <ol className="task-center-queue">
           {groups.queued.map((task, index) => <li key={task.id} data-task-id={task.id}>
             <span className="task-center-queue-icon"><Clock3 size={17} aria-hidden="true" /></span>
             <span className="task-center-queue-copy"><strong title={task.job.status !== "done" ? task.job.title : undefined}>
-              {task.job.status !== "done" ? task.job.title || "新文章" : "新文章"}
-            </strong><small>{index + groups.active.length ? `前方 ${index + groups.active.length} 个任务` : "等待启动"}</small></span>
-            <button className="icon-button" type="button" title="取消排队" aria-label="取消排队" onClick={() => onCancel(task.id)}>
+              {task.job.status !== "done" ? task.job.title || tr("新文章") : tr("新文章")}
+            </strong><small>{index + groups.active.length ? tr("前方 {0} 个任务", index + groups.active.length) : tr("等待启动")}</small></span>
+            <button className="icon-button" type="button" title={tr("取消排队")} aria-label={tr("取消排队")} onClick={() => onCancel(task.id)}>
               <X size={16} aria-hidden="true" />
             </button>
           </li>)}
@@ -199,8 +200,8 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
         <h3 id={`${id}-attention`}>
           <button type="button" className="task-center-disclosure" aria-expanded={attentionOpen} aria-controls={`${id}-attention-list`}
             onClick={() => setAttentionOpen(open => !open)}>
-            <span>需处理<span className="task-center-count">{groups.attention.length}</span></span>
-            <span>{unseen.length > 0 && <small className="task-center-unseen">{unseen.length} 条未查看</small>}
+            <span>{tr("需处理")}<span className="task-center-count">{groups.attention.length}</span></span>
+            <span>{unseen.length > 0 && <small className="task-center-unseen">{unseen.length} {tr("条未查看")}</small>}
               <ChevronDown size={16} aria-hidden="true" /></span>
           </button>
         </h3>
@@ -212,7 +213,7 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
         <h3 id={`${id}-completed`}>
           <button className="task-center-disclosure" type="button" aria-expanded={completedOpen}
             aria-controls={`${id}-completed-list`} onClick={() => setCompletedOpen(open => !open)}>
-            <span>最近完成<span className="task-center-count">{completed.length}</span></span>
+            <span>{tr("最近完成")}<span className="task-center-count">{completed.length}</span></span>
             <ChevronDown size={16} aria-hidden="true" />
           </button>
         </h3>
@@ -220,22 +221,22 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
           {completed.map(article => <li key={article.id}>
             <span className="task-center-queue-icon"><CircleCheck size={16} aria-hidden="true" /></span>
             <span className="task-center-queue-copy"><strong title={article.title}>{article.title}</strong></span>
-            <button className="text-button" type="button" aria-label={`打开文章《${article.title}》`}
+            <button className="text-button" type="button" aria-label={tr("打开文章《{0}》", article.title)}
               data-completed-article={article.id}
-              onClick={() => onOpenArticle(article)}>打开文章</button>
+              onClick={() => onOpenArticle(article)}>{tr("打开文章")}</button>
           </li>)}
         </ul>
       </section>}
       {!groups.active.length && !groups.queued.length && !groups.attention.length && !completed.length && <div className="task-center-empty" role="status">
         <CircleCheck size={26} strokeWidth={1.5} aria-hidden="true" />
-        <strong>没有待处理任务</strong>
+        <strong>{tr("没有待处理任务")}</strong>
       </div>}
     </div>
     <footer className="task-center-footer">
       {clearError && <p className="task-center-error" role="alert">{clearError}</p>}
       <button className="text-button" type="button" disabled={clearing || !removable.length}
-        onClick={() => void clearReviewed()} title="仅清理已查看且已结束的任务记录，保留字幕与缓存">
-        <Trash2 size={14} aria-hidden="true" />{clearing ? "正在清理…" : "清理已查看记录"}
+        onClick={() => void clearReviewed()} title={tr("仅清理已查看且已结束的任务记录，保留字幕与缓存")}>
+        <Trash2 size={14} aria-hidden="true" />{clearing ? tr("正在清理…") : tr("清理已查看记录")}
         {removable.length > 0 && <span>({removable.length})</span>}
       </button>
     </footer>

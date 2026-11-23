@@ -54,7 +54,8 @@ export const getCurrentWindow = () => ({})
 export async function invoke<T>(command: string, args: any = {}): Promise<T> {
   fixture.calls.push({ command, args: clone({ ...args, ...(args.progress ? { progress: 'test-channel' } : {}) }) })
   let result: any
-  if (command === 'load_task_journal') result = clone(fixture.journal)
+  if (command === 'set_ui_language') result = null
+  else if (command === 'load_task_journal') result = clone(fixture.journal)
   else if (command === 'save_task_journal') {
     if (fixture.failJournal) throw Error('QA: task journal is temporarily unwritable')
     fixture.journal = clone(args.journal)

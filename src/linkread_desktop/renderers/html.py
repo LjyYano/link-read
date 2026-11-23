@@ -8,11 +8,13 @@ from ..ai.polish import group_source_blocks
 from ..errors import LinkReadError
 from ..models import TranscriptDocument
 from ..quotes import QuoteCard, context_bounds
+from ..translation import ReadingEdition, join_translation, page_locale, source_language
 from .emphasis import render_emphasis
 from .extras import ArticleExtras, ReadingSection
 from .formatting import display_title, duration_label, group_paragraphs, source_link, video_link
 from .notes import highlights_panel, note_fragments, note_quotes, overview_panel
 from .icons import icon
+from .labels import ZH, page_label
 from .overview import note_overview, section_title
 from .reading_state import reading_state_key
 from .shownotes import shownotes_panel
@@ -22,24 +24,24 @@ from .templates import fill_template, json_data
 _LABELS = {"bilibili": "Bilibili", "youtube": "YouTube", "apple_podcasts": "Apple Podcasts"}
 
 
-def _metadata(document: TranscriptDocument) -> str:
+def _metadata(document: TranscriptDocument, language: str) -> str:
     src = document.source
     parts = [f"<span>{escape(src.author)}</span>"] if src.author else []
     if src.published_at:
-        parts.append(f'<span title="Published">{escape(src.published_at[:10])}</span>')
+        parts.append(f'<span title="{page_label(language, "Published")}">{escape(src.published_at[:10])}</span>')
     if src.duration_ms is not None:
-        parts.append(f'<span title="Duration">{duration_label(src.duration_ms)}</span>')
+        parts.append(f'<span title="{page_label(language, "Duration")}">{duration_label(src.duration_ms)}</span>')
     if source_link(document):
         parts.append(f'<span>{video_link(document, _LABELS[src.platform])}</span>')
     return '<div class="meta">' + "".join(parts) + '</div>' if parts else ""
 
 
-def _reading_notice(note: NoteDocument | None) -> str:
+def _reading_notice(note: NoteDocument | None, language: str) -> str:
     fallback = sum(not item.edited for item in note.analysis.reading_paragraphs) if note else 0
-    return (f'<details class="callout reading-fallback"><summary>Original wording kept in {fallback} paragraph(s)</summary>'
-            '<p>The punctuation pass changed some words, so these paragraphs retain the original text. '
-            'Nothing was removed, but punctuation may still need attention. This checks wording, not factual accuracy.</p></details>'
-            if fallback else "")
+    label = page_label(language, "Original wording kept in {count} paragraph(s)").format(count=fallback)
+    description = page_label(language, "The punctuation pass changed some words, so these paragraphs retain the original text. "
+        "Nothing was removed, but punctuation may still need attention. This checks wording, not factual accuracy.")
+    return f'<details class="callout reading-fallback"><summary>{label}</summary><p>{description}</p></details>' if fallback else ""
 
 
 def _reading_paragraphs(document: TranscriptDocument, note: NoteDocument | None):
@@ -61,11 +63,14 @@ def _reading_paragraphs(document: TranscriptDocument, note: NoteDocument | None)
 
 def _article(
     document: TranscriptDocument, note: NoteDocument | None, chapters: list[ReadingSection],
-    cards: list[QuoteCard],
+    cards: list[QuoteCard], edition: ReadingEdition | None = None,
 ) -> tuple[str, str]:
     next_chapter = 0
     sections = []
     toc = []
+    source_lang = source_language(document)
+    original_lang = f' lang="{escape(source_lang, quote=True)}"' if source_lang else ""
+    translations = edition.cues if edition is not None else None
     marked = [(context_bounds(document, card.start_segment_index, card.end_segment_index), card)
               for card in cards if card.bold or card.red]
     for index, (start, end, text, subheading, fallback, bold, red) in enumerate(_reading_paragraphs(document, note), 1):
@@ -83,17 +88,27 @@ def _article(
         if not sections:
             sections.append('<section class="transcript-section" id="opening">')
         if subheading:
-            sections.append(f"<h3>{escape(subheading)}</h3>")
+            visibility = ' data-transcript-version="original" hidden' if translations is not None else ""
+            sections.append(f"<h3{visibility}>{escape(subheading)}</h3>")
         css = "reading-paragraph unpolished" if fallback else "reading-paragraph"
         for (first, last), card in marked:
             if start <= last and end >= first:
                 bold = bold + card.bold
                 red = red + card.red
         chunks = [chunk for chunk in text.split("\n\n") if chunk.strip()] or [text]
+        # The same paragraph and cue anchors serve both versions. Preserve all
+        # source text inside that paragraph even when its translation reflows.
+        if translations is not None:
+            original = "<br><br>".join(render_emphasis(chunk, bold, red, match_lexical=True) for chunk in chunks)
+            translated = join_translation(translations[start:end + 1], edition.language)
+            sections.append(f'<p class="{css}" id="para-{index}" data-cue-start="{start}" data-cue-end="{end}">'
+                f'<span data-transcript-version="translation" lang="{edition.language}">{escape(translated)}</span>'
+                f'<span data-transcript-version="original"{original_lang} hidden>{original}</span></p>')
+            continue
         for number, chunk in enumerate(chunks, 1):
             paragraph_id = f"para-{index}" if number == 1 else f"para-{index}-{number}"
             sections.append(
-                f'<p class="{css}" id="{paragraph_id}" data-cue-start="{start}" data-cue-end="{end}">'
+                f'<p class="{css}" id="{paragraph_id}" data-cue-start="{start}" data-cue-end="{end}"{original_lang}>'
                 f"{render_emphasis(chunk, bold, red, match_lexical=True)}</p>"
             )
     sections.append("</section>")
@@ -111,11 +126,18 @@ def _tab(name: str, label: str) -> str:
 def render_html(
     document: TranscriptDocument | NoteDocument, *, home_href: str | None = None,
     category: str | None = None, description: str | None = None, extras: ArticleExtras | None = None,
-    title: str | None = None, reading_state: dict | None = None,
+    title: str | None = None, reading_state: dict | None = None, edition: ReadingEdition | None = None,
+    language: str | None = None,
 ) -> str:
     """Fill the bundled html-library article template for single-file offline use."""
     note = document if isinstance(document, NoteDocument) else None
     transcript = note.transcript if note else document
+    if edition:
+        edition.verify(transcript)
+    language = language or (page_locale(transcript, edition.language) if edition else "en")
+    def label(text: str) -> str:
+        return page_label(language, text)
+
     title = title if title is not None else display_title(transcript)
     overview = extras.reading if extras else None
     if overview is None and note:
@@ -130,11 +152,11 @@ def render_html(
             raise LinkReadError(f"金句文件无效：{exc}") from exc
         cards = extras.quotes.cards
     else:
-        cards = note_quotes(note) if note else []
-    article, toc = _article(transcript, note, chapters, cards)
-    panels = note_fragments(note) if note else {}
+        cards = note_quotes(note, language=language) if note else []
+    article, toc = _article(transcript, note, chapters, cards, edition)
+    panels = note_fragments(note, language=language) if note else {}
     if overview:
-        panels["summary"] = overview_panel(overview)
+        panels["summary"] = overview_panel(overview, language=language)
     resources = files(__package__)
     mindmap_style = ""
     mindmap_scripts = ""
@@ -142,7 +164,7 @@ def render_html(
         links = extras.mindmap_links.verified(extras.mindmap, transcript) if extras.mindmap_links else {}
         panels["mindmap"] = fill_template("mindmap.html", {
             "MINDMAP_DATA": json_data(extras.mindmap), "MINDMAP_LINKS": json_data(links),
-        })
+        }, language=language)
         css = resources.joinpath("mindmap.css").read_text(encoding="utf-8")
         mindmap_style = f'<style id="yano-car-cost-mindmap-style">\n{css}</style>'
         vendor = resources.joinpath("vendor")
@@ -157,42 +179,51 @@ def render_html(
         mindmap_scripts = (f'<!--\n{notices}\n-->\n{libraries}\n'
                            f'<script id="yano-car-cost-mindmap-init">\n{script}</script>')
     if cards:
-        panels["highlights"] = highlights_panel(transcript, cards, title=title)
-    shownotes = shownotes_panel(transcript.source, transcript=transcript)
+        panels["highlights"] = highlights_panel(transcript, cards, title=title, language=language, edition=edition)
+    shownotes = shownotes_panel(transcript.source, transcript=transcript, language=language)
     if shownotes:
         panels["shownotes"] = shownotes
     tabs = {
         "summary": "Summary", "mindmap": "Mindmap", "transcript": "Transcript", "keywords": "Keywords",
         "highlights": "Highlights", "shownotes": "Shownotes",
     }
-    tabs_html = "".join(_tab(name, label) for name, label in tabs.items()
+    tabs_html = "".join(_tab(name, label(text)) for name, text in tabs.items()
                         if name in panels or name == "transcript")
     home = escape(home_href, quote=True) if home_href is not None else None
     state = reading_state or {}
     read, starred = state.get("isRead") is True, state.get("isStarred") is True
+    action = label("Mark Unread" if read else "Mark Complete")
     reading_actions = (
         f'<div class="reading-actions" data-reading-actions data-reading-key="{escape(reading_state_key(transcript), quote=True)}" '
         f'data-is-read="{str(read).lower()}" data-is-starred="{str(starred).lower()}">'
         f'<button type="button" data-reading-complete aria-pressed="{str(read).lower()}" '
-        f'aria-label="{"Mark Unread" if read else "Mark Complete"}" '
-        f'title="{"Mark Unread" if read else "Mark Complete"}">{icon("complete")}</button>'
+        f'aria-label="{action}" title="{action}">{icon("complete")}</button>'
         f'<button type="button" data-reading-star aria-pressed="{str(starred).lower()}">{icon("star")}'
-        f'<span>{"Starred" if starred else "Star"}</span></button></div>'
+        f'<span>{label("Starred" if starred else "Star")}</span></button></div>'
     )
+    transcript_switch = (
+        f'<div class="transcript-versions reader-segmented" role="group" aria-label="{label("Transcript version")}">'
+        f'<button type="button" data-select-transcript="translation" aria-pressed="true">{label("Translation")}</button>'
+        f'<button type="button" data-select-transcript="original" aria-pressed="false">{label("Original")}</button></div>'
+        if edition and edition.cues is not None else ""
+    )
+    strings = json_data(ZH if language == "zh-CN" else {})
     return fill_template("reader.html", {
+        "PAGE_LANGUAGE": "zh-CN" if language == "zh-CN" else "en",
         "TITLE": escape(title),
         "DESCRIPTION": escape(description or (overview.lead if overview else title)),
-        "HOME": f'<a href="{home}">Library</a>' if home else "<span>Library</span>",
-        "SIDEBAR_HOME": f'<a href="{home}">Yano · Library</a>' if home else "Yano · Library",
+        "HOME": f'<a href="{home}">{label("Library")}</a>' if home else f'<span>{label("Library")}</span>',
+        "SIDEBAR_HOME": f'<a href="{home}">{label("Yano · Library")}</a>' if home else label("Yano · Library"),
         "CATEGORY": f'<span>/</span><span>{escape(category)}</span>' if category else "",
-        "METADATA": _metadata(transcript),
+        "METADATA": _metadata(transcript, language),
         "READING_ACTIONS": reading_actions,
         "TABS": tabs_html,
-        "SIDEBAR_TOC": (f'<div class="toc-label">Contents</div><nav class="toc" aria-label="Contents">{toc}</nav>'
+        "SIDEBAR_TOC": (f'<div class="toc-label">{label("Contents")}</div><nav class="toc" aria-label="{label("Contents")}">{toc}</nav>'
                         if toc else ""),
-        "MOBILE_TOC": (f'<details class="mobile-toc"><summary>Contents</summary><nav>{toc}</nav></details>'
+        "MOBILE_TOC": (f'<details class="mobile-toc"><summary>{label("Contents")}</summary><nav>{toc}</nav></details>'
                        if toc else ""),
-        "READING_NOTICE": _reading_notice(note),
+        "READING_NOTICE": "" if edition and edition.cues is not None else _reading_notice(note, language),
+        "TRANSCRIPT_SWITCH": transcript_switch,
         "ARTICLE": article,
         "SUMMARY_PANEL": panels.get("summary", ""),
         "MINDMAP_PANEL": panels.get("mindmap", ""),
@@ -201,6 +232,7 @@ def render_html(
         "KEYWORDS_PANEL": panels.get("keywords", ""),
         "HIGHLIGHTS_PANEL": panels.get("highlights", ""),
         "SHOWNOTES_PANEL": panels.get("shownotes", ""),
+        "READER_LABELS": strings,
         "READER_SCRIPT": (resources.joinpath("reading-position.js").read_text(encoding="utf-8")
                           + "\n" + resources.joinpath("reader.js").read_text(encoding="utf-8")),
-    })
+    }, language=language)

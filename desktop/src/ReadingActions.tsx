@@ -1,3 +1,4 @@
+import { tr } from "./language.ts"
 import { useRef, useState } from "react"
 import { Circle, CircleCheck, Star, X } from "lucide-react"
 import type { Article, ArticleStatePatch } from "./api"
@@ -7,8 +8,8 @@ import "./reading-actions.css"
 export type ChangeArticleState = (id: string, patch: ArticleStatePatch) => Promise<void>
 
 const labels = {
-  unread: "Mark Unread", read: "Mark Complete", unstar: "Unstar", star: "Star", starred: "Starred",
-  saveError: "Could not save.", dismissError: "Dismiss error",
+  unread: tr("Mark Unread"), read: tr("Mark Complete"), unstar: tr("Unstar"), star: tr("Star"), starred: tr("Starred"),
+  saveError: tr("Could not save."), dismissError: tr("Dismiss error"),
 } as const
 
 export function ReadingActions({ article, onChange, compact = false, className = "", nativeTooltips = true }: {
@@ -38,7 +39,7 @@ export function ReadingActions({ article, onChange, compact = false, className =
   }
 
   return <div className={`reading-actions${compact ? " reading-actions-compact" : ""} ${className}`}
-    role="group" aria-label={`Reading status: ${article.title}`} aria-busy={pending}>
+    role="group" aria-label={tr("Reading status: {0}", article.title)} aria-busy={pending}>
     <button type="button" className="reading-state-button reading-complete-button" disabled={pending}
       aria-pressed={state.isRead} aria-label={completeLabel}
       title={nativeTooltips ? completeLabel : undefined} onClick={() => void save({ isRead: !state.isRead })}>

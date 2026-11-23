@@ -1,3 +1,4 @@
+import { localizedDetail, tr } from "./language.ts"
 import { normalizeVideoLink } from "./videoLinks"
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import {
@@ -138,7 +139,7 @@ function Cover({ platform, thumbnailUrl, title, sourceUrl, withBackdrop }: Artic
     <span ref={cover} className="shelf-cover" data-platform={platform}
       data-cover-tone={text.tone} data-cover-loaded={Boolean(showCover && loaded === resolved)} aria-hidden="true">
       <span className="cover-typography">
-        <span className="cover-kicker">LINKREAD / {platform === "local" ? "字幕笔记" : platform === "apple_podcasts" ? "播客笔记" : "阅读笔记"}</span>
+        <span className="cover-kicker">LINKREAD / {platform === "local" ? tr("字幕笔记") : platform === "apple_podcasts" ? tr("播客笔记") : tr("阅读笔记")}</span>
         <span className="cover-title" data-compact={text.compact}>{text.label}</span>
         <span className="cover-rule" />
       </span>
@@ -257,7 +258,7 @@ function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkd
   }
 
   function remove() {
-    if (!window.confirm("确认永久删除《" + article.title + "》？\n本地字幕、AI 笔记、HTML 阅读页都会一起删除，且无法撤销。")) return
+    if (!window.confirm(tr("确认永久删除《") + article.title + tr("》？\n本地字幕、AI 笔记、HTML 阅读页都会一起删除，且无法撤销。"))) return
     void perform(() => onDelete(article.id))
   }
 
@@ -274,35 +275,35 @@ function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkd
       setOpen(false)
       trigger.current?.focus()
     }}>
-      <button ref={trigger} className="icon-button shelf-overflow-button" type="button" title="更多操作"
-        aria-label={`${article.title}的更多操作`} aria-expanded={open} onClick={() => { setError(""); setOpen(!open) }}>
+      <button ref={trigger} className="icon-button shelf-overflow-button" type="button" title={tr("更多操作")}
+        aria-label={tr("{0}的更多操作", article.title)} aria-expanded={open} onClick={() => { setError(""); setOpen(!open) }}>
         <MoreHorizontal size={19} />
       </button>
-      {open && <div ref={panel} style={menuLayout} className="shelf-overflow-panel" aria-label="文章操作" role="group" data-action-menu>
+      {open && <div ref={panel} style={menuLayout} className="shelf-overflow-panel" aria-label={tr("文章操作")} role="group" data-action-menu>
         {onStateChange && <>
           <button type="button" disabled={pending} onClick={() => void perform(() => onStateChange(article.id, { isRead: !isRead }))}>
-            <ReadIcon size={15} aria-hidden="true" /> {isRead ? "标为未读" : "标为已读"}
+            <ReadIcon size={15} aria-hidden="true" /> {isRead ? tr("标为未读") : tr("标为已读")}
           </button>
           <button type="button" disabled={pending} onClick={() => void perform(() => onStateChange(article.id, { isStarred: !isStarred }))}>
-            <Star size={15} fill={isStarred ? "currentColor" : "none"} aria-hidden="true" /> {isStarred ? "取消收藏" : "收藏"}
+            <Star size={15} fill={isStarred ? "currentColor" : "none"} aria-hidden="true" /> {isStarred ? tr("取消收藏") : tr("收藏")}
           </button>
         </>}
         <button type="button" disabled={pending} onClick={() => void perform(() => onRegenerate(article))}>
-          <Sparkles size={15} /> {article.hasAnalysis === false ? "AI 整理文章" : "重新整理"}
+          <Sparkles size={15} /> {article.hasAnalysis === false ? tr("AI 整理文章") : tr("重新整理")}
         </button>
         {onEdit && <button type="button" disabled={pending} onClick={() => { setOpen(false); trigger.current?.focus(); onEdit(article) }}>
-          <Pencil size={15} /> 编辑详情
+          <Pencil size={15} /> {tr("编辑详情")}
         </button>}
-        <button type="button" disabled={pending} onClick={() => save("html")}><ArrowDownToLine size={15} /> 导出 HTML</button>
-        <button type="button" disabled={pending} onClick={() => save("markdown")}><ArrowDownToLine size={15} /> 导出 Markdown</button>
+        <button type="button" disabled={pending} onClick={() => save("html")}><ArrowDownToLine size={15} /> {tr("导出 HTML")}</button>
+        <button type="button" disabled={pending} onClick={() => save("markdown")}><ArrowDownToLine size={15} /> {tr("导出 Markdown")}</button>
         <button type="button" disabled={pending} onClick={() => void perform(() => revealArticle(article.id))}>
-          <FolderOpen size={15} /> 在访达显示
+          <FolderOpen size={15} /> {tr("在访达显示")}
         </button>
         {sourceUrl && <button type="button" disabled={pending} onClick={() => void perform(() => openVideo(sourceUrl))}>
-          <ArrowUpRight size={15} /> {article.platform === "apple_podcasts" ? "打开原节目" : "打开原视频"}
+          <ArrowUpRight size={15} /> {article.platform === "apple_podcasts" ? tr("打开原节目") : tr("打开原视频")}
         </button>}
         <button className="shelf-delete" type="button" disabled={pending} onClick={remove}>
-          <Trash2 size={15} /> 删除文章
+          <Trash2 size={15} /> {tr("删除文章")}
         </button>
         {error && <p role="alert" className="shelf-overflow-error">{error}</p>}
       </div>}
@@ -328,10 +329,10 @@ function ArticleRow({ article, onRead, onDelete, onRegenerate, onStateChange, on
           <span className="shelf-article-heading">
             <span className="shelf-article-title" title={article.title}>{article.title}</span>
             {(isRead || isStarred) && <span className="shelf-article-status">
-              {isRead && <span className="shelf-status-read" role="img" aria-label="已读" title="已读">
+              {isRead && <span className="shelf-status-read" role="img" aria-label={tr("已读")} title={tr("已读")}>
                 <CircleCheck size={14} aria-hidden="true" />
               </span>}
-              {isStarred && <span className="shelf-status-star" role="img" aria-label="已收藏" title="已收藏">
+              {isStarred && <span className="shelf-status-star" role="img" aria-label={tr("已收藏")} title={tr("已收藏")}>
                 <Star size={13} fill="currentColor" aria-hidden="true" />
               </span>}
             </span>}
@@ -339,7 +340,7 @@ function ArticleRow({ article, onRead, onDelete, onRegenerate, onStateChange, on
           <span className="shelf-article-meta">
             <SourceDetails {...article} />
             <ArticleUpdatedAt value={article.updatedAt} />
-            {article.hasAnalysis === false && <span className="shelf-raw">原文字幕</span>}
+            {article.hasAnalysis === false && <span className="shelf-raw">{tr("原文字幕")}</span>}
           </span>
         </span>
       </button>
@@ -403,27 +404,28 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
   const outstanding = activeLanes(activity)
   const elapsed = activity ? elapsedLabel(Math.max(0, now - activity.startedAt)) : "00:00"
   const quietSeconds = activity ? Math.max(0, Math.floor((now - activity.lastEventAt) / 1000)) : 0
-  const caption = queued ? `排队中${queuePosition ? ` · 前方 ${queuePosition} 个任务` : ""}`
-    : job.status === "cancelling" ? "正在取消…"
-    : active ? progressCaption(activity, stages[job.step] ?? "正在处理")
-    : job.status === "interrupted" ? "任务已保留，等待继续"
-    : job.status === "cancelled" ? "已取消" : unsupportedAudio ? "暂不支持此音源" : "生成失败"
-  const waitingLabel = job.status === "cancelling" ? "等待任务退出"
-    : outstanding.some(item => item.label === "提取字幕") ? "等待字幕平台响应"
-    : outstanding.some(item => item.label === "生成阅读页") ? "等待文件写入"
-    : "等待模型返回"
-  const title = job.title || (job.platform === "apple_podcasts" ? "播客单集"
-    : job.platform === "local" ? "字幕文件" : job.platform ? `${platformLabel[job.platform]} 视频` : "新文章")
-  const lastMessage = progressDetail(activity, job.message)
+  const caption = queued ? tr("排队中{0}", queuePosition ? tr(" · 前方 {0} 个任务", queuePosition) : "")
+    : job.status === "cancelling" ? tr("正在取消…")
+    : active ? progressCaption(activity, tr(stages[job.step] ?? "正在处理"))
+    : job.status === "interrupted" ? tr("任务已保留，等待继续")
+    : job.status === "cancelled" ? tr("已取消") : unsupportedAudio ? tr("暂不支持此音源") : tr("生成失败")
+  const waitingLabel = job.status === "cancelling" ? tr("等待任务退出")
+    : outstanding.some(item => item.label === tr("提取字幕")) ? tr("等待字幕平台响应")
+    : outstanding.some(item => item.label === tr("生成阅读页")) ? tr("等待文件写入")
+    : tr("等待模型返回")
+  const title = job.title || (job.platform === "apple_podcasts" ? tr("播客单集")
+    : job.platform === "local" ? tr("字幕文件") : job.platform ? tr("{0} 视频", tr(platformLabel[job.platform])) : tr("新文章"))
+  const lastMessage = localizedDetail(progressDetail(activity, job.message), caption)
+  const jobMessage = localizedDetail(job.message, caption)
   const percent = active ? Math.min(99, Math.max(0, job.percent)) : 0
   const requestStatus = requestCaption(activity, now)
   const recoveryAction = unsupportedAudio ? "source" : job.status === "error" ? job.failure?.action ?? "retry" : "retry"
-  const recoveryLabel = job.status === "interrupted" ? "继续"
-    : recoveryAction === "settings" ? "检查模型设置"
-    : recoveryAction === "setup" ? "检查运行环境"
-    : recoveryAction === "source" && job.sourceUrl ? "查看来源"
-    : recoveryAction === "details" || recoveryAction === "source" ? "查看详情"
-    : job.previewId ? "重试未完成部分" : "重试"
+  const recoveryLabel = job.status === "interrupted" ? tr("继续")
+    : recoveryAction === "settings" ? tr("检查模型设置")
+    : recoveryAction === "setup" ? tr("检查运行环境")
+    : recoveryAction === "source" && job.sourceUrl ? tr("查看来源")
+    : recoveryAction === "details" || recoveryAction === "source" ? tr("查看详情")
+    : job.previewId ? tr("重试未完成部分") : tr("重试")
   function recover() {
     if (recoveryAction === "settings" || recoveryAction === "setup") { onSettings(); return }
     if (recoveryAction === "source" && job.status !== "done" && job.sourceUrl) {
@@ -445,14 +447,14 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
         </div>
         <div className="task-card-actions">
           {active || queued ? (
-            <button className="icon-button" type="button" aria-label={queued ? "取消排队" : "取消生成"}
-              title={queued ? "取消排队" : "取消生成"} disabled={job.status === "cancelling"} onClick={onCancel}>
+            <button className="icon-button" type="button" aria-label={queued ? tr("取消排队") : tr("取消生成")}
+              title={queued ? tr("取消排队") : tr("取消生成")} disabled={job.status === "cancelling"} onClick={onCancel}>
               <X size={17} />
             </button>
           ) : <>
             <button className="secondary" type="button" onClick={recover}>{recoveryLabel}</button>
-            {recoveryAction !== "retry" && !unsupportedAudio && <button className="text-button" type="button" onClick={onRetry}>重试</button>}
-            <button className="icon-button" type="button" title="删除任务" aria-label="删除任务" onClick={onRemove}>
+            {recoveryAction !== "retry" && !unsupportedAudio && <button className="text-button" type="button" onClick={onRetry}>{tr("重试")}</button>}
+            <button className="icon-button" type="button" title={tr("删除任务")} aria-label={tr("删除任务")} onClick={onRemove}>
               <Trash2 size={16} />
             </button>
           </>}
@@ -466,27 +468,27 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
             {job.status === "interrupted" && <CirclePause size={14} aria-hidden="true" />}
             {caption}
           </span>
-          {active && <span className="task-elapsed" title="已用时，不是剩余时间">已用时 {elapsed}</span>}
+          {active && <span className="task-elapsed" title={tr("已用时，不是剩余时间")}>{tr("已用时")} {elapsed}</span>}
         </div>
         {active && <>
           <div className="task-meter" data-running={job.status === "running"}>
             <progress className="shelf-progress" value={percent} max={100}
-              aria-label="整体流程进度（按阶段估算，不代表剩余时间）" />
+              aria-label={tr("整体流程进度（按阶段估算，不代表剩余时间）")} />
             <span className="task-meter-motion" style={{ width: `${percent}%` }} aria-hidden="true"><span className="task-meter-sweep" /></span>
           </div>
           <p className="task-detail-line">
-            {requestStatus ?? (quietSeconds >= 20 ? `${waitingLabel} · ${quietSeconds} 秒未收到新结果` : lastMessage)}
+            {requestStatus ?? (quietSeconds >= 20 ? tr("{0} · {1} 秒未收到新结果", waitingLabel, quietSeconds) : lastMessage)}
           </p>
         </>}
-        {queued && <p className="task-detail-line">前一任务结束后自动开始，可继续添加链接。</p>}
-        {job.status === "interrupted" && <p className="task-detail-line">{job.message}</p>}
-        {job.status === "error" && <p className="task-error-summary">{job.message.split("\n")[0].slice(0, 100)}</p>}
+        {queued && <p className="task-detail-line">{tr("前一任务结束后自动开始，可继续添加链接。")}</p>}
+        {job.status === "interrupted" && <p className="task-detail-line">{jobMessage}</p>}
+        {job.status === "error" && <p className="task-error-summary">{jobMessage.split("\n")[0].slice(0, 100)}</p>}
         {actionError && <p className="task-error-summary" role="alert">{actionError}</p>}
         {job.previewId && onPreview && <button className="text-button task-read-transcript" type="button" onClick={onPreview}>
-          <BookOpen size={14} aria-hidden="true" />先读原文<ArrowRight size={13} aria-hidden="true" />
+          <BookOpen size={14} aria-hidden="true" />{tr("先读原文")}<ArrowRight size={13} aria-hidden="true" />
         </button>}
         {(activity || job.status === "error") && <details className="task-details" ref={details}>
-          <summary>{job.status === "error" ? "查看错误详情" : "查看处理详情"}</summary>
+          <summary>{job.status === "error" ? tr("查看错误详情") : tr("查看处理详情")}</summary>
           {activity && <>
             <ol className="task-stage-list">
               {stageRows(activity, job.status, job.failure?.stage).map(lane => <li key={lane.key} data-state={lane.state} data-lane={lane.key}>
@@ -501,13 +503,13 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
                 <span>{lane.statusLabel}</span>
               </li>)}
             </ol>
-            <ol className="task-event-list" aria-label="最近处理记录">
+            <ol className="task-event-list" aria-label={tr("最近处理记录")}>
               {activity.history.map((line, index) => <li key={`${line.at}-${index}`}>
-                <time>{elapsedLabel(line.at - activity.startedAt)}</time><span>{line.message}</span>
+                <time>{elapsedLabel(line.at - activity.startedAt)}</time><span>{localizedDetail(line.message, tr("正在处理"))}</span>
               </li>)}
             </ol>
           </>}
-          {job.status === "error" && <pre>{job.message}</pre>}
+          {job.status === "error" && <pre>{jobMessage}</pre>}
         </details>}
       </div>
     </li>
@@ -517,11 +519,11 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
 function LibraryState({ library, error, onRefresh }: Pick<ArticleListProps, "library" | "error" | "onRefresh">) {
   if (error) return (
     <div className="shelf-state shelf-state-error" role="alert">
-      <CircleAlert size={19} /><span>{error}</span><button className="secondary" type="button" onClick={onRefresh}>重新加载</button>
+      <CircleAlert size={19} /><span>{error}</span><button className="secondary" type="button" onClick={onRefresh}>{tr("重新加载")}</button>
     </div>
   )
-  if (!library) return <div className="shelf-state" role="status"><LoaderCircle className="spin" size={19} /><span>正在读取书架…</span></div>
-  if (library.unavailable) return <p className="shelf-warning" role="status">{library.unavailable} 篇文章无法读取</p>
+  if (!library) return <div className="shelf-state" role="status"><LoaderCircle className="spin" size={19} /><span>{tr("正在读取书架…")}</span></div>
+  if (library.unavailable) return <p className="shelf-warning" role="status">{library.unavailable} {tr("篇文章无法读取")}</p>
   return null
 }
 
@@ -590,9 +592,9 @@ export function Home({
               {dragging ? <FileUp size={20} /> : selectedFile ? <Captions size={20} /> : <Link2 size={20} />}
             </span>
             <div className="home-input-content">
-              <input ref={inputRef} aria-label={selectedFile ? "选中的字幕文件" : "视频或播客链接"} type="text" inputMode={selectedFile ? "text" : "url"}
+              <input ref={inputRef} aria-label={selectedFile ? tr("选中的字幕文件") : tr("视频或播客链接")} type="text" inputMode={selectedFile ? "text" : "url"}
                 readOnly={Boolean(selectedFile)} autoComplete="off" spellCheck={false} value={selectedFile || source}
-                title={selectedFile || undefined} placeholder="粘贴视频或播客链接"
+                title={selectedFile || undefined} placeholder={tr("粘贴视频或播客链接")}
                 onChange={event => setSource(event.target.value)}
                 onPaste={event => {
                   if (localPath) return
@@ -602,19 +604,19 @@ export function Home({
                     setSource(link)
                   } catch { /* Keep incomplete input editable; generation shows the validation error. */ }
                 }} />
-              {dragging && <span className="home-drop-hint" role="status">松开以导入字幕文件</span>}
+              {dragging && <span className="home-drop-hint" role="status">{tr("松开以导入字幕文件")}</span>}
             </div>
             {(selectedFile || source) && <button className="icon-button home-inline-button" type="button"
-              title={selectedFile ? "移除字幕文件" : "清空链接"} aria-label={selectedFile ? "移除字幕文件" : "清空链接"}
+              title={selectedFile ? tr("移除字幕文件") : tr("清空链接")} aria-label={selectedFile ? tr("移除字幕文件") : tr("清空链接")}
               onClick={() => { onClear(); inputRef.current?.focus() }}><X size={16} /></button>}
           </div>
           <div className="home-input-actions">
             <div ref={importRef} className="home-import" onMouseEnter={showImportHint}
               onMouseLeave={event => { if (!event.currentTarget.querySelector(":focus-visible")) hideImportHint() }}
               onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) hideImportHint() }}>
-              <button className="icon-button home-inline-button" type="button" aria-label="导入字幕" onFocus={showImportHint}
+              <button className="icon-button home-inline-button" type="button" aria-label={tr("导入字幕")} onFocus={showImportHint}
                 onClick={() => { setHint(undefined); onPick() }}><FileUp size={18} aria-hidden="true" /></button>
-              {hint === "import" && <span className="home-import-tooltip" aria-hidden="true">导入字幕</span>}
+              {hint === "import" && <span className="home-import-tooltip" aria-hidden="true">{tr("导入字幕")}</span>}
             </div>
             <div ref={helpRef} className="home-help"
               onMouseEnter={() => setHint(current => current === "pinned-help" ? current : "help")}
@@ -628,7 +630,7 @@ export function Home({
                   setHint(current => current === "import" ? current : undefined)
                 }
               }}>
-              <button className="icon-button home-inline-button" type="button" aria-label="查看支持的来源"
+              <button className="icon-button home-inline-button" type="button" aria-label={tr("查看支持的来源")}
                 aria-expanded={helpOpen} aria-controls={helpOpen ? "home-help-content" : undefined}
                 onClick={event => {
                   event.currentTarget.focus({ preventScroll: true })
@@ -637,37 +639,37 @@ export function Home({
                 <CircleHelp size={19} aria-hidden="true" />
               </button>
               {helpOpen && <div id="home-help-content" className="home-help-popover" role="note">
-                支持 YouTube、B 站视频和 Apple 播客单集。
-                <span>可选择或拖入 SRT、VTT、JSON 字幕。无字幕时可在设置中开启语音识别。</span>
+                {tr("支持 YouTube、B 站视频和 Apple 播客单集。")}
+                <span>{tr("可选择或拖入 SRT、VTT、JSON 字幕。无字幕时可在设置中开启语音识别。")}</span>
               </div>}
             </div>
             <button className="primary home-primary" type="submit" disabled={submitDisabled}
               onClick={event => event.currentTarget.focus({ preventScroll: true })}>
-              {existingArticle ? "打开文章" : existingTask ? "查看任务" : sourceBlocked ? "暂不支持此来源" : sourceNeedsAsr ? "设置语音识别" : configureAI ? "配置 AI 工具" : busy ? "加入队列" : "生成文章"}
+              {existingArticle ? tr("打开文章") : existingTask ? tr("查看任务") : sourceBlocked ? tr("暂不支持此来源") : sourceNeedsAsr ? tr("设置语音识别") : configureAI ? tr("配置 AI 工具") : busy ? tr("加入队列") : tr("生成文章")}
             </button>
           </div>
         </div>
-        {existingArticle && <div className="source-preview existing-source-preview" aria-label="已有文章">
+        {existingArticle && <div className="source-preview existing-source-preview" aria-label={tr("已有文章")}>
           <Cover {...existingArticle} />
           <div className="source-preview-info"><strong>{existingArticle.title}</strong><SourceDetails {...existingArticle} />
-            <span className="existing-source-status"><Check size={13} />已在书架中{existingTask ? " · 正在更新" : ""}</span></div>
+            <span className="existing-source-status"><Check size={13} />{tr("已在书架中")}{existingTask ? tr(" · 正在更新") : ""}</span></div>
           {existingTask && <button className="text-button" type="button" onClick={event => {
             event.currentTarget.focus({ preventScroll: true }); (onViewExistingTask ?? onTasks)()
-          }}>查看任务</button>}
+          }}>{tr("查看任务")}</button>}
           <ArticleActions article={existingArticle} onDelete={onDelete} onRegenerate={onRegenerate} onEdit={onEdit} onExportMarkdown={onExportMarkdown} />
         </div>}
-        {!existingArticle && !selectedFile && linkPreview.status === "loading" && <div className="source-preview preview-loading" role="status" aria-label="正在识别链接">
+        {!existingArticle && !selectedFile && linkPreview.status === "loading" && <div className="source-preview preview-loading" role="status" aria-label={tr("正在识别链接")}>
           <span className="preview-cover preview-pending-cover" data-platform={podcastPreview ? "apple_podcasts" : undefined} aria-hidden="true">
             {podcastPreview ? <Podcast size={28} strokeWidth={1.5} /> : <Link2 size={25} strokeWidth={1.6} />}
           </span>
           <div className="source-preview-info preview-loading-info">
-            <strong>{podcastPreview ? "Apple 播客单集" : "正在识别来源"}</strong>
+            <strong>{podcastPreview ? tr("Apple 播客单集") : tr("正在识别来源")}</strong>
             <span className="preview-status"><LoaderCircle className="spin" size={13} aria-hidden="true" />
-              {linkPreview.slow ? "获取信息较慢，仍在等待标题与封面" : "正在获取标题与封面…"}
+              {linkPreview.slow ? tr("获取信息较慢，仍在等待标题与封面") : tr("正在获取标题与封面…")}
             </span>
           </div>
         </div>}
-        {!existingArticle && !selectedFile && linkPreview.status === "ready" && <div className="source-preview" aria-label="来源预览">
+        {!existingArticle && !selectedFile && linkPreview.status === "ready" && <div className="source-preview" aria-label={tr("来源预览")}>
           <Cover {...linkPreview.metadata} />
           <div className="source-preview-info">
             <strong>{linkPreview.metadata.title}</strong>
@@ -675,22 +677,22 @@ export function Home({
           </div>
         </div>}
         {!existingArticle && !selectedFile && linkPreview.status === "error" && <div className="preview-unavailable" role="status">
-          <span>{linkPreview.timedOut ? "来源预览等待超时" : "暂未获取到标题与封面"}</span>
-          <button className="text-button" type="button" onClick={linkPreview.retry}><RotateCw size={12} aria-hidden="true" />重试预览</button>
+          <span>{linkPreview.timedOut ? tr("来源预览等待超时") : tr("暂未获取到标题与封面")}</span>
+          <button className="text-button" type="button" onClick={linkPreview.retry}><RotateCw size={12} aria-hidden="true" />{tr("重试预览")}</button>
         </div>}
         {!existing && !selectedFile && sourceReadiness}
         {inputError && <p className="home-tool-warning" role="alert"><CircleAlert size={15} /><span>{inputError}</span></p>}
         {!existing && toolWarning && !inputError && <div className="home-tool-warning" role="status">
           <CircleAlert size={15} /><span>{toolWarning}</span>
-          {!configureAI && <button className="text-button" type="button" onClick={onSettings}>检查设置 <ArrowUpRight size={13} /></button>}
+          {!configureAI && <button className="text-button" type="button" onClick={onSettings}>{tr("检查设置")} <ArrowUpRight size={13} /></button>}
         </div>}
       </form>
-      {journalLoading && <p className="task-journal-notice" role="status"><LoaderCircle size={14} className="spin" />正在恢复任务记录…</p>}
+      {journalLoading && <p className="task-journal-notice" role="status"><LoaderCircle size={14} className="spin" />{tr("正在恢复任务记录…")}</p>}
       {journalError && <div className="task-journal-notice task-journal-error" role="alert">
         <CircleAlert size={15} /><span>{journalError}</span>
-        {onRetryJournal && <button type="button" className="text-button" onClick={onRetryJournal}>重试保存或加载</button>}
+        {onRetryJournal && <button type="button" className="text-button" onClick={onRetryJournal}>{tr("重试保存或加载")}</button>}
       </div>}
-      {currentJobs.length > 0 && <section className="home-tasks" aria-label="生成任务">
+      {currentJobs.length > 0 && <section className="home-tasks" aria-label={tr("生成任务")}>
         <ul className="task-list">
           {currentJobs.map(task => <JobRow key={task.id} job={task.job}
             onCancel={() => onCancel(task.id)} onRetry={() => onRetry(task.id)} onRemove={() => onRemove(task.id)}
@@ -700,18 +702,18 @@ export function Home({
       {(taskSummary.queued > 0 || taskSummary.attention > 0) && <div className="home-task-summary" data-unread={taskSummary.unread > 0} role="status">
         {taskSummary.unread > 0 ? <CircleAlert size={15} aria-hidden="true" /> : <CirclePause size={15} aria-hidden="true" />}
         <span>{[
-          taskSummary.queued > 0 ? `${taskSummary.queued} 个任务排队中` : "",
-          taskSummary.unread > 0 ? `${taskSummary.unread} 个任务需要查看`
-            : taskSummary.attention > 0 ? `${taskSummary.attention} 条已保留记录` : "",
+          taskSummary.queued > 0 ? tr("{0} 个任务排队中", taskSummary.queued) : "",
+          taskSummary.unread > 0 ? tr("{0} 个任务需要查看", taskSummary.unread)
+            : taskSummary.attention > 0 ? tr("{0} 条已保留记录", taskSummary.attention) : "",
         ].filter(Boolean).join(" · ")}</span>
         <button type="button" className="text-button" onClick={event => {
           event.currentTarget.focus({ preventScroll: true }); onTasks()
-        }}>查看任务<ArrowRight size={13} aria-hidden="true" /></button>
+        }}>{tr("查看任务")}<ArrowRight size={13} aria-hidden="true" /></button>
       </div>}
-      {resume && <section className="continue-reading" aria-label="继续阅读">
+      {resume && <section className="continue-reading" aria-label={tr("继续阅读")}>
         <button type="button" className="continue-reading-link" onClick={() => onRead(resume.article)}>
           <span className="continue-reading-cover"><Cover {...resume.article} /></span>
-          <span className="continue-reading-copy"><small>继续阅读</small>
+          <span className="continue-reading-copy"><small>{tr("继续阅读")}</small>
             <strong title={resume.article.title}>{resume.article.title}</strong>
           </span>
           <span className="continue-reading-action" aria-hidden="true"><ArrowRight size={18} /></span>
@@ -719,14 +721,14 @@ export function Home({
       </section>}
       <section aria-labelledby="home-recent-title" className="home-recent">
         <div className="home-section-title">
-          <h2 id="home-recent-title">最近文章</h2>
-          <button className="text-button" type="button" onClick={onLibrary}>查看书架 <ArrowRight size={15} /></button>
+          <h2 id="home-recent-title">{tr("最近文章")}</h2>
+          <button className="text-button" type="button" onClick={onLibrary}>{tr("查看书架")} <ArrowRight size={15} /></button>
         </div>
         {recent.length > 0 ? <ul className="recent-grid">
           {recent.map(article => <ArticleCard key={article.id} article={article}
             onRead={onRead} onDelete={onDelete} onRegenerate={onRegenerate} onStateChange={onStateChange} onEdit={onEdit} onExportMarkdown={onExportMarkdown} />)}
         </ul> : library && !error && <div className="shelf-state home-empty" role="status">
-          <BookOpen size={22} strokeWidth={1.5} /><span>还没有文章，粘贴链接开始阅读</span>
+          <BookOpen size={22} strokeWidth={1.5} /><span>{tr("还没有文章，粘贴链接开始阅读")}</span>
         </div>}
         <LibraryState library={library} error={error} onRefresh={onRefresh} />
       </section>
@@ -746,7 +748,7 @@ export function Bookshelf({
   const counts = shelfCounts(matching, filters.starred)
   const filtered = Boolean(search.trim() || filters.read !== "all" || filters.starred)
   const readFilters: { key: ReadFilter; label: string }[] = [
-    { key: "all", label: "全部" }, { key: "unread", label: "未读" }, { key: "completed", label: "已读" },
+    { key: "all", label: tr("全部") }, { key: "unread", label: tr("未读") }, { key: "completed", label: tr("已读") },
   ]
 
   function clearSearch() {
@@ -762,12 +764,12 @@ export function Bookshelf({
   return (
     <section className="bookshelf-page" aria-labelledby="bookshelf-title">
       <header className="bookshelf-title">
-        <h1 id="bookshelf-title">书架</h1>
-        <button className="primary" type="button" onClick={onCreate}><Plus size={16} aria-hidden="true" />新建文章</button>
+        <h1 id="bookshelf-title">{tr("书架")}</h1>
+        <button className="primary" type="button" onClick={onCreate}><Plus size={16} aria-hidden="true" />{tr("新建文章")}</button>
       </header>
       {library && library.articles.length > 0 && <div className="shelf-toolbar">
-        <div className="shelf-filters" role="group" aria-label="筛选文章">
-          <div className="shelf-read-filters" role="group" aria-label="阅读状态">
+        <div className="shelf-filters" role="group" aria-label={tr("筛选文章")}>
+          <div className="shelf-read-filters" role="group" aria-label={tr("阅读状态")}>
             {readFilters.map(filter => <button key={filter.key} type="button" aria-pressed={filters.read === filter.key}
               onClick={() => onFilters({ ...filters, read: filter.key })}>
               {filter.label}<span>{counts[filter.key]}</span>
@@ -775,23 +777,23 @@ export function Bookshelf({
           </div>
           <button className="shelf-star-filter" type="button" aria-pressed={filters.starred}
             onClick={() => onFilters({ ...filters, starred: !filters.starred })}>
-            <Star size={14} aria-hidden="true" fill={filters.starred ? "currentColor" : "none"} />收藏<span>{counts.starred}</span>
+            <Star size={14} aria-hidden="true" fill={filters.starred ? "currentColor" : "none"} />{tr("收藏")}<span>{counts.starred}</span>
           </button>
         </div>
         <span className="shelf-search">
           <Search size={16} aria-hidden="true" />
-          <input ref={searchField} aria-label="搜索书架" type="search" value={search} placeholder="搜索标题、作者、分类或来源"
+          <input ref={searchField} aria-label={tr("搜索书架")} type="search" value={search} placeholder={tr("搜索标题、作者、分类或来源")}
             onChange={event => onSearch(event.target.value)} />
-          {search && <button className="icon-button" type="button" aria-label="清空搜索" title="清空搜索" onClick={clearSearch}><X size={15} /></button>}
+          {search && <button className="icon-button" type="button" aria-label={tr("清空搜索")} title={tr("清空搜索")} onClick={clearSearch}><X size={15} /></button>}
         </span>
-        <span className="sr-only" aria-live="polite">显示 {articles.length} 篇文章</span>
+        <span className="sr-only" aria-live="polite">{tr("显示")} {articles.length} {tr("篇文章")}</span>
       </div>}
       {articles.length > 0 ? <ul className="shelf-list">
         {articles.map(article => <ArticleRow key={article.id} article={article} onRead={onRead} onDelete={onDelete} onRegenerate={onRegenerate} onStateChange={onStateChange} onEdit={onEdit} onExportMarkdown={onExportMarkdown} />)}
       </ul> : library && !error && <div className="shelf-state bookshelf-empty" role="status">
-        {filtered ? <><Search size={20} aria-hidden="true" /><span>没有符合条件的文章</span>
-          <button className="text-button" type="button" onClick={resetFilters}>清除搜索和筛选</button>
-        </> : <><BookOpen size={24} strokeWidth={1.5} aria-hidden="true" /><span>书架还没有文章</span>
+        {filtered ? <><Search size={20} aria-hidden="true" /><span>{tr("没有符合条件的文章")}</span>
+          <button className="text-button" type="button" onClick={resetFilters}>{tr("清除搜索和筛选")}</button>
+        </> : <><BookOpen size={24} strokeWidth={1.5} aria-hidden="true" /><span>{tr("书架还没有文章")}</span>
         </>}
       </div>}
       <LibraryState library={library} error={error} onRefresh={onRefresh} />

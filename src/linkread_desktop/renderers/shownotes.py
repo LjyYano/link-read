@@ -8,6 +8,7 @@ from urllib.parse import quote, urljoin, urlsplit
 
 from ..models import SourceInfo, TranscriptDocument
 from .formatting import source_info_link
+from .labels import page_label
 
 
 _TAGS = {"p", "div", "br", "hr", "ul", "ol", "li", "h2", "h3", "h4", "h5", "h6",
@@ -263,17 +264,17 @@ def description_markdown(source: SourceInfo) -> str:
     return re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", "".join(parser.parts)).strip()
 
 
-def shownotes_panel(source: SourceInfo, *, transcript: TranscriptDocument | None = None) -> str:
+def shownotes_panel(source: SourceInfo, *, transcript: TranscriptDocument | None = None, language: str = "en") -> str:
     content = description_html(source, transcript=transcript)
     url = source_info_link(source)
     if not content and not url:
         return ""
-    original = _link(url, "View original") if url else ""
+    original = _link(url, page_label(language, "View original")) if url else ""
     if content:
         body = f'<div class="shownotes-source">{original}</div>{content}' if original else content
     else:
-        body = ('<div class="shownotes-empty"><p>No shownotes saved yet.</p>'
+        body = (f'<div class="shownotes-empty"><p>{page_label(language, "No shownotes saved yet.")}</p>'
                 f'<div class="shownotes-empty-actions">{original}'
-                '<button type="button" data-refresh-shownotes hidden>Fetch shownotes</button></div></div>')
+                f'<button type="button" data-refresh-shownotes hidden>{page_label(language, "Fetch shownotes")}</button></div></div>')
     return ('<section class="panel" id="panel-shownotes" data-panel="shownotes" role="tabpanel" '
             f'aria-labelledby="tab-shownotes" hidden><div class="panel-inner">{body}</div></section>')

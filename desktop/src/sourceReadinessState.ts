@@ -1,3 +1,4 @@
+import { tr } from "./language.ts"
 import type { GenerationFailure, SourceCheck } from "./api"
 import { previewKey } from "./previewState.ts"
 import { normalizeVideoLink } from "./videoLinks.ts"
@@ -87,20 +88,20 @@ export class SourceReadinessRequests {
       status: "unknown", code, message, checkedAt: this.now() })
     const timeout = new Promise<SourceCheck>(resolve => {
       deadline = setTimeout(() => resolve(unknown("source_check_timeout",
-        "来源检查暂时超时，尚未确认内容是否可用；请重试检查或查看来源。")), 38_000)
+        tr("来源检查暂时超时，尚未确认内容是否可用；请重试检查或查看来源。"))), 38_000)
     })
     const request = Promise.race([Promise.resolve().then(load), timeout]).then(result => {
       if (this.revisions.get(key) !== revision) return
       if (sourceCheckKey(result.source) !== key
           || !["captions", "needs_asr", "blocked", "unknown"].includes(result.status)
           || (result.status === "blocked" && !blockedCodes.has(result.code))) {
-        this.save(key, unknown("source_check_mismatch", "检查结果与当前来源不一致，请重新检查。"))
+        this.save(key, unknown("source_check_mismatch", tr("检查结果与当前来源不一致，请重新检查。")))
         return
       }
       this.save(key, { ...result, checkedAt: this.now(), origin: "check" })
     }, () => {
       if (this.revisions.get(key) === revision) this.save(key,
-        unknown("source_check_failed", "暂时无法完成来源检查，请重试检查或查看来源。"))
+        unknown("source_check_failed", tr("暂时无法完成来源检查，请重试检查或查看来源。")))
     }).finally(() => {
       clearTimeout(deadline)
       if (this.pending.get(key) === request) this.pending.delete(key)

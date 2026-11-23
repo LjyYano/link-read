@@ -451,6 +451,8 @@ def extract_apple_podcasts(url: str, *, session=None, progress=None) -> Transcri
         ) from exc
     source = _rss_source_description(episode.source, item)
     resources = item.findall(f"{{{_PODCAST}}}transcript")
+    feed_language = (item.findtext("language") or feed.findtext("./channel/language") or "").strip()
+    publisher_language = feed_language.lower().split("-")[0]
     candidates = []
     for row in resources:
         kind = row.get("type", "").split(";", 1)[0].strip().lower()
@@ -458,12 +460,13 @@ def extract_apple_podcasts(url: str, *, session=None, progress=None) -> Transcri
             if not row.get("url"):
                 raise ExtractionError("该集的公开字幕地址缺失，请稍后重试")
             language = row.get("language", "").lower()
-            candidates.append((0 if language.startswith("zh") else 1 if language.startswith("en") else 2,
-                               _TIMED_TYPES[kind], row, kind))
+            preferred = publisher_language and language.split("-")[0] == publisher_language
+            fallback = 0 if language.startswith("zh") else 1 if language.startswith("en") else 2
+            candidates.append((not preferred, fallback, _TIMED_TYPES[kind], row, kind))
     if not candidates:
         check_audio_source(episode.audio_url, session=client)
         raise SubtitleUnavailableError("该播客单集未发布可读取的带时间戳字幕，可在设置中启用语音识别", source=source)
-    _, _, selected, kind = min(candidates, key=lambda row: row[:2])
+    _, _, _, selected, kind = min(candidates, key=lambda row: row[:3])
     report(progress, "captions_done", "已找到该单集的公开字幕")
     report(progress, "download", "正在下载播客字幕（不下载音频）")
     content = get_bytes(client, selected.get("url"), max_bytes=_MAX_TRANSCRIPT, accept=kind)
@@ -475,7 +478,7 @@ def extract_apple_podcasts(url: str, *, session=None, progress=None) -> Transcri
         raise ExtractionError("该集公开字幕内容无效，请重试；未自动提交语音识别") from exc
     report(progress, "parsed", f"字幕解析完成：{len(segments)} 个片段")
     return TranscriptDocument(source=source, transcript_source="subtitle", segments=segments,
-                              language=selected.get("language") or feed.findtext("./channel/language"))
+                              language=selected.get("language") or feed_language or None)
 
 
 def download_episode_audio(url, folder: Path, config, *, progress=None, session=None):

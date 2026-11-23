@@ -85,9 +85,9 @@ async def routes(route):
         await route.fulfill(path=str(path), content_type={'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css'}.get(path.suffix))
 
 
-async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=1280, native_drag=False):
+async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=1280, native_drag=False, locale='zh-CN'):
     context = await browser.new_context(viewport={'width': width, 'height': 980},
-                                        color_scheme='dark' if dark else 'light', reduced_motion='reduce')
+                                        color_scheme='dark' if dark else 'light', reduced_motion='reduce', locale=locale)
     await context.route('**/*', routes)
     page = await context.new_page()
     errors, confirmations = [], []
@@ -386,6 +386,33 @@ async def verify_source_checks(browser, *, dark=False, width=1280):
     await context.close()
 
 
+async def verify_language_preferences(browser):
+    context, page, errors, _ = await open_app(browser, locale='fr-FR')
+    await expect(page.locator('html')).to_have_attribute('lang', 'en')
+    await page.get_by_role('button', name='Settings', exact=True).click()
+    await page.get_by_label('Generated page language').select_option('zh-CN')
+    await page.get_by_label('Interface language').select_option('zh-CN')
+    await expect(page.get_by_role('heading', name='语言', exact=True)).to_be_visible()
+    await page.reload()
+    await expect(page.locator('html')).to_have_attribute('lang', 'zh-CN')
+    await page.get_by_role('button', name='设置', exact=True).click()
+    await expect(page.get_by_label('生成网页语言')).to_have_value('zh-CN')
+    await page.get_by_label('界面语言').select_option('en')
+    await expect(page.locator('html')).to_have_attribute('lang', 'en')
+    await page.get_by_role('button', name='Back', exact=True).click()
+    await page.get_by_role('button', name='Import subtitles', exact=True).click()
+    await page.get_by_role('button', name='Generate article', exact=True).click()
+    await page.wait_for_function("window.taskWorkspaceFixture.pendingGenerations.length === 1")
+    targets = await page.evaluate("""() => {
+      const fixture = window.taskWorkspaceFixture, args = fixture.pendingGenerations[0].args;
+      return [args.uiLanguage, args.pageLanguage, fixture.journal.tasks[0].settings.pageLanguage];
+    }""")
+    assert targets == ['en', 'zh-CN', 'zh-CN'], targets
+    assert not errors, errors
+    RESULTS.append({'check': 'Non-Chinese system defaults to English; both settings survive restart and the queue passes English logs with Chinese page output'})
+    await context.close()
+
+
 async def main():
     OUT.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as playwright:
@@ -398,6 +425,7 @@ async def main():
             await verify_continue(browser)
             await verify_source_checks(browser)
             await verify_source_checks(browser, dark=True, width=740)
+            await verify_language_preferences(browser)
         except Exception:
             for context_index, context in enumerate(browser.contexts):
                 for page_index, page in enumerate(context.pages):

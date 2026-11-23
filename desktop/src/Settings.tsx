@@ -1,3 +1,6 @@
+import { tr } from "./language.ts"
+import type { LanguageSettings } from "./language.ts"
+import { LanguageSettingsCard } from "./LanguageSettingsCard"
 import { isTauri } from "@tauri-apps/api/core"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from "react"
@@ -18,13 +21,16 @@ import "./settings.css"
 
 export type SettingsTarget = "ai" | "asr"
 
-export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGuard, target }: {
+export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGuard, target, language, onLanguageChange, languageError }: {
   preferences: Preferences
   onSave: (preferences: Preferences) => void
   onBack: () => void
   onTokenChanged: () => void
   leaveGuard: RefObject<(() => boolean) | null>
   target?: SettingsTarget
+  language: LanguageSettings
+  onLanguageChange: (language: LanguageSettings) => void
+  languageError: string
 }) {
   const [draft, setDraft] = useState<SettingsDraft>(() => ({ preferences, apiToken: "", asrToken: "" }))
   const [baseline, setBaseline] = useState(draft)
@@ -90,9 +96,9 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
   function requestLeave() {
     if (savingNow.current || latest.current.saving) return false
     const notices = []
-    if (latest.current.dirty) notices.push("有未保存的修改，离开后将放弃这些修改。")
-    if (latest.current.asrTesting) notices.push("语音测试仍在进行，离开不会取消已提交的云端测试。")
-    return notices.length === 0 || window.confirm(notices.join("\n") + "\n仍要离开设置？")
+    if (latest.current.dirty) notices.push(tr("有未保存的修改，离开后将放弃这些修改。"))
+    if (latest.current.asrTesting) notices.push(tr("语音测试仍在进行，离开不会取消已提交的云端测试。"))
+    return notices.length === 0 || window.confirm(notices.join("\n") + tr("\n仍要离开设置？"))
   }
 
   useLayoutEffect(() => {
@@ -152,7 +158,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
     const timer = window.setTimeout(() => {
       checkTool(provider, paths[provider]).then(
         result => { if (active) setToolInfo(result) },
-        () => { if (active) setToolError("暂时无法检查工具路径，请确认程序可用后重试。") },
+        () => { if (active) setToolError(tr("暂时无法检查工具路径，请确认程序可用后重试。")) },
       )
     }, 200)
     return () => { active = false; window.clearTimeout(timer) }
@@ -171,7 +177,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
       if (!preserveDraft) setDraft(current => ({ ...current, ...keys }))
     } catch {
       if (mounted.current && revision === keyLoadRevision.current) {
-        setLoadError("无法读取已保存的密钥，请重试。读取成功前不会覆盖配置。")
+        setLoadError(tr("无法读取已保存的密钥，请重试。读取成功前不会覆盖配置。"))
       }
     } finally {
       if (mounted.current && revision === keyLoadRevision.current) setLoading(false)
@@ -232,8 +238,8 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
 
   async function clearCredential(kind: "apiToken" | "asrToken") {
     if (disabled || savingNow.current || testing || asrTesting) return
-    const label = kind === "apiToken" ? "AI API 密钥" : "语音 API 密钥"
-    if (!window.confirm(`立即删除本机保存的${label}？\n取消设置不会恢复已删除的密钥。`)) return
+    const label = kind === "apiToken" ? tr("AI API 密钥") : tr("语音 API 密钥")
+    if (!window.confirm(tr("立即删除本机保存的{0}？\n取消设置不会恢复已删除的密钥。", label))) return
     savingNow.current = true
     setSaving(true)
     setError("")
@@ -249,7 +255,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
       setSavedNotice(false)
       if (kind === "apiToken") onTokenChanged()
     } catch {
-      if (mounted.current) setError(`删除${label}失败，原有密钥仍保留。请重试。`)
+      if (mounted.current) setError(tr("删除{0}失败，原有密钥仍保留。请重试。", label))
     } finally {
       savingNow.current = false
       if (mounted.current) setSaving(false)
@@ -287,28 +293,27 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
 
   return <section className="settings-page" aria-labelledby="settings-heading">
     <header className="settings-heading">
-      <button className="icon-button settings-back" type="button" aria-label="返回" title="返回" disabled={saving} onClick={onBack}>
+      <button className="icon-button settings-back" type="button" aria-label={tr("返回")} title={tr("返回")} disabled={saving} onClick={onBack}>
         <ArrowLeft size={20} aria-hidden="true" />
       </button>
-      <h1 id="settings-heading">设置</h1>
+      <h1 id="settings-heading">{tr("设置")}</h1>
     </header>
     <form className="settings-form" onSubmit={event => { void save(event) }} noValidate aria-busy={saving || loading}>
       {loadError && <div className="settings-load-error" role="alert">
         <p>{loadError}</p>
         <button type="button" className="text-button" disabled={loading || saving}
-          onClick={() => void readKeys(preserveLoadDraft.current)}>重新读取</button>
+          onClick={() => void readKeys(preserveLoadDraft.current)}>{tr("重新读取")}</button>
       </div>}
+      <LanguageSettingsCard value={language} onChange={onLanguageChange} error={languageError} />
       <section className="settings-card" aria-labelledby="settings-ai-heading">
         <header className="settings-card-header">
           <div className="settings-card-title">
-            <h2 id="settings-ai-heading">AI 生成</h2>
-            <SettingsHelp label="AI 工具说明">
-              自定义 API 使用 OpenAI 兼容接口；地址填写 API 根地址，模型填写服务商提供的模型 ID。
-              Codex 和 Claude Code 使用本机已安装的工具，绿点仅表示找到程序。
-              密钥保存在本机私有文件中。
+            <h2 id="settings-ai-heading">{tr("AI 生成")}</h2>
+            <SettingsHelp label={tr("AI 工具说明")}>
+              {tr("自定义 API 使用 OpenAI 兼容接口；地址填写 API 根地址，模型填写服务商提供的模型 ID。 Codex 和 Claude Code 使用本机已安装的工具，绿点仅表示找到程序。 密钥保存在本机私有文件中。")}
             </SettingsHelp>
           </div>
-          <div className="settings-provider" role="radiogroup" aria-label="默认 AI 工具" id="provider">
+          <div className="settings-provider" role="radiogroup" aria-label={tr("默认 AI 工具")} id="provider">
             {(["api", "codex", "claude"] as Provider[]).map(value => <label key={value} className={provider === value ? "is-selected" : ""}>
               <input type="radio" name="ai-provider" value={value} checked={provider === value} disabled={disabled}
                 onChange={() => update(current => ({ ...current, preferences: { ...current.preferences, provider: value } }), true)} />
@@ -319,51 +324,51 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
         <div className="settings-card-body">
           {provider === "api" ? <>
             <label className="settings-field" htmlFor="api-url">
-              <span className="settings-label">API 地址</span>
-              <input id="api-url" type="url" aria-label="API 地址" value={api.baseUrl} disabled={disabled}
+              <span className="settings-label">{tr("API 地址")}</span>
+              <input id="api-url" type="url" aria-label={tr("API 地址")} value={api.baseUrl} disabled={disabled}
                 placeholder="https://api.example.com/v1" autoComplete="off" spellCheck={false}
                 onChange={event => update(current => ({ ...current, preferences: {
                   ...current.preferences, api: { ...current.preferences.api, baseUrl: event.target.value },
                 } }), true)} />
             </label>
             <label className="settings-field" htmlFor="api-model">
-              <span className="settings-label">模型</span>
-              <input id="api-model" type="text" aria-label="API 模型名称" value={api.model} disabled={disabled}
-                placeholder="填写模型 ID" autoComplete="off" spellCheck={false}
+              <span className="settings-label">{tr("模型")}</span>
+              <input id="api-model" type="text" aria-label={tr("API 模型名称")} value={api.model} disabled={disabled}
+                placeholder={tr("填写模型 ID")} autoComplete="off" spellCheck={false}
                 onChange={event => update(current => ({ ...current, preferences: {
                   ...current.preferences, api: { ...current.preferences.api, model: event.target.value },
                 } }), true)} />
             </label>
-            <SettingsSecretField id="api-token" label="API 密钥" value={draft.apiToken} savedValue={baseline.apiToken}
+            <SettingsSecretField id="api-token" label={tr("API 密钥")} value={draft.apiToken} savedValue={baseline.apiToken}
               onChange={apiToken => update(current => ({ ...current, apiToken }), true)}
               onClear={() => void clearCredential("apiToken")} disabled={disabled} clearDisabled={testing || asrTesting} />
             <div className="settings-card-footer settings-connect-row">
               <button className={currentTestResult?.ok ? "secondary connection-ok" : "secondary"} type="button"
                 disabled={disabled || testing || !draft.apiToken.trim()}
-                title={currentTestResult?.ok ? "重新测试当前配置" : "测试当前地址、模型和密钥"}
+                title={currentTestResult?.ok ? tr("重新测试当前配置") : tr("测试当前地址、模型和密钥")}
                 onClick={() => void tryConnection()}>
                 {testing ? <LoaderCircle size={15} className="spin" aria-hidden="true" />
                   : currentTestResult?.ok ? <span className="settings-green-dot" aria-hidden="true" /> : null}
-                {testing ? "连接中…" : currentTestResult?.ok ? "已连接" : "测试连接"}
+                {testing ? tr("连接中…") : currentTestResult?.ok ? tr("已连接") : tr("测试连接")}
               </button>
             </div>
-            <span className="sr-only" role="status">{currentTestResult?.ok ? "已连接" : ""}</span>
+            <span className="sr-only" role="status">{currentTestResult?.ok ? tr("已连接") : ""}</span>
             {currentTestResult && !currentTestResult.ok && <p className="settings-test-error" role="alert">{currentTestResult.message}</p>}
           </> : <>
             <label className="settings-field" htmlFor={`${provider}-path`}>
-              <span className="settings-label">程序路径</span>
-              <input id={`${provider}-path`} type="text" aria-label={`${providerNames[provider]} 路径`} disabled={disabled}
-                placeholder={toolInfo?.executable || "留空自动查找"} value={paths[provider]} autoComplete="off" spellCheck={false}
+              <span className="settings-label">{tr("程序路径")}</span>
+              <input id={`${provider}-path`} type="text" aria-label={tr("{0} 路径", providerNames[provider])} disabled={disabled}
+                placeholder={toolInfo?.executable || tr("留空自动查找")} value={paths[provider]} autoComplete="off" spellCheck={false}
                 onChange={event => update(current => ({ ...current, preferences: {
                   ...current.preferences, paths: { ...current.preferences.paths, [provider]: event.target.value },
                 } }))} />
             </label>
             <div className="settings-tool-status" role="status">
-              {toolInfo?.executable ? <span className="settings-recognized" title="仅表示已找到可执行文件，不代表已登录">
-                <span className="settings-green-dot" aria-hidden="true" />已检测到 {providerNames[provider]}
-              </span> : toolError || (toolInfo ? `未检测到 ${providerNames[provider]}，请填写程序路径` : "正在查找本机工具…")}
+              {toolInfo?.executable ? <span className="settings-recognized" title={tr("仅表示已找到可执行文件，不代表已登录")}>
+                <span className="settings-green-dot" aria-hidden="true" />{tr("已检测到")} {providerNames[provider]}
+              </span> : toolError || (toolInfo ? tr("未检测到 {0}，请填写程序路径", providerNames[provider]) : tr("正在查找本机工具…"))}
               {provider === "claude" && toolInfo?.executable && !toolInfo.keyAvailable &&
-                <p id="claude-auth-status" tabIndex={-1}>请为本机 Claude Code 配置 ANTHROPIC_API_KEY。</p>}
+                <p id="claude-auth-status" tabIndex={-1}>{tr("请为本机 Claude Code 配置 ANTHROPIC_API_KEY。")}</p>}
             </div>
           </>}
         </div>
@@ -376,14 +381,14 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
       {error && <p id="settings-error" className="settings-error" role="alert" tabIndex={-1}>{error}</p>}
       <footer className="settings-actions">
         <span className="settings-save-status" role="status" data-state={savedNotice && !dirty ? "saved" : undefined}>
-          {loading ? "正在读取配置…" : saving ? "正在保存…" : asrTesting ? "正在测试转写…" : testing ? "正在测试连接…"
-            : dirty ? "有未保存的修改" : savedNotice ? "设置已保存" : ""}
+          {loading ? tr("正在读取配置…") : saving ? tr("正在保存…") : asrTesting ? tr("正在测试转写…") : testing ? tr("正在测试连接…")
+            : dirty ? tr("有未保存的修改") : savedNotice ? tr("设置已保存") : ""}
         </span>
         <div className="settings-action-buttons">
-          <button className="plain" type="button" disabled={saving} onClick={onBack}>取消</button>
+          <button className="plain" type="button" disabled={saving} onClick={onBack}>{tr("取消")}</button>
           <button className="primary" type="submit" disabled={disabled || testing || asrTesting || !dirty}
-            aria-label="保存设置" title="保存设置">
-            {saving && <LoaderCircle size={15} className="spin" aria-hidden="true" />}{saving ? "保存中…" : "保存设置"}
+            aria-label={tr("保存设置")} title={tr("保存设置")}>
+            {saving && <LoaderCircle size={15} className="spin" aria-hidden="true" />}{saving ? tr("保存中…") : tr("保存设置")}
           </button>
         </div>
       </footer>

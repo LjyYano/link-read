@@ -8,6 +8,7 @@ from linkread_desktop.models import SourceInfo, TranscriptDocument, TranscriptSe
 from linkread_desktop.quotes import QuoteCard, QuoteCards, context_bounds, cue_text
 from linkread_desktop.renderers.extras import ArticleExtras
 from linkread_desktop.renderers.html import render_html
+from linkread_desktop.translation import prepare_edition
 
 
 REPO = Path(__file__).resolve().parents[3]
@@ -52,8 +53,20 @@ def main():
         title = 'My reading title <safe> & "quoted"' if name == "article" else source.title
         markup = render_html(note, extras=extras, title=title)
         (SITE / f"{name}.html").write_text(markup, encoding="utf-8")
+        if name == "article":
+            translation_note, translation_extras = note, extras
     (SITE / "fixture.json").write_text(json.dumps({"quote": quote, "context": context, "title": 'My reading title <safe> & "quoted"',
         "author": 'Ada <Reader> & Co', "time": "02:00–02:09", "source": "https://www.youtube.com/watch?v=1-Fo8McCD9w&t=120s"}), encoding="utf-8")
+    class OfflineTranslation:
+        name = "codex"
+
+        def generate(self, prompt, schema, *, timeout_seconds):
+            inputs = json.loads(prompt.splitlines()[-1])
+            return {"translations": [{"index": i, "text": "离线中文译文。"} for i, _ in inputs]}
+
+    edition = prepare_edition(OUT, translation_note.transcript, "zh-CN", OfflineTranslation(), max_chars=4500,
+                              timeout_seconds=10, workers=1, progress=None, cache_dir=OUT / "cache")
+    (SITE / "translation.html").write_text(render_html(translation_note, extras=translation_extras, edition=edition), encoding="utf-8")
     print(json.dumps({"site": str(SITE), "model_calls": 0}))
 
 

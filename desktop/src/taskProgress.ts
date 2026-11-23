@@ -1,6 +1,7 @@
+import { tr } from "./language.ts"
 import type { Progress, RequestActivity } from "./api"
 
-export type Lane = "extract" | "audio" | "upload" | "asr" | "analysis" | "polish" | "publication" | "render"
+export type Lane = "extract" | "audio" | "upload" | "asr" | "analysis" | "polish" | "publication" | "translation" | "render"
 export type ActivityLine = { at: number; stage: string; message: string }
 export type LaneState = {
   label: string
@@ -20,10 +21,10 @@ export type TaskActivity = {
   lastResultAt?: number
 }
 
-export const laneOrder: Lane[] = ["extract", "audio", "upload", "asr", "analysis", "polish", "publication", "render"]
+export const laneOrder: Lane[] = ["extract", "audio", "upload", "asr", "analysis", "polish", "publication", "translation", "render"]
 const labels: Record<Lane, string> = {
   extract: "提取字幕", audio: "下载音频", upload: "上传音频", asr: "语音识别", analysis: "提炼内容", polish: "校对正文",
-  publication: "整理摘要与导图", render: "生成阅读页",
+  publication: "整理摘要与导图", translation: "正在翻译字幕", render: "生成阅读页",
 }
 
 export function laneFor(stage: string): Lane | undefined {
@@ -32,6 +33,7 @@ export function laneFor(stage: string): Lane | undefined {
   if (stage.startsWith("asr_")) return "asr"
   if (stage === "article_ai_done" || stage.startsWith("publication_") || stage === "article_ai" || stage === "quote_warning") return "publication"
   if (stage.startsWith("polish_")) return "polish"
+  if (stage.startsWith("translation_")) return "translation"
   if (stage.startsWith("ai_") || stage === "reuse") return "analysis"
   if (["render", "saved_article", "site", "saved_site", "replace_publish"].includes(stage)) return "render"
   if (["extract", "source", "redirect", "metadata", "metadata_done", "captions", "captions_done", "download", "reading", "parse", "parsed", "saved_transcript", "provider_switch", "replace"].includes(stage)) return "extract"
@@ -69,7 +71,7 @@ export function recordProgress(previous: TaskActivity | undefined, event: Progre
     const completed = counted ? Math.max(old?.completed ?? 0, event.completed!) : old?.completed
     const total = counted ? event.total! : old?.total
     const complete = (!restartingAudio && old?.state === "complete") || completedStages.has(event.stage)
-      || (counted && (event.stage === "ai_done" || event.stage === "polish_done") && completed! >= total!)
+      || (counted && ["ai_done", "polish_done", "translation_done"].includes(event.stage) && completed! >= total!)
     lanes[lane] = {
       label: lane === "audio" && event.stage.startsWith("audio_split") ? "分片音频" : labels[lane], message: event.message, state: complete ? "complete" : "running",
       startedAt: old?.startedAt ?? now, updatedAt: now, completed, total,
@@ -88,7 +90,7 @@ export function recordProgress(previous: TaskActivity | undefined, event: Progre
 export function activeLanes(activity?: TaskActivity): LaneState[] {
   return laneOrder.flatMap(lane => {
     const entry = activity?.lanes[lane]
-    return entry?.state === "running" ? [entry] : []
+    return entry?.state === "running" ? [{ ...entry, label: tr(entry.label) }] : []
   })
 }
 
@@ -110,10 +112,10 @@ export function stageRows(activity: TaskActivity | undefined, status: TaskStatus
       : status === "running" ? "running"
       : status === "cancelling" ? "stopping"
       : status === "error" && (failedLane ? key === failedLane : running === 1) ? "failed" : "stopped"
-    const labels = { running: "处理中", complete: "已完成", failed: "失败", stopped: "已停止", stopping: "正在停止" }
+    const labels = { running: tr("处理中"), complete: tr("已完成"), failed: tr("失败"), stopped: tr("已停止"), stopping: tr("正在停止") }
     const count = state !== "complete" && lane.total
-      ? ` · 已完成 ${Math.min(lane.completed ?? 0, lane.total)}/${lane.total} 批` : ""
-    return [{ ...lane, key, state, statusLabel: labels[state] + count }]
+      ? tr(" · 已完成 {0}/{1} 批", Math.min(lane.completed ?? 0, lane.total), lane.total) : ""
+    return [{ ...lane, label: tr(lane.label), key, state, statusLabel: labels[state] + count }]
   })
 }
 
@@ -122,13 +124,13 @@ export function requestCaption(activity: TaskActivity | undefined, now: number):
   const state = activity?.request
   if (!state) return undefined
   const parts: string[] = []
-  if (state.active) parts.push(`${state.active} 项等待模型响应`)
-  if (state.queued) parts.push(`${state.queued} 项等待并发空位`)
-  if (state.validating) parts.push(`${state.validating} 项正在校验`)
+  if (state.active) parts.push(tr("{0} 项等待模型响应", state.active))
+  if (state.queued) parts.push(tr("{0} 项等待并发空位", state.queued))
+  if (state.validating) parts.push(tr("{0} 项正在校验", state.validating))
   if (!parts.length) return undefined
   if (activity?.lastResultAt) {
     const seconds = Math.max(0, Math.floor((now - activity.lastResultAt) / 1000))
-    if (seconds >= 20) parts.push(`上次结果 ${seconds} 秒前`)
+    if (seconds >= 20) parts.push(tr("上次结果 {0} 秒前", seconds))
   }
   return parts.join(" · ")
 }
@@ -137,7 +139,7 @@ export function progressCaption(activity: TaskActivity | undefined, fallback: st
   const active = activeLanes(activity)
   if (!active.length) return fallback
   const current = active[0]
-  const count = current.total ? ` · 已完成 ${Math.min(current.completed ?? 0, current.total)}/${current.total} 批` : ""
+  const count = current.total ? tr(" · 已完成 {0}/{1} 批", Math.min(current.completed ?? 0, current.total), current.total) : ""
   return current.label + count
 }
 
@@ -149,12 +151,12 @@ export function progressDetail(activity: TaskActivity | undefined, fallback: str
   const current = activeLanes(activity)[0]
   const message = current?.message || fallback
   if (/^(AI 正在(?:校对|提炼)|已调度(?:校对|提炼)批次)/.test(message)) {
-    if (current?.label === "校对正文") return "逐批校对并校验原文字词，完成后按顺序合并"
-    if (current?.label === "提炼内容") return "各批次独立处理，完成后按原文顺序合并"
+    if (current?.label === tr("校对正文")) return tr("逐批校对并校验原文字词，完成后按顺序合并")
+    if (current?.label === tr("提炼内容")) return tr("各批次独立处理，完成后按原文顺序合并")
   }
   const detail = message.replace(/^第\s*\d+\s*\/\s*\d+\s*(?:批|块)(?:中)?\s*[，,:：]?\s*/, "")
   if (detail !== message) {
-    if (/^(?:提炼|校对)?完成[。！!]?$/u.test(detail)) return "一批内容已处理完成"
+    if (/^(?:提炼|校对)?完成[。！!]?$/u.test(detail)) return tr("一批内容已处理完成")
     return detail
   }
   return message

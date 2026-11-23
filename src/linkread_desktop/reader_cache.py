@@ -14,7 +14,7 @@ from .storage import write_text
 
 
 # Bump when a packaged metadata/renderer algorithm changes without asset changes.
-CACHE_VERSION = 6
+CACHE_VERSION = 7
 READER_MANIFEST = ".reader-cache.json"
 LIBRARY_INDEX = ".library-index.json"
 _DERIVED = {".reader.html", READER_MANIFEST}

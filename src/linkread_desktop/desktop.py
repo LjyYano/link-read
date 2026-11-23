@@ -23,6 +23,7 @@ from .ai.openai_compatible import OpenAICompatibleProvider
 from .generation import _run_note, generate_article
 from .errors import LinkReadError, error_context, error_details
 from .links import canonical_link
+from .messages import english_mode, localize_event
 from .extractors.bilibili import BILIBILI_SHORT_HOSTS
 from .extractors.local import extract_local
 from .models import SourceInfo, TranscriptDocument
@@ -39,12 +40,13 @@ from .storage import write_text
 from .source_notes import MAX_SOURCE_NOTES_BYTES, with_source_notes
 from .workspace import find_workspace, _source_key
 from .transcript_previews import save_preview, prepare_preview, resume_preview, preview_folder, snapshot_id
+from .translation import PageLanguage, load_edition
 from .reader_cache import (CACHE_VERSION, LIBRARY_INDEX, archive_signature, implementation_signature,
                            cached_reader, remember_reader, read_cache, save_cache)
 
 
 def _emit(kind: str, **fields: object) -> None:
-    print(json.dumps({"type": kind, **fields}, ensure_ascii=False, separators=(",", ":")), flush=True)
+    print(json.dumps({"type": kind, **localize_event(kind, fields)}, ensure_ascii=False, separators=(",", ":")), flush=True)
 
 
 def _video_url(source: str) -> str:
@@ -154,10 +156,11 @@ def _article_markdown(library: Path, article_id: str, *, content: str = "full",
     with archive_mutation(library):
         article = _article_path(library, article_id)
         archive_signature(article.parent)
-        source, document, _ = _reader_source(article)
+        source, document, raw = _reader_source(article)
         metadata = article_metadata(document, source, overview=load_extras(source).reading)
         return render_markdown(document, content=content, include_timestamped=include_timestamped,
-                               title=metadata["title"], category=metadata["category"])
+                               title=metadata["title"], category=metadata["category"],
+                               edition=load_edition(article.parent, raw))
 
 
 def _valid_cached_record(record: object, article_id: str) -> bool:
@@ -268,12 +271,12 @@ def _prepared_reader(article: Path) -> dict:
     previous = cached_reader(article, signature)
     if previous is not None:
         return previous
-    source, document, _ = _reader_source(article)
+    source, document, raw = _reader_source(article)
     extras = load_extras(source)
     metadata = article_metadata(document, source, overview=extras.reading)
     html = render_html(document, title=metadata["title"], category=metadata["category"],
                        description=metadata["description"], extras=extras,
-                       reading_state=reading_state(article.parent))
+                       reading_state=reading_state(article.parent), edition=load_edition(article.parent, raw))
     cached = article.with_name(".reader.html")
     if cached.is_symlink():
         raise LinkReadError("阅读缓存路径不可用")
@@ -447,7 +450,7 @@ def _publish_replacement_locked(generated: Path, library: Path) -> Path:
 
 def _generate_with_replacement(
     source: str, library: Path, progress: ProgressCallback, *,
-    local_file: bool, replace: bool, provider, asr: AsrConfig | None = None,
+    local_file: bool, replace: bool, provider, asr: AsrConfig | None = None, page_language: PageLanguage = "original",
 ) -> Path:
     # Files and videos share the same enrichment, polish and publication pipeline.
     # ASR is irrelevant to subtitle files and must never be invoked for them.
@@ -458,6 +461,9 @@ def _generate_with_replacement(
     # Incomplete runs can leave a valid note.json even without article.html.
     # Never silently reuse an API-generated note when the user now selects Codex.
     identity = provider_identity(provider)
+    if page_language != "original":
+        identity = {**identity, "pageLanguage": page_language}
+        options["page_language"] = page_language
     if not replace and provider is not None and duplicate["key"]:
         old_workspace = find_workspace(library, duplicate["key"])
         if old_workspace is not None:
@@ -549,7 +555,8 @@ def _generation_stage(library: Path, source_key: str, identity: dict,
     return stage
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=("LinkRead desktop generation and offline reader" if english_mode()
+                                                   else "LinkRead 桌面端生成和离线阅读工具"))
     parser.add_argument("--library", type=Path, required=True)
     commands = parser.add_subparsers(dest="command", required=True)
     generate = commands.add_parser("generate")
@@ -560,6 +567,8 @@ def main() -> int:
     generate.add_argument("--executable")
     generate.add_argument("--local-file", action="store_true")
     generate.add_argument("--resume-preview")
+    generate.add_argument("--page-language", choices=("original", "zh-CN", "en"), default="original",
+                          help="Language of the generated reading page and transcript edition")
     generate.add_argument("--asr", action="store_true")
     generate.add_argument("--asr-base-url", default="https://dashscope.aliyuncs.com/api/v1")
     generate.add_argument("--asr-model", default="paraformer-v2")
@@ -630,7 +639,7 @@ def main() -> int:
                                          base_url=args.base_url)
             article = _generate_with_replacement(
                 source, library, send_progress, local_file=local_input,
-                replace=args.replace, provider=provider,
+                replace=args.replace, provider=provider, page_language=args.page_language,
                 asr=(AsrConfig(base_url=args.asr_base_url, model=args.asr_model,
                                max_minutes=args.asr_max_minutes, chunk_minutes=args.asr_chunk_minutes,
                                ffmpeg_path=args.ffmpeg_path) if args.asr else None))

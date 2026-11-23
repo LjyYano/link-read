@@ -1,3 +1,4 @@
+import { tr } from "./language.ts"
 import type { Provider } from "./api"
 import type { AsrOptions } from "./asrSettings"
 
@@ -69,17 +70,17 @@ export function settingsDraftEqual(a: SettingsDraft, b: SettingsDraft): boolean 
 }
 
 function validateToken(value: string, field: "api-token" | "asr-token", required: boolean) {
-  const name = field === "api-token" ? "AI API 密钥" : "语音 API 密钥"
-  if (required && !value) throw new SettingsValidationError(field, `请填写${name}`)
+  const name = field === "api-token" ? tr("AI API 密钥") : tr("语音 API 密钥")
+  if (required && !value) throw new SettingsValidationError(field, tr("请填写{0}", name))
   if (bytes(value) > 8192 || controls.test(value)) {
-    throw new SettingsValidationError(field, `${name}不能超过 8192 字节或包含控制字符`)
+    throw new SettingsValidationError(field, tr("{0}不能超过 8192 字节或包含控制字符", name))
   }
 }
 
 function validatePath(value: string, field: "codex-path" | "claude-path" | "ffmpeg-path") {
   if (value && (!value.startsWith("/") || bytes(value) > 4096 || controls.test(value))) {
     const name = field === "ffmpeg-path" ? "FFmpeg" : field === "codex-path" ? "Codex" : "Claude Code"
-    throw new SettingsValidationError(field, `请填写 ${name} 程序的完整路径，或留空自动查找`)
+    throw new SettingsValidationError(field, tr("请填写 {0} 程序的完整路径，或留空自动查找", name))
   }
 }
 
@@ -90,7 +91,7 @@ function parsedUrl(value: string, field: "api-url" | "asr-url", message: string)
 
 export function validateApiConfiguration(api: Preferences["api"], token: string): Preferences["api"] {
   const normalized = { baseUrl: cleanUrl(api.baseUrl), model: clean(api.model) }
-  const message = "请输入 HTTPS API 根地址（本机 localhost 可用 HTTP），不要包含账号、查询参数或 /chat/completions"
+  const message = tr("请输入 HTTPS API 根地址（本机 localhost 可用 HTTP），不要包含账号、查询参数或 /chat/completions")
   const url = parsedUrl(normalized.baseUrl, "api-url", message)
   const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
   if ((url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) || !url.hostname
@@ -99,7 +100,7 @@ export function validateApiConfiguration(api: Preferences["api"], token: string)
     throw new SettingsValidationError("api-url", message)
   }
   if (!normalized.model || bytes(normalized.model) > 256 || controls.test(normalized.model)) {
-    throw new SettingsValidationError("api-model", "请填写有效的模型名称（最多 256 字节）")
+    throw new SettingsValidationError("api-model", tr("请填写有效的模型名称（最多 256 字节）"))
   }
   validateToken(clean(token), "api-token", true)
   return normalized
@@ -108,7 +109,7 @@ export function validateApiConfiguration(api: Preferences["api"], token: string)
 export function validateAsrConfiguration(value: AsrOptions, token: string): AsrOptions {
   const asr = normalizedAsr(value)
   validatePath(asr.ffmpegPath, "ffmpeg-path")
-  const message = "请填写百炼原生 /api/v1 接口地址"
+  const message = tr("请填写百炼原生 /api/v1 接口地址")
   const url = parsedUrl(asr.baseUrl, "asr-url", message)
   if (url.protocol !== "https:" || url.username || url.password || url.port
     || /[?#]/.test(asr.baseUrl) || url.pathname.replace(/\/+$/, "") !== "/api/v1"
@@ -117,13 +118,13 @@ export function validateAsrConfiguration(value: AsrOptions, token: string): AsrO
     throw new SettingsValidationError("asr-url", message)
   }
   if (asr.model !== "paraformer-v2") {
-    throw new SettingsValidationError("asr-model", "当前语音服务使用 paraformer-v2 模型")
+    throw new SettingsValidationError("asr-model", tr("当前语音服务使用 paraformer-v2 模型"))
   }
   if (!Number.isInteger(asr.maxMinutes) || asr.maxMinutes < 1 || asr.maxMinutes > 720) {
-    throw new SettingsValidationError("asr-max-minutes", "转写上限需要在 1–720 分钟之间")
+    throw new SettingsValidationError("asr-max-minutes", tr("转写上限需要在 1–720 分钟之间"))
   }
   if (![0, 5, 10, 15].includes(asr.chunkMinutes)) {
-    throw new SettingsValidationError("asr-chunk-minutes", "请选择整段转写，或每 5、10、15 分钟分片")
+    throw new SettingsValidationError("asr-chunk-minutes", tr("请选择整段转写，或每 5、10、15 分钟分片"))
   }
   validateToken(clean(token), "asr-token", true)
   return asr
@@ -134,7 +135,7 @@ export function validateSettingsDraft(value: SettingsDraft): SettingsDraft {
   const next = normalizeSettingsDraft(value)
   const { preferences, apiToken, asrToken } = next
   if (!["api", "codex", "claude"].includes(preferences.provider)) {
-    throw new SettingsValidationError("provider", "请选择 AI 工具")
+    throw new SettingsValidationError("provider", tr("请选择 AI 工具"))
   }
   if (preferences.provider !== "api") {
     validatePath(preferences.paths[preferences.provider], `${preferences.provider}-path`)
@@ -176,21 +177,21 @@ export async function saveSettingsDraft(
   const originalAsrToken = previous.asrToken
   if (settingsDraftEqual(next, before)) return next
   const undo: Array<() => Promise<void>> = []
-  let stage = "设置"
+  let stage = tr("设置")
   try {
     if (next.apiToken !== before.apiToken) {
-      stage = "AI API 密钥"
+      stage = tr("AI API 密钥")
       if (next.apiToken) await ports.saveApiToken(next.apiToken)
       else await ports.deleteApiToken()
       undo.push(() => originalApiToken ? ports.saveApiToken(originalApiToken) : ports.deleteApiToken())
     }
     if (next.asrToken !== before.asrToken) {
-      stage = "语音 API 密钥"
+      stage = tr("语音 API 密钥")
       if (next.asrToken) await ports.saveAsrToken(next.asrToken)
       else await ports.deleteAsrToken()
       undo.push(() => originalAsrToken ? ports.saveAsrToken(originalAsrToken) : ports.deleteAsrToken())
     }
-    stage = "设置"
+    stage = tr("设置")
     await ports.savePreferences(next.preferences)
     return next
   } catch {
@@ -199,8 +200,8 @@ export async function saveSettingsDraft(
       try { await restore() } catch { rollbackFailed = true }
     }
     if (rollbackFailed) {
-      throw new SettingsSaveError(`保存${stage}失败，且部分密钥未能恢复。请重新读取配置后再试。`, true)
+      throw new SettingsSaveError(tr("保存{0}失败，且部分密钥未能恢复。请重新读取配置后再试。", stage), true)
     }
-    throw new SettingsSaveError(`保存${stage}失败，${undo.length ? "已恢复原有密钥" : "原有设置未更改"}。请重试。`)
+    throw new SettingsSaveError(`保存${stage}失败，${undo.length ? tr("已恢复原有密钥") : tr("原有设置未更改")}。请重试。`)
   }
 }

@@ -25,6 +25,7 @@ from .renderers.extras import load_extras, save_missing_extras
 from .renderers.html import render_html
 from .renderers.site import article_metadata, build_site, load_document
 from .storage import write_text
+from .translation import LANGUAGE_NAMES, PageLanguage, page_locale, prepare_edition
 from .workspace import find_workspace, keep_transcript, load_saved_transcript, workspace_dir
 
 
@@ -69,7 +70,7 @@ def generate_article(
     site: Path | None = None, progress: ProgressCallback | None = None,
     max_chars: int = 4500, timeout: int = 300, jobs: int = 4, polish: bool = True,
     cookies_from_browser: str | None = None, cookies_file: Path | None = None,
-    asr: AsrConfig | None = None, asr_cache_dir: Path | None = None,
+    asr: AsrConfig | None = None, asr_cache_dir: Path | None = None, page_language: PageLanguage = "original",
 ) -> Path:
     """Reuse archived stages and publish the desktop article only after success."""
     started = time.monotonic()
@@ -93,17 +94,18 @@ def generate_article(
     note_path, saved_note = _run_note(folder, raw)
     cache_dir = folder / ".ai-checkpoints"
     extras = load_extras(note_path)
+    language_options = {"language": LANGUAGE_NAMES[page_language]} if page_language != "original" else {}
 
     def analyze(workers):
         result = enrich(raw, agent, max_chars=max_chars, timeout_seconds=timeout,
-                        progress=progress, workers=workers, cache_dir=cache_dir)
+                        progress=progress, workers=workers, cache_dir=cache_dir, **language_options)
         _save_json(result, note_path)
         report(progress, "ai_saved", "AI 提炼完成，已保存可复用的笔记")
         return result
 
     def publish(document):
         result = complete_extras(document, extras, agent, timeout_seconds=timeout, progress=progress,
-                                 cache_dir=cache_dir)
+                                 cache_dir=cache_dir, **language_options)
         # Save this successful independent stage even if proofreading later fails.
         if result is not extras:
             save_missing_extras(note_path, extras, result)
@@ -155,6 +157,8 @@ def generate_article(
                    "已复用完整校对正文" if polish else "已跳过全文校对")
     report(progress, "article_ai_done", "AI 整理与阅读信息生成完成")
     completed = load_extras(note_path)
+    edition = prepare_edition(folder, raw, page_language, agent, max_chars=max_chars,
+                              timeout_seconds=timeout, workers=jobs, progress=progress, cache_dir=cache_dir)
 
     article = folder / ("article.html" if output is None else "index.html")
     home = site / "index.html" if site is not None else None
@@ -169,7 +173,7 @@ def generate_article(
     metadata = article_metadata(note, note_path, overview=completed.reading)
     write_text(article, render_html(note, extras=completed, home_href=home_href,
                                    category=metadata["category"], description=metadata["description"],
-                                   title=metadata["title"]))
+                                   title=metadata["title"], edition=edition))
     metrics = {"wall_seconds": round(time.monotonic() - started, 3),
                "html_seconds": round(time.monotonic() - render_started, 3),
                "model_calls": agent.calls, "cache_hits": agent.cache_hits,
@@ -184,6 +188,6 @@ def generate_article(
     report(progress, "saved_article", f"已生成阅读文件：{article}")
     if site is not None:
         report(progress, "site", "正在更新阅读书架")
-        count = build_site(root, site)
+        count = build_site(root, site, language=page_locale(raw, page_language))
         report(progress, "saved_site", f"已更新阅读书架：{home}（{count} 篇文章）")
     return article

@@ -1,3 +1,4 @@
+import { tr } from "./language.ts"
 /** FIFO controller for desktop generation. Only one sidecar request may be active. */
 export type QueueTask<T> = {
   id: string
@@ -21,7 +22,7 @@ export class SerialTaskQueue<T> {
 
   enqueue(task: QueueTask<T>): void {
     if (this.active?.id === task.id || this.waiting.some(item => item.id === task.id)) {
-      throw new Error("重复的任务标识")
+      throw new Error(tr("重复的任务标识"))
     }
     this.waiting.push(task)
     this.advance()

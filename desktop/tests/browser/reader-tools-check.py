@@ -260,12 +260,19 @@ async def run():
             assert await page.evaluate("document.documentElement.scrollWidth<=innerWidth")
             CHECKS.append("appearance and copy menus fit a narrow dark viewport without horizontal overflow")
             await page.keyboard.press("Escape")
-            await page.locator("#reader-tab-list").evaluate("list => { list.scrollLeft = 0; }")
+            tab_strip = page.locator("#reader-tab-list")
+            await tab_strip.evaluate("list => list.scrollTo({ left: 0, behavior: 'instant' })")
             right = page.get_by_role("button", name="Scroll tabs right")
-            for _ in range(3):
-                if await right.is_disabled():
+            scroll_steps = await tab_strip.evaluate("list => Math.ceil(list.scrollWidth / (list.clientWidth * .75)) + 1")
+            for _ in range(scroll_steps):
+                previous, width, total = await tab_strip.evaluate("list => [list.scrollLeft, list.clientWidth, list.scrollWidth]")
+                if previous + width >= total - 1:
                     break
                 await right.click()
+                await page.wait_for_function("""previous => {
+                    const list = document.querySelector('#reader-tab-list');
+                    return list.scrollLeft >= Math.min(list.scrollWidth - list.clientWidth, previous + list.clientWidth * .75) - 1;
+                }""", arg=previous)
                 await settled(page)
             await expect(right).to_be_disabled()
             shownotes = page.get_by_role("tab", name="Shownotes")
@@ -292,6 +299,26 @@ async def run():
             await expect(page.locator("#text-search")).to_have_value("reading")
             await expect(page.get_by_role("tab", name="Transcript")).to_have_attribute("aria-selected", "true")
             CHECKS.append("keyword cloud animates on hover, respects reduced motion and opens search from the keyboard")
+            await open_article(page, "translation")
+            await expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
+            await expect(page.get_by_role("tab", name="正文", exact=True)).to_have_attribute("aria-selected", "true")
+            first = page.locator(".reading-paragraph[data-cue-start='0']")
+            await expect(first.locator('[data-transcript-version="translation"]')).to_be_visible()
+            await expect(first.locator('[data-transcript-version="original"]')).to_be_hidden()
+            await page.get_by_role("button", name="原文", exact=True).click()
+            await expect(first.locator('[data-transcript-version="original"]')).to_be_visible()
+            await page.get_by_role("button", name="搜索文章", exact=True).click()
+            await page.locator("#text-search").fill("离线中文译文")
+            await expect(page.locator("#match-count")).to_have_text("没有匹配项")
+            await page.get_by_role("button", name="译文", exact=True).click()
+            await expect(first.locator('[data-transcript-version="translation"]')).to_be_visible()
+            await expect(page.locator("#match-count")).to_contain_text("正文")
+            await page.get_by_role("tab", name="摘录", exact=True).click()
+            await page.locator(".anki-card summary").click()
+            await expect(page.locator(".quote-source a")).to_have_attribute("href", fixture["source"])
+            await page.get_by_role("button", name="在正文中显示", exact=True).click()
+            await expect(page.get_by_role("tab", name="正文", exact=True)).to_have_attribute("aria-selected", "true")
+            CHECKS.append("localized offline article toggles complete original and translated text on the same cue anchors")
             assert not ERRORS, ERRORS
         except Exception as error:
             ERRORS.append(str(error))

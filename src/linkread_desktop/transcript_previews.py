@@ -12,6 +12,7 @@ from .links import canonical_link
 from .models import TranscriptDocument
 from .pipeline import video_source_key
 from .renderers.html import render_html
+from .translation import page_locale
 from .renderers.site import load_transcript
 from .storage import write_text
 from .source_notes import with_source_notes
@@ -35,7 +36,7 @@ def _render_preview(library: Path, document: TranscriptDocument) -> str:
     # changing the immutable transcript or any model checkpoint identity.
     archive = find_workspace(library, _source_key(document))
     visible = with_source_notes(document, archive) if archive is not None else document
-    return render_html(visible)
+    return render_html(visible, language=page_locale(document, "original"))
 
 
 def preview_folder(library: Path, preview_id: str, *, create: bool = False) -> Path:

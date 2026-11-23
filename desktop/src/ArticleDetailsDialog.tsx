@@ -1,3 +1,4 @@
+import { tr } from "./language.ts"
 import { useEffect, useId, useRef, useState, type FormEvent } from "react"
 import { LoaderCircle, X } from "lucide-react"
 import { getArticleDetails, updateArticleDetails, type Article, type ArticleDetails } from "./api"
@@ -34,7 +35,7 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
   async function save(event: FormEvent) {
     event.preventDefault()
     if (!details || saving) return
-    if (!title.trim()) { setError("Enter a display title."); titleInput.current?.focus(); return }
+    if (!title.trim()) { setError(tr("Enter a display title.")); titleInput.current?.focus(); return }
     setSaving(true); setError("")
     try {
       const updated = await updateArticleDetails(article.id, resetTitle ? null : title.trim(), resetCategory ? null : category.trim())
@@ -47,28 +48,28 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
     onCancel={event => { event.preventDefault(); event.stopPropagation(); if (!saving) onClose() }}
     onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); if (event.repeat || event.nativeEvent.isComposing) event.preventDefault() } }}>
     <form onSubmit={event => void save(event)}>
-      <header><h2 id={id + "-title"}>Edit details</h2><button className="icon-button" type="button" aria-label="Close edit details" disabled={saving} onClick={onClose}><X size={18} /></button></header>
+      <header><h2 id={id + "-title"}>{tr("Edit details")}</h2><button className="icon-button" type="button" aria-label={tr("Close edit details")} disabled={saving} onClick={onClose}><X size={18} /></button></header>
       {!details ? <div className="article-dialog-loading" role="status">
-        {error ? <><p className="error-line" role="alert">{error}</p><button className="secondary" type="button" onClick={() => setLoadAttempt(value => value + 1)}>Try again</button></>
-          : <><LoaderCircle className="spin" size={19} />Loading article details…</>}
+        {error ? <><p className="error-line" role="alert">{error}</p><button className="secondary" type="button" onClick={() => setLoadAttempt(value => value + 1)}>{tr("Try again")}</button></>
+          : <><LoaderCircle className="spin" size={19} />{tr("Loading article details…")}</>}
       </div> : <>
         <div className="article-dialog-body">
-          <label className="article-dialog-field" htmlFor={id + "-display-title"}>Display title
+          <label className="article-dialog-field" htmlFor={id + "-display-title"}>{tr("Display title")}
             <input ref={titleInput} id={id + "-display-title"} value={title} maxLength={300} required disabled={saving}
               onChange={event => { setTitle(event.target.value); setResetTitle(false) }} />
           </label>
-          <div className="article-original"><span>Original title: {details.originalTitle}</span>
-            <button className="text-button" type="button" disabled={saving || resetTitle} onClick={() => { setTitle(details.originalTitle); setResetTitle(true) }}>Reset to original</button></div>
-          <label className="article-dialog-field" htmlFor={id + "-category"}>Category
+          <div className="article-original"><span>{tr("Original title:")} {details.originalTitle}</span>
+            <button className="text-button" type="button" disabled={saving || resetTitle} onClick={() => { setTitle(details.originalTitle); setResetTitle(true) }}>{tr("Reset to original")}</button></div>
+          <label className="article-dialog-field" htmlFor={id + "-category"}>{tr("Category")}
             <input id={id + "-category"} value={category} maxLength={80} disabled={saving}
               onChange={event => { setCategory(event.target.value); setResetCategory(false) }} />
           </label>
-          <div className="article-original"><span>Original category: {details.originalCategory || "None"}</span>
-            <button className="text-button" type="button" disabled={saving || resetCategory} onClick={() => { setCategory(details.originalCategory); setResetCategory(true) }}>Reset to original</button></div>
+          <div className="article-original"><span>{tr("Original category:")} {details.originalCategory || "None"}</span>
+            <button className="text-button" type="button" disabled={saving || resetCategory} onClick={() => { setCategory(details.originalCategory); setResetCategory(true) }}>{tr("Reset to original")}</button></div>
           {error && <p className="error-line" role="alert">{error}</p>}
         </div>
-        <footer><button className="secondary" type="button" disabled={saving} onClick={onClose}>Cancel</button>
-          <button className="primary" type="submit" disabled={saving || !title.trim()}>{saving && <LoaderCircle className="spin" size={14} />}Save changes</button></footer>
+        <footer><button className="secondary" type="button" disabled={saving} onClick={onClose}>{tr("Cancel")}</button>
+          <button className="primary" type="submit" disabled={saving || !title.trim()}>{saving && <LoaderCircle className="spin" size={14} />}{tr("Save changes")}</button></footer>
       </>}
     </form>
   </dialog>

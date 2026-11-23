@@ -152,6 +152,17 @@ def test_absent_timed_subtitles_only_after_matching_good_feed():
         apple.extract_apple_podcasts(URL, session=Session(metadata_response(), Response(feed())))
 
 
+def test_uses_declared_episode_language_for_original_podcast_track():
+    english = "https://feeds.example.com/captions-en.vtt"
+    tags = (f'<language>en-US</language><podcast:transcript url="{CAPTION}" type="text/vtt" language="zh-CN"/>'
+            f'<podcast:transcript url="{english}" type="text/vtt" language="en"/>')
+    session = Session(metadata_response(), Response(feed(transcript=tags)),
+                      Response("WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nOriginal subtitle\n"))
+    doc = apple.extract_apple_podcasts(URL, session=session)
+    assert session.calls[-1][0] == english
+    assert doc.language == "en" and doc.segments[0].text == "Original subtitle"
+
+
 @pytest.mark.parametrize("response", [Response(b""), Response("not RSS"), Response("Forbidden", 403),
                                       Response(feed(guid="other-guid")), requests.Timeout()])
 def test_feed_failure_cannot_trigger_paid_asr(response):

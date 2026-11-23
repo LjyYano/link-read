@@ -1,3 +1,4 @@
+import { languageKey, loadLanguageSettings, resolveLocale, setLocale, tr, type LanguageSettings } from "./language.ts"
 import { isTauri } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
@@ -8,7 +9,7 @@ import { BookOpen, CircleCheck, ListTodo, Search, Settings as SettingsIcon, X } 
 import {
   cancelGeneration, checkDuplicate, checkTool, deleteArticle,
   articleTranscriptPath, generateArticle, listArticles, pickSubtitle, providerNames, updateArticleState,
-  loadTaskJournal, saveTaskJournal, normalizeGenerationFailure, openVideo,
+  loadTaskJournal, saveTaskJournal, normalizeGenerationFailure, openVideo, setNativeLanguage,
   type Article, type ArticleStatePatch, type Library, type Progress, type ToolStatus,
 } from "./api"
 import { Bookshelf, Home, type Job, type TaskJob } from "./Home"
@@ -113,7 +114,7 @@ function TitleBar({ screen, taskCount, unreadTasks, onTasks, onSettings, onQuick
       <div className="titlebar-drag" onMouseDown={event => {
         if (!isTauri()) return
         void titlebarMouseDown(event, getCurrentWindow()).catch(() => {
-          console.warn("窗口拖动或缩放操作未完成")
+          console.warn(tr("窗口拖动或缩放操作未完成"))
         })
       }} />
       <div className="titlebar-brand" aria-label="LinkRead">
@@ -121,8 +122,9 @@ function TitleBar({ screen, taskCount, unreadTasks, onTasks, onSettings, onQuick
         <span>LinkRead</span>
       </div>
       <div className="titlebar-tools">
-      <button className="icon-button titlebar-tasks" type="button" aria-label={`任务中心${taskCount ? `，${taskCount} 个活动任务` : ""}${unreadTasks ? `，${unreadTasks} 条未查看` : ""}`}
-        title={`任务中心${unreadTasks ? ` · ${unreadTasks} 条记录需要查看` : ""}`} onClick={event => {
+      <button className="icon-button titlebar-tasks" type="button" aria-label={tr("任务中心{0}{1}",
+        taskCount ? tr("，{0} 个活动任务", taskCount) : "", unreadTasks ? tr("，{0} 条未查看", unreadTasks) : "")}
+        title={tr("任务中心{0}", unreadTasks ? tr(" · {0} 条记录需要查看", unreadTasks) : "")} onClick={event => {
           // WebKit does not focus buttons on pointer clicks by default. Make
           // this trigger the dialog's explicit return point before mounting it.
           event.currentTarget.focus({ preventScroll: true }); onTasks()
@@ -131,11 +133,11 @@ function TitleBar({ screen, taskCount, unreadTasks, onTasks, onSettings, onQuick
         {taskCount > 0 && <span className="titlebar-task-count">{taskCount}</span>}
         {unreadTasks > 0 && <span className="titlebar-task-alert" aria-hidden="true">!</span>}
       </button>
-      <button className="icon-button" type="button" aria-label="快速打开" title="快速打开（⌘K / Ctrl+K）" onClick={onQuickOpen}>
+      <button className="icon-button" type="button" aria-label={tr("快速打开")} title={tr("快速打开（⌘K / Ctrl+K）")} onClick={onQuickOpen}>
         <Search size={16} aria-hidden="true" />
       </button>
       {(screen === "create" || screen === "library") && (
-        <button className="icon-button titlebar-settings" type="button" aria-label="设置" title="设置" onClick={onSettings}>
+        <button className="icon-button titlebar-settings" type="button" aria-label={tr("设置")} title={tr("设置")} onClick={onSettings}>
           <SettingsIcon size={17} aria-hidden="true" />
         </button>
       )}
@@ -145,6 +147,25 @@ function TitleBar({ screen, taskCount, unreadTasks, onTasks, onSettings, onQuick
 }
 
 function App() {
+  const [language, setLanguage] = useState(loadLanguageSettings)
+  const [languageError, setLanguageError] = useState("")
+  const [systemLanguage, setSystemLanguage] = useState(() => resolveLocale("system"))
+  const appLocale = language.interfaceLanguage === "system" ? systemLanguage : language.interfaceLanguage
+  setLocale(appLocale)
+  useEffect(() => {
+    const updateSystem = () => setSystemLanguage(resolveLocale("system"))
+    window.addEventListener("languagechange", updateSystem)
+    return () => window.removeEventListener("languagechange", updateSystem)
+  }, [])
+  useEffect(() => { void setNativeLanguage(appLocale).catch(() => {}) }, [appLocale])
+
+  function changeLanguage(next: LanguageSettings) {
+    try {
+      localStorage.setItem(languageKey, JSON.stringify(next))
+      setLanguage(next)
+      setLanguageError("")
+    } catch { setLanguageError(tr("无法保存语言设置，请重试。")) }
+  }
   const [screen, setScreen] = useState<Screen>("create")
   const [previousScreen, setPreviousScreen] = useState<Exclude<Screen, "settings">>("create")
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>()
@@ -276,20 +297,20 @@ function App() {
     const tasks = current.flatMap(task => {
       if (task.job.status === "done") return []
       const input = inputs.get(task.id), time = times.get(task.id)
-      if (!input || !time) throw new Error("任务输入记录缺失，无法保存队列")
+      if (!input || !time) throw new Error(tr("任务输入记录缺失，无法保存队列"))
       return [taskSnapshot(task.id, input, task.job, time.createdAt, time.updatedAt)]
     })
     return parseTaskJournal({ version: 1, tasks })
   }
 
   async function persistJournal() {
-    if (!journalReady.current) throw new Error("请先完成任务记录恢复")
+    if (!journalReady.current) throw new Error(tr("请先完成任务记录恢复"))
     const version = ++journalSaveVersion.current
     try {
       await journalWriter.current.write(journalSnapshot())
       if (version === journalSaveVersion.current) setJournalError("")
     } catch (failure) {
-      if (version === journalSaveVersion.current) setJournalError("任务记录未能保存。" + String(failure))
+      if (version === journalSaveVersion.current) setJournalError(tr("任务记录未能保存。") + String(failure))
       throw failure
     }
   }
@@ -319,7 +340,7 @@ function App() {
       // Restored tasks are display-only until the user explicitly chooses Continue.
       changeJobs(restored.map(({ id, job }) => ({ id, job })))
     } catch (failure) {
-      if (version === journalLoadVersion.current) setJournalError("未能读取保存的任务。" + String(failure))
+      if (version === journalLoadVersion.current) setJournalError(tr("未能读取保存的任务。") + String(failure))
     } finally {
       if (version === journalLoadVersion.current) setJournalLoading(false)
     }
@@ -347,11 +368,11 @@ function App() {
 
   function chooseLocal(paths: string[]) {
     if (paths.length !== 1) {
-      setInputError("一次只能导入一个字幕文件")
+      setInputError(tr("一次只能导入一个字幕文件"))
       return
     }
     if (!subtitleExtension.test(paths[0])) {
-      setInputError("请选择 SRT、VTT 或 JSON 字幕文件")
+      setInputError(tr("请选择 SRT、VTT 或 JSON 字幕文件"))
       return
     }
     cancelPendingStart()
@@ -414,7 +435,7 @@ function App() {
       if (active) unlisten = cleanup
       else cleanup()
     }).catch(error => {
-      if (active) console.error("LinkRead file drop:", error)
+      if (active) console.error(tr("LinkRead file drop:"), error)
     })
     return () => {
       active = false
@@ -485,7 +506,7 @@ function App() {
 
   /** Capture source and settings on submission; run jobs one at a time. */
   function enqueueTask(spec: ActiveGeneration, replaceId?: string) {
-    if (!journalReady.current) throw new Error("请先恢复任务记录，再开始生成")
+    if (!journalReady.current) throw new Error(tr("请先恢复任务记录，再开始生成"))
     const id = crypto.getRandomValues(new Uint32Array(4)).join("-")
     const inputs = new Map(taskInputs.current), times = new Map(taskTimes.current)
     if (replaceId) { inputs.delete(replaceId); times.delete(replaceId) }
@@ -493,7 +514,7 @@ function App() {
     times.set(id, { createdAt: Date.now(), updatedAt: Date.now() })
     const next: TaskJob[] = [
       ...jobsRef.current.filter(task => task.id !== replaceId),
-      { id, job: { ...spec.identity, previewId: spec.previewId, status: "queued", message: "等待前面任务完成" } },
+      { id, job: { ...spec.identity, previewId: spec.previewId, status: "queued", message: tr("等待前面任务完成") } },
     ]
     // Refuse an oversized queue before mutating state; never silently discard older work.
     journalSnapshot(next, inputs, times)
@@ -505,7 +526,7 @@ function App() {
       id,
       beforeStart: async () => {
         try { await persistJournal() } catch (failure) {
-          throw { message: "任务尚未开始：无法保存恢复记录。" + String(failure),
+          throw { message: tr("任务尚未开始：无法保存恢复记录。") + String(failure),
             code: "task_journal", stage: null, retryable: true, action: "retry" }
         }
       },
@@ -513,8 +534,8 @@ function App() {
         requestId.current = id
         updateTask(id, () => ({
           ...spec.identity, previewId: spec.previewId, status: "running", step: 0,
-          message: spec.previewId ? "正在检查已保存的字幕与处理结果…" : "正在读取字幕…", percent: 0,
-          activity: recordProgress(undefined, { stage: "source", message: "正在检查已保存的处理结果", completed: null, total: null }),
+          message: spec.previewId ? tr("正在检查已保存的字幕与处理结果…") : tr("正在读取字幕…"), percent: 0,
+          activity: recordProgress(undefined, { stage: "source", message: tr("正在检查已保存的处理结果"), completed: null, total: null }),
         }))
       },
       run: () => generateArticle(spec.input, spec.provider, spec.executable,
@@ -522,7 +543,7 @@ function App() {
           spec.identity = mergeArticleMetadata(spec.identity, event.metadata)
           if (event.previewId) spec.previewId = event.previewId
           updateTask(id, job => updateJob(job, event) ?? job)
-        }, id, spec.localFile, spec.replace, spec.baseUrl, spec.model, spec.asr, spec.previewId),
+        }, id, spec.localFile, spec.replace, spec.baseUrl, spec.model, spec.asr, spec.previewId, spec.pageLanguage),
       onSuccess: generated => {
         if (!spec.localFile) forgetSourceReadiness(spec.input)
         updateTask(id, () => ({ status: "done", article: generated }))
@@ -571,15 +592,15 @@ function App() {
         if (!current()) return
         if (before === taskState()) { checked = result; break }
       }
-      if (!checked) { setInputError("任务状态正在更新，请稍后再试。"); return }
+      if (!checked) { setInputError(tr("任务状态正在更新，请稍后再试。")); return }
       // Finding saved work comes before model, ASR and source-readiness checks.
       // A protected/unavailable source can still have a perfectly readable archive.
       if (checked.article) { setInputError(""); await read(checked.article); return }
       const inQueue = matchingTask(checked.key)
       if (inQueue) { setInputError(""); openTasks(inQueue.id); return }
-      if (!journalReady.current) { setInputError(journalLoading ? "正在恢复任务记录，请稍候" : "请先重试读取保存的任务"); return }
+      if (!journalReady.current) { setInputError(journalLoading ? tr("正在恢复任务记录，请稍候") : tr("请先重试读取保存的任务")); return }
       if (!localFile && sourceReadiness.blocked) {
-        setInputError("此来源已确认暂不支持处理，请导入字幕、查看来源或重新检查。"); return
+        setInputError(tr("此来源已确认暂不支持处理，请导入字幕、查看来源或重新检查。")); return
       }
       if (!localFile && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled) { void showSettings("asr"); return }
       if (toolWarning) { void showSettings("ai"); return }
@@ -590,6 +611,7 @@ function App() {
         executable: preferences.provider === "api" ? "" : preferences.paths[preferences.provider],
         baseUrl: preferences.api.baseUrl,
         model: preferences.api.model,
+        pageLanguage: language.pageLanguage,
         sourceKey: checked.key,
         replace: false,
         asr: { ...preferences.asr },
@@ -624,13 +646,13 @@ function App() {
         ...taskInputs.current.get(id)?.identity,
         ...(current.status === "done" ? {} : current),
         status: "cancelled",
-        message: "已取消排队",
+        message: tr("已取消排队"),
       }))
       return
     }
     if (requestId.current !== id) return
     updateTask(id, job => job.status === "running"
-      ? { ...job, status: "cancelling", message: "正在取消…" } : job)
+      ? { ...job, status: "cancelling", message: tr("正在取消…") } : job)
     try {
       await cancelGeneration(id)
     } catch (error) {
@@ -651,7 +673,7 @@ function App() {
   }
 
   async function clearReviewed(ids: string[]) {
-    if (!journalReady.current) throw new Error("请先恢复任务记录")
+    if (!journalReady.current) throw new Error(tr("请先恢复任务记录"))
     const eligible = new Set(reviewedTerminalTaskIds(jobsRef.current, reviewedTasksRef.current))
     const selected = new Set(ids.filter(id => eligible.has(id)))
     if (!selected.size) return
@@ -660,8 +682,8 @@ function App() {
     try {
       await journalWriter.current.write(journalSnapshot(jobsRef.current.filter(task => !selected.has(task.id))))
     } catch (failure) {
-      setJournalError("任务记录未能保存。" + String(failure))
-      throw new Error("清理未完成，任务记录已保留。" + String(failure))
+      setJournalError(tr("任务记录未能保存。") + String(failure))
+      throw new Error(tr("清理未完成，任务记录已保留。") + String(failure))
     }
     const stillEligible = new Set(reviewedTerminalTaskIds(jobsRef.current, reviewedTasksRef.current))
     const removed = new Set([...selected].filter(id => stillEligible.has(id)))
@@ -716,20 +738,20 @@ function App() {
 
   async function regenerate(selected: Article) {
     if (submitting.current) return
-    if (!journalReady.current) throw new Error("请先在新建文章页面恢复保存的任务记录")
-    if (toolWarning) throw new Error(toolWarning + "，请先打开设置")
+    if (!journalReady.current) throw new Error(tr("请先在新建文章页面恢复保存的任务记录"))
+    if (toolWarning) throw new Error(toolWarning + tr("，请先打开设置"))
     submitting.current = true
     try {
-      const title = selected.hasAnalysis === false ? "AI 整理" : "重新整理"
-      if (!window.confirm(title + "《" + selected.title + "》？\n使用 " + providerNames[preferences.provider]
-        + " 处理已保存的字幕，可能产生模型费用。新版本成功后才替换旧文章。")) return
+      const title = selected.hasAnalysis === false ? tr("AI 整理") : tr("重新整理")
+      if (!window.confirm(tr("{0}《{1}》？\n使用 {2} 处理已保存的字幕，可能产生模型费用。新版本成功后才替换旧文章。",
+        title, selected.title, providerNames[preferences.provider]))) return
       const input = await articleTranscriptPath(selected.id)
       const duplicate = await checkDuplicate(input, true)
-      if (matchingTask(duplicate.key)) throw new Error("该文章已在处理或排队，可在任务中心查看。")
+      if (matchingTask(duplicate.key)) throw new Error(tr("该文章已在处理或排队，可在任务中心查看。"))
       enqueueTask({
         input, localFile: true, provider: preferences.provider,
         executable: preferences.provider === "api" ? "" : preferences.paths[preferences.provider],
-        baseUrl: preferences.api.baseUrl, model: preferences.api.model,
+        baseUrl: preferences.api.baseUrl, model: preferences.api.model, pageLanguage: language.pageLanguage,
         sourceKey: duplicate.key, replace: true, asr: { ...preferences.asr },
         identity: selected, replacementArticleId: selected.id,
       })
@@ -752,7 +774,7 @@ function App() {
       const unavailable = provider === "api"
         ? !preferences.api.baseUrl || !preferences.api.model || !currentTool.keyAvailable
         : !currentTool.executable || (provider === "claude" && !currentTool.keyAvailable)
-      if (unavailable) throw { message: "请检查当前 AI 服务设置，再继续此任务。", code: "settings", stage: null, retryable: true, action: "settings" }
+      if (unavailable) throw { message: tr("请检查当前 AI 服务设置，再继续此任务。"), code: "settings", stage: null, retryable: true, action: "settings" }
       const previewId = previous.status === "done" ? original.previewId : previous.previewId ?? original.previewId
       const duplicate = await checkDuplicate(original.input, original.localFile, previewId)
       const inQueue = duplicate.key !== null && [...taskInputs.current.entries()].some(([key, input]) =>
@@ -760,11 +782,11 @@ function App() {
         && (taskQueue.current.activeId === key || taskQueue.current.waitingIds.includes(key)))
       const replace = duplicate.article !== null || inQueue
       if (replace && !window.confirm(duplicate.article
-        ? "《" + duplicate.article.title + "》已在书架中。是否重新生成并替换？\n旧文章会在新版本成功后被替换。"
-        : "该内容已经在生成或排队。是否继续添加重新生成任务？\n新任务会排在后面，并替换前一个版本。")) return
+        ? tr("《{0}》已在书架中。是否重新生成并替换？\n旧文章会在新版本成功后被替换。", duplicate.article.title)
+        : tr("该内容已经在生成或排队。是否继续添加重新生成任务？\n新任务会排在后面，并替换前一个版本。"))) return
       const asr = { ...preferences.asr }
       if (!original.localFile && !previewId && resumeNeedsAsrConfirmation(original.asr, asr) && !window.confirm(
-        "当前语音识别设置比此任务上次使用的范围更大，或服务/分片配置已改变。\n继续时只会在没有可读取字幕的情况下使用已启用的语音识别，可能产生新费用。是否继续？")) return
+        tr("当前语音识别设置比此任务上次使用的范围更大，或服务/分片配置已改变。\n继续时只会在没有可读取字幕的情况下使用已启用的语音识别，可能产生新费用。是否继续？"))) return
       enqueueTask({ ...original, provider, executable,
         baseUrl: preferences.api.baseUrl, model: preferences.api.model, asr,
         sourceKey: duplicate.key, replace, previewId,
@@ -838,7 +860,7 @@ function App() {
     setTaskCenterOpen(false)
     const identity = { ...taskInputs.current.get(id)?.identity, ...task.job }
     setPreviewTaskId(id)
-    setArticle({ id: "preview-" + previewId, previewId, title: identity.title || "Transcript preview",
+    setArticle({ id: "preview-" + previewId, previewId, title: identity.title || tr("Transcript preview"),
       hasAnalysis: false, category: "", platform: identity.platform || "local", updatedAt: Date.now(),
       sourceUrl: identity.sourceUrl ?? null, author: identity.author ?? null, publishedAt: identity.publishedAt ?? null,
       durationMs: identity.durationMs ?? null, thumbnailUrl: identity.thumbnailUrl ?? null,
@@ -878,10 +900,10 @@ function App() {
   const toolWarning = toolError
     || (preferences.provider === "api"
       ? (!preferences.api.baseUrl || !preferences.api.model
-        ? "请在设置中填写 API Base URL 和模型"
-        : toolStatus && !toolStatus.keyAvailable ? "请在设置中保存 API Token" : undefined)
-      : toolStatus && !toolStatus.executable ? `未检测到 ${providerNames[preferences.provider]}`
-      : toolStatus && !toolStatus.keyAvailable ? "缺少 ANTHROPIC_API_KEY" : undefined)
+        ? tr("请在设置中填写 API Base URL 和模型")
+        : toolStatus && !toolStatus.keyAvailable ? tr("请在设置中保存 API Token") : undefined)
+      : toolStatus && !toolStatus.executable ? tr("未检测到 {0}", providerNames[preferences.provider])
+      : toolStatus && !toolStatus.keyAvailable ? tr("缺少 ANTHROPIC_API_KEY") : undefined)
 
   const shelfActions = {
     library, error: libraryError, onRead: read, onRefresh: refreshLibrary,
@@ -906,7 +928,7 @@ function App() {
   const visibleCompletions = completionNotice.filter(item => item.id !== suppressedId)
   const readyArticle = visibleCompletions[0]
   const origin = readingOrigin.current
-  const backLabel = origin.tasks ? "Tasks" : origin.screen === "create" ? "Home" : origin.screen === "settings" ? "Settings" : "Library"
+  const backLabel = origin.tasks ? tr("Tasks") : origin.screen === "create" ? tr("Home") : origin.screen === "settings" ? tr("Settings") : tr("Library")
   const groupedTasks = groupTasks(jobs)
   const unreadTaskIds = unreviewedTaskIds(jobs, reviewedTasks)
 
@@ -935,6 +957,7 @@ function App() {
         )}
         {screen === "settings" && (
           <Settings preferences={preferences} onSave={configure} leaveGuard={settingsLeaveGuard} target={settingsTarget}
+            language={language} onLanguageChange={changeLanguage} languageError={languageError}
             onTokenChanged={() => setApiTokenVersion(current => current + 1)}
             onBack={() => navigateTo(previousScreen)} />
         )}
@@ -974,11 +997,11 @@ function App() {
         }} />}
       {readyArticle && <div className="completion-toast" role="status" aria-live="polite">
         <CircleCheck size={18} aria-hidden="true" />
-        <div className="completion-toast-content"><strong>文章已生成</strong>
-          <span>{readyArticle.title}{visibleCompletions.length > 1 ? ` · 另有 ${visibleCompletions.length - 1} 篇已完成` : ""}</span>
+        <div className="completion-toast-content"><strong>{tr("文章已生成")}</strong>
+          <span>{readyArticle.title}{visibleCompletions.length > 1 ? tr(" · 另有 {0} 篇已完成", visibleCompletions.length - 1) : ""}</span>
         </div>
-        <button className="text-button" type="button" onClick={() => read(readyArticle)}>打开文章</button>
-        <button className="icon-button" type="button" aria-label="关闭完成提示" onClick={() => setCompletionNotice([])}><X size={15} /></button>
+        <button className="text-button" type="button" onClick={() => read(readyArticle)}>{tr("打开文章")}</button>
+        <button className="icon-button" type="button" aria-label={tr("关闭完成提示")} onClick={() => setCompletionNotice([])}><X size={15} /></button>
       </div>}
     </div>
   )

@@ -49,7 +49,7 @@ class RunProvider:
                     "complete": "模型结果已通过校验", "cache": "已复用校验通过的批次",
                     "failed": "本次模型请求未完成"}
         report(self.progress, {"analysis": "ai_request", "polish": "polish_request",
-                               "publication": "publication_request"}.get(stage, "model_request"),
+                               "publication": "publication_request", "translation": "translation_request"}.get(stage, "model_request"),
                message or messages[phase], request=RequestStatus(
                    sequence=self._sequence, id=f"request-{request_id}", stage=stage, phase=phase,
                    active=self._active, queued=len(self._waiting), validating=self._validating,

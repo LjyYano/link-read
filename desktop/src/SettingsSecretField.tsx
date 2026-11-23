@@ -1,3 +1,4 @@
+import { tr } from "./language.ts"
 import { useEffect, useRef, useState } from "react"
 import { Eye, EyeOff, MoreHorizontal } from "lucide-react"
 
@@ -68,30 +69,30 @@ export function SettingsSecretField({ id, label, value, savedValue, onChange, on
   return <div className="settings-field">
     <label className="settings-label" htmlFor={saved && !editing ? `${id}-change` : id}>{label}</label>
     <div className="settings-field-control">
-      {saved && !editing ? <div className="settings-secret settings-secret-saved" aria-label={`${label}已保存`}>
+      {saved && !editing ? <div className="settings-secret settings-secret-saved" aria-label={tr("{0}已保存", label)}>
         <span className="settings-secret-mask" aria-hidden="true">••••••••</span>
-        <span className="settings-secret-state">已保存</span>
+        <span className="settings-secret-state">{tr("已保存")}</span>
         <div className="settings-secret-actions">
           <button ref={changeTrigger} id={`${id}-change`} type="button" className="text-button" disabled={disabled}
-            aria-label={`更换${label}`} onClick={() => edit()}>更换</button>
+            aria-label={tr("更换{0}", label)} onClick={() => edit()}>{tr("更换")}</button>
           <div ref={menu} className="settings-secret-menu">
             <button ref={menuTrigger} className="icon-button" type="button" disabled={disabled}
-              aria-label={`${label}更多操作`} title="更多操作" aria-expanded={menuOpen} aria-controls={`${id}-menu`}
+              aria-label={tr("{0}更多操作", label)} title={tr("更多操作")} aria-expanded={menuOpen} aria-controls={`${id}-menu`}
               onClick={() => setMenuOpen(value => !value)}><MoreHorizontal size={18} aria-hidden="true" /></button>
-            {menuOpen && <div id={`${id}-menu`} className="settings-secret-popover" role="group" aria-label={`${label}操作`}>
-              <button type="button" className="plain" disabled={disabled} onClick={() => edit(true)}>显示密钥</button>
+            {menuOpen && <div id={`${id}-menu`} className="settings-secret-popover" role="group" aria-label={tr("{0}操作", label)}>
+              <button type="button" className="plain" disabled={disabled} onClick={() => edit(true)}>{tr("显示密钥")}</button>
               {onClear && <button type="button" className="plain settings-secret-delete" disabled={disabled || clearDisabled}
-                onClick={() => { setMenuOpen(false); onClear() }}>删除已保存密钥…</button>}
+                onClick={() => { setMenuOpen(false); onClear() }}>{tr("删除已保存密钥…")}</button>}
             </div>}
           </div>
         </div>
       </div> : <>
         <div className="settings-secret">
           <input ref={input} id={id} aria-label={label} type={visible ? "text" : "password"}
-            value={value} disabled={disabled} placeholder={`输入${label}`} autoComplete="new-password" spellCheck={false}
+            value={value} disabled={disabled} placeholder={tr("输入{0}", label)} autoComplete="new-password" spellCheck={false}
             onChange={event => onChange(event.target.value)} />
           <button className="icon-button settings-secret-toggle" type="button" disabled={disabled}
-            aria-label={`${visible ? "隐藏" : "显示"}${label}`} title={`${visible ? "隐藏" : "显示"}密钥`}
+            aria-label={tr(visible ? "隐藏{0}" : "显示{0}", label)} title={tr(visible ? "隐藏密钥" : "显示密钥")}
             onClick={() => setVisible(value => !value)}>
             {visible ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
           </button>
@@ -100,7 +101,7 @@ export function SettingsSecretField({ id, label, value, savedValue, onChange, on
           onClick={() => {
             onChange(savedValue); setEditing(false); setVisible(false)
             requestAnimationFrame(() => changeTrigger.current?.focus({ preventScroll: true }))
-          }}>{saved ? "收起" : "撤销密钥修改"}</button>}
+          }}>{saved ? tr("收起") : tr("撤销密钥修改")}</button>}
       </>}
     </div>
   </div>

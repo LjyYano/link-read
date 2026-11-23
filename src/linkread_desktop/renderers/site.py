@@ -19,6 +19,7 @@ from .catalog import load_catalog, load_user_metadata, source_date
 from .extras import ReadingOverview, is_extra_json, load_extras
 from .formatting import display_title
 from .html import render_html
+from ..translation import EDITION_FILE
 from .reading_state import reading_state_key
 from .templates import fill_template, json_data
 
@@ -116,15 +117,17 @@ def _document_files(source: Path) -> list[Path]:
         path for path in source.rglob("*.json")
         if not any(part.startswith(".") for part in path.relative_to(source).parts)
         and path.is_file() and not is_extra_json(path)
-        and path.name != "article.json" and not path.name.endswith(".article.json")
+        and path.name not in {"article.json", EDITION_FILE} and not path.name.endswith(".article.json")
     )
     if not result:
         raise ExtractionError(f"目录下没有 LinkRead 字幕 JSON：{source}")
     return result
 
 
-def render_home(records: list[dict]) -> str:
+def render_home(records: list[dict], *, language: str = "legacy") -> str:
     """Fill the html-library table template with local article links."""
+    from .labels import SHELF_EN, ZH, page_label
+
     rows = []
     articles = []
     for item in records:
@@ -138,28 +141,35 @@ def render_home(records: list[dict]) -> str:
         date_text = escape(metadata["date"] or "—")
         date_title = {"published": "发布日期", "archived": "归档日期", "custom": "文章日期"}.get(
             metadata.get("date_source", ""), "文章日期" if metadata["date"] else "日期未知")
+        if language == "en":
+            date_title = SHELF_EN[date_title]
         tags = "".join(f'<span class="tag">{escape(tag)}</span>' for tag in metadata["tags"][:4])
         key = item.get("readingKey", f"page:{item['slug']}")
         state = item.get("readingState", {"isRead": False, "isStarred": False})
         read, starred = state.get("isRead") is True, state.get("isStarred") is True
+        read_label = page_label(language, "Mark Unread" if read else "Mark Complete")
+        star_label = page_label(language, "Unstar" if starred else "Star")
         rows.append(f'''<tr class="record" tabindex="0" data-href="{href}">
           <td class="name-cell"><a class="document-link" href="{href}" title="{desc}">{_DOC_ICON}<span>{title}</span></a></td>
           <td class="category-cell">{category_badge}</td>
           <td class="tags-cell"><div class="tag-set">{tags}</div></td>
           <td class="reading-cell"><div class="reading-flags">
-            <button type="button" class="reading-toggle" data-read aria-pressed="{str(read).lower()}" aria-label="{'Mark Unread' if read else 'Mark Complete'}" title="{'Mark Unread' if read else 'Mark Complete'}">{_READ_ICON}</button>
-            <button type="button" class="reading-toggle star-toggle" data-star aria-pressed="{str(starred).lower()}" aria-label="{'Unstar' if starred else 'Star'}">{_STAR_ICON}</button>
+            <button type="button" class="reading-toggle" data-read aria-pressed="{str(read).lower()}" aria-label="{read_label}" title="{read_label}">{_READ_ICON}</button>
+            <button type="button" class="reading-toggle star-toggle" data-star aria-pressed="{str(starred).lower()}" aria-label="{star_label}">{_STAR_ICON}</button>
           </div></td>
           <td><span class="date" title="{date_title}">{date_text}</span></td>
         </tr>''')
         articles.append({**metadata, "url": url, "readingKey": key, "readingState": state})
     return fill_template("home.html", {
+        "PAGE_LANGUAGE": "en" if language == "en" else "zh-CN", "LABELS": json_data(ZH if language == "zh-CN" else {}),
         "COUNT": str(len(records)), "ROWS": "\n".join(rows), "ARTICLE_DATA": json_data(articles),
-    })
+    }, language=language)
 
 
-def build_site(source: Path, output_dir: Path) -> int:
+def build_site(source: Path, output_dir: Path, *, language: str = "legacy") -> int:
     """Validate every document before writing, then create home + article pages."""
+    from ..translation import load_edition
+
     paths = _document_files(source)
     root = source.parent if source.is_file() else source
     records = []
@@ -207,12 +217,15 @@ def build_site(source: Path, output_dir: Path) -> int:
         folder = output_dir / "pages" / record["slug"]
         extras = record["extras"]
         metadata = record["metadata"]
-        html = render_html(record["document"], home_href="../../index.html",
+        document = record["document"]
+        transcript = document.transcript if isinstance(document, NoteDocument) else document
+        html = render_html(document, home_href="../../index.html",
                            title=metadata["title"],
                            category=metadata["category"], description=metadata["description"],
-                           extras=extras, reading_state=record["readingState"])
+                           extras=extras, reading_state=record["readingState"],
+                           edition=load_edition(record["path"].parent, transcript))
         pages.append((folder, html, metadata))
-    home = render_home(records)
+    home = render_home(records, language=language)
     for folder, html, metadata in pages:
         write_text(folder / "index.html", html)
         write_text(folder / "article.json", json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")

@@ -1,3 +1,4 @@
+import { tr } from "./language.ts"
 import { useId, useRef, useState, type FormEvent } from "react"
 import { LoaderCircle, X } from "lucide-react"
 import { exportArticle, type Article, type MarkdownExportOptions } from "./api"
@@ -26,21 +27,21 @@ export function MarkdownExportDialog({ article, onClose }: { article: Article; o
     onCancel={event => { event.preventDefault(); event.stopPropagation(); if (!saving) onClose() }}
     onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); if (event.repeat || event.nativeEvent.isComposing) event.preventDefault() } }}>
     <form onSubmit={event => void save(event)}>
-      <header><div><h2 id={id + "-title"}>Export Markdown</h2><p className="article-dialog-subtitle">{article.title}</p></div>
-        <button className="icon-button" type="button" aria-label="Close Markdown export" disabled={saving} onClick={onClose}><X size={18} /></button></header>
+      <header><div><h2 id={id + "-title"}>{tr("Export Markdown")}</h2><p className="article-dialog-subtitle">{article.title}</p></div>
+        <button className="icon-button" type="button" aria-label={tr("Close Markdown export")} disabled={saving} onClick={onClose}><X size={18} /></button></header>
       <div className="article-dialog-body">
-        <fieldset disabled={saving} className="export-content-options"><legend>Content</legend>
+        <fieldset disabled={saving} className="export-content-options"><legend>{tr("Content")}</legend>
           <label><input type="radio" name={id + "-content"} value="readable" checked={content === "readable"} onChange={() => setContent("readable")} />
-            <span><strong>Readable article</strong><small>Summary and clean transcript</small></span></label>
+            <span><strong>{tr("Readable article")}</strong><small>{tr("Summary and clean transcript")}</small></span></label>
           <label><input type="radio" name={id + "-content"} value="full" checked={content === "full"} onChange={() => setContent("full")} />
-            <span><strong>Full note</strong><small>Also include saved takeaways, chapter guide, highlights, keywords and Shownotes</small></span></label>
+            <span><strong>{tr("Full note")}</strong><small>{tr("Also include saved takeaways, chapter guide, highlights, keywords and Shownotes")}</small></span></label>
         </fieldset>
         <label className="export-transcript-option"><input type="checkbox" checked={includeTimestamped} disabled={saving} onChange={event => setIncludeTimestamped(event.target.checked)} />
-          <span>Include timestamped transcript</span></label>
+          <span>{tr("Include timestamped transcript")}</span></label>
         {error && <p className="error-line" role="alert">{error}</p>}
       </div>
-      <footer><button className="secondary" type="button" disabled={saving} onClick={onClose}>Cancel</button>
-        <button className="primary" type="submit" disabled={saving}>{saving && <LoaderCircle className="spin" size={14} />}Export Markdown</button></footer>
+      <footer><button className="secondary" type="button" disabled={saving} onClick={onClose}>{tr("Cancel")}</button>
+        <button className="primary" type="submit" disabled={saving}>{saving && <LoaderCircle className="spin" size={14} />}{tr("Export Markdown")}</button></footer>
     </form>
   </dialog>
 }

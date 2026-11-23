@@ -4,6 +4,8 @@
   const svgEl = panel?.querySelector('#markmap-svg');
   const data = document.getElementById('yano-mindmap-data');
   if (!panel || !svgEl || !data) return;
+  const labelsForPage = JSON.parse(document.getElementById('linkread-reader-labels')?.textContent || '{}');
+  const t = label => Object.hasOwn(labelsForPage, label) ? labelsForPage[label] : label;
   const MINDMAP_MD = JSON.parse(data.textContent);
   const sourceData = JSON.parse(document.getElementById('linkread-mindmap-links')?.textContent || '{}');
   const cueRanges = Array.from(document.querySelectorAll('.reading-paragraph'), paragraph =>
@@ -172,9 +174,9 @@
     wasNativeFullscreen = native;
     const active = isFullscreen();
     if (fullscreenBtn) {
-      fullscreenBtn.textContent = active ? 'Exit fullscreen' : 'Fullscreen';
-      fullscreenBtn.setAttribute('aria-label', active ? 'Exit mindmap fullscreen' : 'View mindmap fullscreen');
-      fullscreenBtn.setAttribute('title', active ? 'Exit fullscreen' : 'View mindmap fullscreen');
+      fullscreenBtn.textContent = t(active ? 'Exit fullscreen' : 'Fullscreen');
+      fullscreenBtn.setAttribute('aria-label', t(active ? 'Exit mindmap fullscreen' : 'View mindmap fullscreen'));
+      fullscreenBtn.setAttribute('title', t(active ? 'Exit fullscreen' : 'View mindmap fullscreen'));
       fullscreenBtn.setAttribute('aria-pressed', String(active));
     }
     document.body.classList.toggle('mindmap-fullscreen-open', wrap.classList.contains('is-fullscreen'));
@@ -242,8 +244,8 @@
     if (sourceLinks.has(path)) {
       label.type = 'button'; label.className = 'mindmap-source-label'; label.dataset.sourcePath = path;
       label.setAttribute('aria-pressed', String(selectedSource === path));
-      label.setAttribute('aria-label', 'Show source for ' + label.textContent);
-      label.title = 'Show source section';
+      label.setAttribute('aria-label', t('Show source for ') + label.textContent);
+      label.title = t('Show source section');
       node.content = label.outerHTML;
     } else node.content = label.innerHTML;
     node.children?.forEach((child, index) => plainTextLabels(child, labels, path + '.' + index));
@@ -357,7 +359,7 @@
       stack.push(entry);
     }
     if (nodes.length !== 1) {
-      el.setAttribute('aria-label', 'Invalid mindmap structure');
+      el.setAttribute('aria-label', t('Invalid mindmap structure'));
       return {fit() {}, expand() {}, overview() {}, restore() {}, applyViewport() {}, capture() {return {folded: [], viewport: null};}};
     }
     const root = nodes[0];
@@ -416,7 +418,7 @@
         if (sourceLinks.has(entry.path)) {
           label.classList.add('mindmap-source-label'); label.dataset.sourcePath = entry.path;
           label.setAttribute('tabindex', '0'); label.setAttribute('role', 'button');
-          label.setAttribute('aria-label', 'Show source for ' + entry.text);
+          label.setAttribute('aria-label', t('Show source for ') + entry.text);
           label.setAttribute('aria-pressed', String(selectedSource === entry.path));
           label.addEventListener('keydown', event => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -429,7 +431,7 @@
             stroke: color, 'stroke-width': entry.depth === 0 ? 3 : 1.7, opacity: .92}));
         if (entry.children.length) {
           const control = node('g', {class: 'yano-fallback-toggle', tabindex: '0', role: 'button',
-            'aria-label': (entry.closed ? 'Expand ' : 'Collapse ') + entry.text});
+            'aria-label': t(entry.closed ? 'Expand ' : 'Collapse ') + entry.text});
           control.append(node('circle', {cx: entry.x + entry.width - 8, cy: entry.y + 5, r: 7,
             fill: 'var(--surface, #f7f7f5)', stroke: color, 'stroke-width': 1.6}),
           node('text', {x: entry.x + entry.width - 8, y: entry.y + 9, 'text-anchor': 'middle', 'font-size': 12,

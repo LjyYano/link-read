@@ -7,7 +7,7 @@ type Result<T> = std::result::Result<T, String>;
 const JOURNAL_LIMIT: usize = 1024 * 1024;
 const POSITION_LIMIT: usize = 256 * 1024;
 const TABS: &[&str] = &["summary", "mindmap", "transcript", "keywords", "highlights", "shownotes"];
-const LANES: &[&str] = &["extract", "audio", "upload", "asr", "analysis", "polish", "publication", "render"];
+const LANES: &[&str] = &["extract", "audio", "upload", "asr", "analysis", "polish", "publication", "translation", "render"];
 
 fn fields(value: &Value, allowed: &[&str], required: &[&str]) -> bool {
     value.as_object().is_some_and(|o| o.keys().all(|k| allowed.contains(&k.as_str())) && required.iter().all(|k| o.contains_key(*k)))
@@ -66,7 +66,8 @@ pub fn validate_journal(value: &Value) -> Result<()> {
             !text(&input["source"], 32768) || input["source"].as_str().is_none_or(|s| s.is_empty()) ||
             !input["localFile"].is_boolean() || !optional_text(&input["sourceKey"], 8192) || !input["replaceRequested"].is_boolean() { return Err(invalid()) }
         let settings = &task["settings"];
-        if !fields(settings, &["provider","executable","baseUrl","model","asr"], &["provider","executable","baseUrl","model","asr"]) ||
+        if !fields(settings, &["provider","executable","baseUrl","model","asr","pageLanguage"], &["provider","executable","baseUrl","model","asr"]) ||
+            (settings.get("pageLanguage").is_some() && !choice(&settings["pageLanguage"], &["original","zh-CN","en"])) ||
             !choice(&settings["provider"], &["codex","claude","api"]) || !text(&settings["executable"], 8192) ||
             !endpoint(&settings["baseUrl"]) || !text(&settings["model"], 1024) { return Err(invalid()) }
         let asr = &settings["asr"];

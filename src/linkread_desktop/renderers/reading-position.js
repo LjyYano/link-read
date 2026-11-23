@@ -124,7 +124,8 @@
       });
       const seen = new Map(), values = [];
       const anchors = elements.map(element => {
-        const text = lexical(element.textContent || ''), id = fingerprint(text), occurrence = seen.get(id) || 0;
+        const original = element.querySelector('[data-transcript-version="original"]') || element;
+        const text = lexical(original.textContent || ''), id = fingerprint(text), occurrence = seen.get(id) || 0;
         seen.set(id, occurrence + 1); values.push(text);
         const cue = Number(element.dataset.cueStart), endCue = Number(element.dataset.cueEnd);
         return { element, token: id, occurrence, ...(name === 'transcript' && integer(cue, 10000000) && integer(endCue, 10000000)
