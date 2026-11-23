@@ -10,6 +10,7 @@ import {
   cancelGeneration, checkDuplicate, checkTool, deleteArticle,
   articleTranscriptPath, generateArticle, listArticles, pickSubtitle, providerNames, updateArticleState,
   loadTaskJournal, saveTaskJournal, normalizeGenerationFailure, openVideo, setNativeLanguage,
+  readSubtitleClipboard, resolveSubtitlePath, savePastedSubtitle,
   type Article, type ArticleStatePatch, type Library, type Progress, type ToolStatus,
 } from "./api"
 import { Bookshelf, Home, type Job, type TaskJob } from "./Home"
@@ -33,6 +34,7 @@ import { TaskJournalWriter, parseTaskJournal, restoreTaskJournal, resumeNeedsAsr
 import { recordProgress } from "./taskProgress"
 import { mergeArticleMetadata } from "./coverSource"
 import { normalizeVideoLink } from "./videoLinks"
+import { maxSubtitleBytes, pastedSubtitleFormat, pastedSubtitlePath, subtitleExtension, type ComposerPaste } from "./subtitlePaste"
 import { useLinkPreview } from "./useLinkPreview"
 import { Settings, type SettingsTarget } from "./Settings"
 import type { Preferences } from "./settingsState"
@@ -45,7 +47,6 @@ type Screen = "create" | "library" | "settings" | "reader"
 type ReadingOrigin = { screen: Exclude<Screen, "reader">; scroll: number; tasks: boolean; completedArticleId?: string; taskId?: string }
 type ActiveGeneration = GenerationInput & { replacementArticleId?: string }
 const storageKey = "linkread-preferences"
-const subtitleExtension = /\.(srt|vtt|json)$/i
 
 function loadPreferences(): Preferences {
   try {
@@ -171,6 +172,8 @@ function App() {
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>()
   const [source, setSource] = useState("")
   const [localPath, setLocalPath] = useState<string | null>(null)
+  const [pasting, setPasting] = useState(false)
+  const nativePaste = isTauri() && navigator.platform.startsWith("Mac")
   const [dragging, setDragging] = useState(false)
   const linkPreview = useLinkPreview(source, localPath !== null)
   const sourceReadiness = useSourceReadiness(source, localPath !== null)
@@ -219,6 +222,7 @@ function App() {
   const startSubmission = useRef<symbol | undefined>(undefined)
   const draft = useRef("")
   const inputVersion = useRef(0)
+  const pasteRequest = useRef<symbol | undefined>(undefined)
   const workspace = useRef<HTMLElement>(null)
   const shelfScroll = useRef(0)
   const loadingVersion = useRef(0)
@@ -242,8 +246,15 @@ function App() {
 
   function beginNavigation() {
     cancelPendingStart()
+    cancelPendingPaste()
     const version = ++navigationVersion.current
     return () => navigationVersion.current === version
+  }
+
+  function cancelPendingPaste() {
+    if (!pasteRequest.current) return
+    pasteRequest.current = undefined
+    setPasting(false)
   }
 
   function cancelPendingStart() {
@@ -367,6 +378,7 @@ function App() {
   }
 
   function chooseLocal(paths: string[]) {
+    cancelPendingPaste()
     if (paths.length !== 1) {
       setInputError(tr("一次只能导入一个字幕文件"))
       return
@@ -474,6 +486,7 @@ function App() {
 
   function setLink(value: string) {
     cancelPendingStart()
+    cancelPendingPaste()
     inputVersion.current++
     draft.current = value
     setSource(value)
@@ -483,15 +496,80 @@ function App() {
 
   async function pick() {
     if (picking.current) return
+    cancelPendingPaste()
+    const input = inputVersion.current, navigation = navigationVersion.current
+    const current = () => inputVersion.current === input && navigationVersion.current === navigation
     setInputError("")
     picking.current = true
     try {
       const selected = await pickSubtitle()
-      if (selected) chooseLocal([selected])
+      if (selected && current()) chooseLocal([selected])
     } catch (error) {
-      setInputError(String(error))
+      if (current()) setInputError(String(error))
     } finally {
       picking.current = false
+    }
+  }
+
+  async function paste({ clipboard, start, end }: ComposerPaste) {
+    cancelPendingStart()
+    inputVersion.current++
+    const request = Symbol("subtitle paste")
+    pasteRequest.current = request
+    const current = () => pasteRequest.current === request
+    setPasting(true)
+    setInputError("")
+    try {
+      const files = clipboard ? Array.from(clipboard.files).slice(0, 2) : []
+      let text = clipboard?.getData("text/plain") || ""
+      let paths: string[] = []
+      // Finder file copies may appear in WebKit as a plain filename or empty
+      // paste data. In either case read the native file URLs on explicit paste.
+      if (!clipboard || (nativePaste && !files.length && (!text
+          || (!pastedSubtitlePath(text) && subtitleExtension.test(text.trim()))))) {
+        const native = await readSubtitleClipboard()
+        if (!current()) return
+        paths = native.paths
+        text = native.text || text
+      }
+      if (paths.length > 1 || files.length > 1) throw new Error(tr("一次只能导入一个字幕文件"))
+      if (paths.length || (!files.length && pastedSubtitlePath(text))) {
+        const path = await resolveSubtitlePath(paths[0] ?? text.trim())
+        if (current()) chooseLocal([path])
+        return
+      }
+      if (files.length) {
+        const file = files[0]
+        if (!subtitleExtension.test(file.name)) throw new Error(tr("请选择 SRT、VTT 或 JSON 字幕文件"))
+        if (file.size > maxSubtitleBytes) throw new Error(tr("粘贴的字幕超过 16 MB"))
+        const contents = await file.arrayBuffer()
+        if (!current()) return
+        try { text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(contents) }
+        catch { throw new Error(tr("无法读取字幕文件，请使用 UTF-8 编码。")) }
+        const path = await savePastedSubtitle(file.name, text)
+        if (current()) chooseLocal([path])
+        return
+      }
+      if (text.length > maxSubtitleBytes) throw new Error(tr("粘贴的字幕超过 16 MB"))
+      const format = pastedSubtitleFormat(text)
+      if (format) {
+        const path = await savePastedSubtitle(tr("粘贴的字幕") + "." + format, text)
+        if (current()) chooseLocal([path])
+        return
+      }
+      if (!text) return
+      try { setLink(normalizeVideoLink(text)) }
+      catch {
+        if (/[\r\n]/.test(text.trim())) {
+          setInputError(tr("请粘贴受支持的链接，或带时间戳的字幕。"))
+        } else if (!localPath) {
+          setLink(source.slice(0, start) + text.trim() + source.slice(end))
+        }
+      }
+    } catch (error) {
+      if (current()) setInputError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (current()) cancelPendingPaste()
     }
   }
 
@@ -571,7 +649,7 @@ function App() {
   }
 
   async function start() {
-    if (submitting.current) return
+    if (submitting.current || pasteRequest.current) return
     const input = localPath ?? source.trim()
     if (!input) return
     const version = inputVersion.current, navigation = navigationVersion.current
@@ -939,6 +1017,7 @@ function App() {
       <main ref={workspace} className={screen === "reader" ? "workspace workspace-reader" : "workspace"}>
         {screen === "create" && (
           <Home {...shelfActions} linkPreview={linkPreview} source={source} setSource={setLink} localPath={localPath}
+            nativePaste={nativePaste} pasting={pasting} onPaste={paste}
             onPick={pick} onClear={() => setLink("")} onStart={start} busy={busy} jobs={jobs}
             onCancel={cancel} onRetry={retry} onRemove={removeJob} toolWarning={toolWarning} inputError={inputError}
             onPreview={readPreview} journalLoading={journalLoading} journalError={journalError} onRetryJournal={retryJournal}

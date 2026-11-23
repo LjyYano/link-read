@@ -583,6 +583,7 @@ def main() -> int:
     duplicate.add_argument("--local-file", action="store_true")
     duplicate.add_argument("--resume-preview")
     duplicate.add_argument("source")
+    commands.add_parser("validate-subtitle").add_argument("source")
     commands.add_parser("preview").add_argument("source")
     commands.add_parser("check-source").add_argument("source")
     test_asr = commands.add_parser("test-asr")
@@ -662,6 +663,12 @@ def main() -> int:
             if args.resume_preview:
                 source = str(resume_preview(library, args.resume_preview, source=source, local_file=args.local_file))
             _emit("duplicate", **_duplicate(source, library, local_file=args.local_file or bool(args.resume_preview)))
+        elif args.command == "validate-subtitle":
+            try:
+                extract_local(Path(args.source))
+            except (LinkReadError, ValueError, OverflowError) as exc:
+                raise LinkReadError("无法识别粘贴的字幕，请检查格式和时间戳。", code="invalid_pasted_subtitle") from exc
+            _emit("subtitle_validated")
         elif args.command == "library":
             _emit("library", **_library_records(library))
         elif args.command == "article-details":

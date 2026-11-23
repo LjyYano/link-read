@@ -123,15 +123,18 @@
         return true;
       });
       const seen = new Map(), values = [];
+      const sourceSignature = name === 'transcript' && panel?.querySelector('.article-body')?.dataset.readingSignature;
       const anchors = elements.map(element => {
-        const original = element.querySelector('[data-transcript-version="original"]') || element;
-        const text = lexical(original.textContent || ''), id = fingerprint(text), occurrence = seen.get(id) || 0;
+        const text = lexical(element.textContent || '');
+        const sourceToken = element.dataset.readingToken;
+        const id = token(sourceSignature) && token(sourceToken) ? sourceToken : fingerprint(text);
+        const occurrence = seen.get(id) || 0;
         seen.set(id, occurrence + 1); values.push(text);
         const cue = Number(element.dataset.cueStart), endCue = Number(element.dataset.cueEnd);
         return { element, token: id, occurrence, ...(name === 'transcript' && integer(cue, 10000000) && integer(endCue, 10000000)
           ? { kind: 'cue', cue, endCue } : { kind: 'block' }) };
       });
-      const result = { anchors, signature: fingerprint(values.join('')) };
+      const result = { anchors, signature: token(sourceSignature) ? sourceSignature : fingerprint(values.join('')) };
       cached.set(name, result);
       return result;
     }

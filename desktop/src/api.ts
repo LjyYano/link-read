@@ -116,6 +116,9 @@ export const updateArticleDetails = (id: string, title: string | null, category:
 export const openVideo = (source: string) => invoke("open_video", { source })
 export const openExternal = (url: string) => invoke("open_external", { url })
 export const pickSubtitle = () => invoke<string | null>("pick_subtitle", { uiLanguage: locale() })
+export const readSubtitleClipboard = () => invoke<{ paths: string[]; text: string }>("read_subtitle_clipboard", { uiLanguage: locale() })
+export const resolveSubtitlePath = (path: string) => invoke<string>("resolve_subtitle_path", { path })
+export const savePastedSubtitle = (name: string, text: string) => invoke<string>("save_pasted_subtitle", { name, text })
 export const openArticle = (id: string) => invoke("open_article", { id })
 export const revealArticle = (id: string) => invoke("reveal_article", { id })
 

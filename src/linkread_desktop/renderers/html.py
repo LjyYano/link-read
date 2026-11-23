@@ -3,12 +3,12 @@
 from html import escape
 from importlib.resources import files
 
-from ..ai.models import NoteDocument
+from ..ai.models import NoteDocument, lexical_content
 from ..ai.polish import group_source_blocks
 from ..errors import LinkReadError
 from ..models import TranscriptDocument
 from ..quotes import QuoteCard, context_bounds
-from ..translation import ReadingEdition, join_translation, page_locale, source_language
+from ..translation import ReadingEdition, page_locale, reading_translation, source_language
 from .emphasis import render_emphasis
 from .extras import ArticleExtras, ReadingSection
 from .formatting import display_title, duration_label, group_paragraphs, source_link, video_link
@@ -16,7 +16,7 @@ from .notes import highlights_panel, note_fragments, note_quotes, overview_panel
 from .icons import icon
 from .labels import ZH, page_label
 from .overview import note_overview, section_title
-from .reading_state import reading_state_key
+from .reading_state import position_fingerprint, reading_state_key
 from .shownotes import shownotes_panel
 from .templates import fill_template, json_data
 
@@ -64,10 +64,11 @@ def _reading_paragraphs(document: TranscriptDocument, note: NoteDocument | None)
 def _article(
     document: TranscriptDocument, note: NoteDocument | None, chapters: list[ReadingSection],
     cards: list[QuoteCard], edition: ReadingEdition | None = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     next_chapter = 0
     sections = []
     toc = []
+    source_paragraphs = []
     source_lang = source_language(document)
     original_lang = f' lang="{escape(source_lang, quote=True)}"' if source_lang else ""
     translations = edition.cues if edition is not None else None
@@ -87,24 +88,29 @@ def _article(
             toc.append(f'<button type="button" data-go-section="{target}">{title}</button>')
         if not sections:
             sections.append('<section class="transcript-section" id="opening">')
+        if translations is not None:
+            # Retain source-based reading positions without embedding a second body.
+            original = lexical_content(text.replace("\0", ""))
+            source_paragraphs.append(original)
+            translated = reading_translation(
+                [cue.text for cue in document.segments[start:end + 1]],
+                translations[start:end + 1], edition.language, text,
+            )
+            rendered = "<br><br>".join(escape(part) for part in translated.split("\n\n"))
+            sections.append(
+                f'<p class="reading-paragraph" id="para-{index}" data-cue-start="{start}" data-cue-end="{end}" '
+                f'lang="{edition.language}" data-reading-token="{position_fingerprint(original)}">'
+                f'{rendered}</p>'
+            )
+            continue
         if subheading:
-            visibility = ' data-transcript-version="original" hidden' if translations is not None else ""
-            sections.append(f"<h3{visibility}>{escape(subheading)}</h3>")
+            sections.append(f"<h3>{escape(subheading)}</h3>")
         css = "reading-paragraph unpolished" if fallback else "reading-paragraph"
         for (first, last), card in marked:
             if start <= last and end >= first:
                 bold = bold + card.bold
                 red = red + card.red
         chunks = [chunk for chunk in text.split("\n\n") if chunk.strip()] or [text]
-        # The same paragraph and cue anchors serve both versions. Preserve all
-        # source text inside that paragraph even when its translation reflows.
-        if translations is not None:
-            original = "<br><br>".join(render_emphasis(chunk, bold, red, match_lexical=True) for chunk in chunks)
-            translated = join_translation(translations[start:end + 1], edition.language)
-            sections.append(f'<p class="{css}" id="para-{index}" data-cue-start="{start}" data-cue-end="{end}">'
-                f'<span data-transcript-version="translation" lang="{edition.language}">{escape(translated)}</span>'
-                f'<span data-transcript-version="original"{original_lang} hidden>{original}</span></p>')
-            continue
         for number, chunk in enumerate(chunks, 1):
             paragraph_id = f"para-{index}" if number == 1 else f"para-{index}-{number}"
             sections.append(
@@ -112,7 +118,8 @@ def _article(
                 f"{render_emphasis(chunk, bold, red, match_lexical=True)}</p>"
             )
     sections.append("</section>")
-    return "\n".join(sections), "".join(toc)
+    signature = position_fingerprint("".join(source_paragraphs)) if translations is not None else ""
+    return "\n".join(sections), "".join(toc), signature
 
 
 def _tab(name: str, label: str) -> str:
@@ -153,7 +160,7 @@ def render_html(
         cards = extras.quotes.cards
     else:
         cards = note_quotes(note, language=language) if note else []
-    article, toc = _article(transcript, note, chapters, cards, edition)
+    article, toc, signature = _article(transcript, note, chapters, cards, edition)
     panels = note_fragments(note, language=language) if note else {}
     if overview:
         panels["summary"] = overview_panel(overview, language=language)
@@ -201,12 +208,6 @@ def render_html(
         f'<button type="button" data-reading-star aria-pressed="{str(starred).lower()}">{icon("star")}'
         f'<span>{label("Starred" if starred else "Star")}</span></button></div>'
     )
-    transcript_switch = (
-        f'<div class="transcript-versions reader-segmented" role="group" aria-label="{label("Transcript version")}">'
-        f'<button type="button" data-select-transcript="translation" aria-pressed="true">{label("Translation")}</button>'
-        f'<button type="button" data-select-transcript="original" aria-pressed="false">{label("Original")}</button></div>'
-        if edition and edition.cues is not None else ""
-    )
     strings = json_data(ZH if language == "zh-CN" else {})
     return fill_template("reader.html", {
         "PAGE_LANGUAGE": "zh-CN" if language == "zh-CN" else "en",
@@ -223,7 +224,7 @@ def render_html(
         "MOBILE_TOC": (f'<details class="mobile-toc"><summary>{label("Contents")}</summary><nav>{toc}</nav></details>'
                        if toc else ""),
         "READING_NOTICE": "" if edition and edition.cues is not None else _reading_notice(note, language),
-        "TRANSCRIPT_SWITCH": transcript_switch,
+        "READING_SIGNATURE": f' data-reading-signature="{signature}"' if signature else "",
         "ARTICLE": article,
         "SUMMARY_PANEL": panels.get("summary", ""),
         "MINDMAP_PANEL": panels.get("mindmap", ""),

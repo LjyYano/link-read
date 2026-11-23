@@ -10,6 +10,9 @@ const fixture = {
   positions: clone(config.positions || {}),
   failJournal: false,
   pickedPath: '/fixture/imported-subtitles.srt',
+  clipboard: { paths: [] as string[], text: '' },
+  pendingPastes: [] as any[],
+  holdPaste: false,
   pendingGenerations: [] as any[],
   pendingSourceChecks: [] as any[],
   holdSourceChecks: true,
@@ -92,6 +95,14 @@ export async function invoke<T>(command: string, args: any = {}): Promise<T> {
   else if (command === 'load_reading_position') result = clone(fixture.positions[args.key] ?? null)
   else if (command === 'save_reading_position') { fixture.positions[args.key] = clone(args.position); result = null }
   else if (command === 'pick_subtitle') result = fixture.pickedPath
+  else if (command === 'read_subtitle_clipboard') result = clone(fixture.clipboard)
+  else if (command === 'resolve_subtitle_path') result = args.path.startsWith('file:')
+    ? decodeURIComponent(new URL(args.path).pathname) : args.path
+  else if (command === 'save_pasted_subtitle') {
+    const path = '/fixture/pasted/' + args.name
+    if (fixture.holdPaste) return await new Promise<T>(resolve => fixture.pendingPastes.push(() => resolve(path as T)))
+    result = path
+  }
   else if (command === 'load_api_token' || command === 'load_asr_token') result = null
   else if (['open_external', 'open_video', 'open_article', 'reveal_article'].includes(command)) result = null
   else if (command === 'delete_article') { fixture.library = fixture.library.filter((article: any) => article.id !== args.id); result = null }

@@ -7,7 +7,8 @@ from linkread_desktop.desktop import _article_markdown, _prepared_reader
 from linkread_desktop.extractors.youtube import _choose_caption
 from linkread_desktop.generation import generate_article
 from linkread_desktop.messages import localize_event
-from linkread_desktop.translation import EDITION_FILE, load_edition, prepare_edition
+from linkread_desktop.ai.models import lexical_content
+from linkread_desktop.translation import EDITION_FILE, load_edition, prepare_edition, reading_translation
 
 from test_ai_notes import FakeProvider, make_transcript
 
@@ -28,7 +29,18 @@ class TranslationProvider(FakeProvider):
         return super().generate(prompt, schema, timeout_seconds=timeout_seconds)
 
 
-def test_generation_localizes_chinese_page_and_loads_both_editions_offline(tmp_path, monkeypatch):
+def test_unchanged_translation_cues_use_proofread_dialogue_and_preserve_translated_terms():
+    source = ["这件事很重要", "是的", "再说 childcare 这个例子", "你说得对"]
+    proofread = "这件事很重要。\n\n是的，再说 childcare 这个例子。\n\n你说得对。"
+    translated = [*source]
+    assert reading_translation(source, translated, "zh-CN", proofread) == proofread
+    translated[2] = "再说照看孩子这个例子"
+    body = reading_translation(source, translated, "zh-CN", proofread)
+    assert body == "这件事很重要。\n\n是的，再说照看孩子这个例子。\n\n你说得对。"
+    assert lexical_content(body) == lexical_content("".join(translated))
+
+
+def test_generation_renders_only_the_final_body_in_chinese_offline(tmp_path, monkeypatch):
     raw = make_transcript(10, "Original subtitle").model_copy(update={"language": "en-US"})
     before = raw.model_dump_json()
     monkeypatch.setattr("linkread_desktop.generation.extract_document", lambda *args, **kwargs: raw)
@@ -40,15 +52,16 @@ def test_generation_localizes_chinese_page_and_loads_both_editions_offline(tmp_p
     assert raw.model_dump_json() == before
     assert "简体中文" in provider.prompts[0]
     assert load_edition(finished.parent, raw).language == "zh-CN"
-    for page in (finished, next(site.glob("pages/*/index.html"))):
+    _prepared_reader(finished)
+    for page in (finished, next(site.glob("pages/*/index.html")), finished.parent / ".reader.html"):
         html = page.read_text(encoding="utf-8")
         assert '<html lang="zh-CN">' in html
-        assert 'data-select-transcript="original"' in html
-        assert 'data-transcript-version="original" lang="en-us" hidden' in html
-        assert '中文译文' in html and 'Original subtitle' in html
-        assert 'data-cue-start="0"' in html
-    _prepared_reader(finished)
-    assert 'data-transcript-version="original"' in (finished.parent / ".reader.html").read_text()
+        assert "data-select-transcript" not in html
+        body = html.split('<article class="article-body"', 1)[1].split("</article>", 1)[0]
+        assert "中文译文" in body
+        assert "Original subtitle" not in body
+        assert 'data-cue-start="0"' in body
+        assert "Original subtitle" in html.split('<section class="panel" id="panel-highlights"', 1)[1]
     markdown = _article_markdown(library, finished.parent.name)
     assert "## 译文" in markdown and "## 原始字幕" in markdown
     assert "**[00:00]** Original subtitle" in markdown

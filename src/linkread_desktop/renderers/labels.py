@@ -34,8 +34,8 @@ ZH = {
     "Show source section": "查看原文章节", "Expand ": "展开 ", "Collapse ": "折叠 ", "Invalid mindmap structure": "导图结构无效",
     "Mindmap controls": "导图操作", "Mindmap. Use circles to expand or collapse.": "思维导图。使用圆点展开或折叠。",
     "Read section": "阅读本节", "Read section ": "阅读本节 ", "Read section: ": "阅读本节：",
-    "Read transcript at ": "跳转到正文 ", "Excerpt": "原文摘录", "Original": "原文", "Translation": "译文",
-    "Transcript version": "正文版本", "Refresh Shownotes": "刷新节目简介",
+    "Read transcript at ": "跳转到正文 ", "Excerpt": "原文摘录", "Translation": "译文",
+    "Refresh Shownotes": "刷新节目简介",
     "View original": "查看来源", "No shownotes saved yet.": "暂无节目简介。", "Fetch shownotes": "获取节目简介",
     "Original wording kept in {count} paragraph(s)": "{count} 段保留了原文措辞",
     "The punctuation pass changed some words, so these paragraphs retain the original text. Nothing was removed, but punctuation may still need attention. This checks wording, not factual accuracy.":

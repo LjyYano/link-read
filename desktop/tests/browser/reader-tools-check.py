@@ -299,26 +299,38 @@ async def run():
             await expect(page.locator("#text-search")).to_have_value("reading")
             await expect(page.get_by_role("tab", name="Transcript")).to_have_attribute("aria-selected", "true")
             CHECKS.append("keyword cloud animates on hover, respects reduced motion and opens search from the keyboard")
-            await open_article(page, "translation")
+
+            await open_article(page, "article")
+            await page.locator('.reading-paragraph[data-cue-start="13"]').evaluate("""p=>{
+              const rect=p.getBoundingClientRect(),inset=document.querySelector('.tabs').getBoundingClientRect().height+12;
+              window.scrollTo({top:scrollY+rect.top-inset+rect.height*.35,behavior:'instant'});
+            }""")
+            await settled(page)
+            previous = await position(page)
+            assert previous["anchor"]["cue"] == 13
+            await page.evaluate("linkreadReadingPosition.flush()")
+
+            await page.goto(BASE + "translation.html")
+            await page.wait_for_function("!!window.linkreadReadingPosition")
+            await settled(page)
             await expect(page.locator("html")).to_have_attribute("lang", "zh-CN")
             await expect(page.get_by_role("tab", name="正文", exact=True)).to_have_attribute("aria-selected", "true")
+            restored = await position(page)
+            assert restored["signature"] == previous["signature"] and restored["anchor"] == previous["anchor"], restored
             first = page.locator(".reading-paragraph[data-cue-start='0']")
-            await expect(first.locator('[data-transcript-version="translation"]')).to_be_visible()
-            await expect(first.locator('[data-transcript-version="original"]')).to_be_hidden()
-            await page.get_by_role("button", name="原文", exact=True).click()
-            await expect(first.locator('[data-transcript-version="original"]')).to_be_visible()
+            await expect(first).to_have_text("离线中文译文。")
+            await expect(page.locator("[data-select-transcript]")).to_have_count(0)
             await page.get_by_role("button", name="搜索文章", exact=True).click()
-            await page.locator("#text-search").fill("离线中文译文")
+            await page.locator("#text-search").fill("Topic 0")
             await expect(page.locator("#match-count")).to_have_text("没有匹配项")
-            await page.get_by_role("button", name="译文", exact=True).click()
-            await expect(first.locator('[data-transcript-version="translation"]')).to_be_visible()
+            await page.locator("#text-search").fill("离线中文译文")
             await expect(page.locator("#match-count")).to_contain_text("正文")
             await page.get_by_role("tab", name="摘录", exact=True).click()
             await page.locator(".anki-card summary").click()
             await expect(page.locator(".quote-source a")).to_have_attribute("href", fixture["source"])
             await page.get_by_role("button", name="在正文中显示", exact=True).click()
             await expect(page.get_by_role("tab", name="正文", exact=True)).to_have_attribute("aria-selected", "true")
-            CHECKS.append("localized offline article toggles complete original and translated text on the same cue anchors")
+            CHECKS.append("translated body opens directly, resumes on the same original cue, and keeps search and source attribution")
             assert not ERRORS, ERRORS
         except Exception as error:
             ERRORS.append(str(error))

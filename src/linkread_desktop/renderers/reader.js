@@ -143,9 +143,7 @@ function searchBlocks(){
   const blocks=[];
   for(const element of $$('.reading-paragraph,.transcript-section h2,.transcript-section h3')){
     const nodes=[],walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
-    while(walker.nextNode()){
-      if(!walker.currentNode.parentElement.closest('[data-transcript-version][hidden]'))nodes.push(walker.currentNode);
-    }
+    while(walker.nextNode())nodes.push(walker.currentNode);
     blocks.push({nodes,panel:'transcript'});
   }
   for(const root of $$('.shownotes-copy')){
@@ -231,18 +229,7 @@ inp.addEventListener('compositionend',()=>{composing=false;scheduleSearch()});
 inp.addEventListener('input',event=>{if(!event.isComposing)scheduleSearch()});
 inp.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.isComposing){event.preventDefault();step(event.shiftKey?-1:1)}});
 $('#search-prev').addEventListener('click',()=>step(-1));$('#search-next').addEventListener('click',()=>step(1));$('#search-close').addEventListener('click',closeSearch);
-const transcriptToggles=$$('[data-select-transcript]');
-function selectTranscript(version){
-  if(!transcriptToggles.length)return;
-  const restore=readingPosition?.preserveLayout();
-  $$('[data-transcript-version]').forEach(span=>span.hidden=span.dataset.transcriptVersion!==version);
-  transcriptToggles.forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.selectTranscript===version)));
-  if(!searchBar.hidden)search(false);
-  restore?.();
-}
-transcriptToggles.forEach(button=>button.addEventListener('click',()=>selectTranscript(button.dataset.selectTranscript)));
 $$('[data-keyword]').forEach(button=>button.addEventListener('click',()=>{
-  selectTranscript('translation');
   openSearch(button.dataset.keyword);
   if(!hits.length)toast(t('No matches in Transcript or Shownotes'));
 }));

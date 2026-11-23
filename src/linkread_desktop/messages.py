@@ -47,6 +47,7 @@ _ERRORS = {
     "subtitles_unavailable": "No usable subtitles are available for this source. Import subtitles or enable speech recognition in Settings.",
     "subtitle_login_required": "Bilibili requires sign-in to view subtitles. Open the original video or import a subtitle file.",
     "subtitle_response_invalid": "Bilibili returned an incomplete subtitle list. Check the source again.",
+    "invalid_pasted_subtitle": "Could not read the pasted subtitles. Check their format and timestamps.",
     "source_permission_denied": "Access to this source was denied. Check the source permissions.",
     "source_timeout": "The subtitle service timed out. Try again.",
     "source_rate_limited": "The source service is rate-limiting requests. Try again later.",

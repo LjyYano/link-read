@@ -2,10 +2,21 @@
 
 from hashlib import sha256
 import json
+from struct import iter_unpack
 
 from ..ai.models import NoteDocument
 from ..models import TranscriptDocument
 from .formatting import source_link
+
+
+def position_fingerprint(text: str) -> str:
+    """Match the reader's p1 fingerprint over JavaScript UTF-16 code units."""
+    encoded = text.encode("utf-16-le", errors="surrogatepass")
+    first, second = 2166136261, 3339675911
+    for (unit,) in iter_unpack("<H", encoded):
+        first = ((first ^ unit) * 16777619) & 0xFFFFFFFF
+        second = ((second ^ unit) * 2246822519) & 0xFFFFFFFF
+    return f"p1-{first:08x}{second:08x}-{len(encoded) // 2}"
 
 
 def reading_state_key(document: TranscriptDocument | NoteDocument) -> str:

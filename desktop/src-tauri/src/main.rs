@@ -6,6 +6,7 @@ mod keychain;
 mod credentials;
 mod durable_state;
 mod environment;
+mod subtitle_clipboard;
 
 use std::{
     collections::VecDeque,
@@ -715,6 +716,36 @@ async fn pick_subtitle(app: AppHandle, window: tauri::WebviewWindow, ui_language
 }
 
 #[tauri::command]
+async fn read_subtitle_clipboard(app: AppHandle, ui_language: Option<String>) -> AppResult<subtitle_clipboard::ClipboardSubtitles> {
+    let (send, receive) = oneshot::channel();
+    let failed = translated(ui_language.as_deref(), "无法读取剪贴板", "Could not read the clipboard");
+    app.run_on_main_thread(move || {
+        let _ = send.send(subtitle_clipboard::read(ui_language.as_deref()));
+    }).map_err(|_| failed.to_owned())?;
+    receive.await.map_err(|_| failed.to_owned())?
+}
+
+#[tauri::command]
+fn resolve_subtitle_path(path: String) -> AppResult<PathBuf> {
+    subtitle_clipboard::resolve_path(&path)
+}
+
+#[tauri::command]
+async fn save_pasted_subtitle(
+    locations: State<'_, Locations>, name: String, text: String,
+) -> AppResult<PathBuf> {
+    let language = Some(locations.language());
+    let (temporary, destination) = subtitle_clipboard::stage(&locations.data, &name, &text, language)?;
+    let path = temporary.path().to_str().ok_or_else(|| translated(language,
+        "无法读取字幕文件路径", "Could not read the subtitle file path").to_owned())?;
+    let _: serde_json::Value = query_with_timeout(&locations, &["validate-subtitle", "--", path],
+        Duration::from_secs(20), translated(language, "校验字幕超时，请重试", "Subtitle validation timed out. Try again.")).await?;
+    temporary.persist(&destination).map_err(|_| translated(language,
+        "无法保存粘贴的字幕", "Could not save the pasted subtitles").to_owned())?;
+    Ok(destination)
+}
+
+#[tauri::command]
 async fn check_ffmpeg(path: String) -> environment::FfmpegStatus {
     environment::check(&path, command_paths()).await
 }
@@ -1409,7 +1440,10 @@ fn main() {
             open_article,
             reveal_article,
             article_transcript_path,
-            pick_subtitle
+            pick_subtitle,
+            read_subtitle_clipboard,
+            resolve_subtitle_path,
+            save_pasted_subtitle,
         ])
         .build(tauri::generate_context!())
         .expect("failed to initialize LinkRead")

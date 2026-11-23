@@ -181,6 +181,60 @@ async def verify_home_composer(browser, *, width, dark):
     await context.close()
 
 
+async def verify_pasted_subtitles(browser):
+    context, page, errors, _ = await open_app(browser, native_drag=True)
+    composer = page.locator('.home-dropzone')
+    field = composer.get_by_role('textbox', name='视频或播客链接')
+    selected = composer.get_by_role('textbox', name='选中的字幕文件')
+    srt = "1\n00:00:01,000 --> 00:00:02,000\nRead the original cue.\n"
+    url = 'https://www.youtube.com/watch?v=abcdefghij1'
+
+    async def paste_text(locator, text):
+        await locator.evaluate('''(input, text) => {
+          const clipboardData = new DataTransfer();
+          clipboardData.setData('text/plain', text);
+          input.dispatchEvent(new ClipboardEvent('paste', {clipboardData, bubbles:true, cancelable:true}));
+        }''', text)
+
+    await page.evaluate("""window.taskWorkspaceFixture.clipboard = {
+      paths: ['/fixture/Finder subtitle.srt'], text: 'Finder subtitle.srt'
+    }""")
+    await field.press('Meta+v')
+    await expect(selected).to_have_value('Finder subtitle.srt')
+    await paste_text(selected, 'file:///fixture/Other%20subtitle.vtt')
+    await expect(selected).to_have_value('Other subtitle.vtt')
+    await paste_text(selected, srt)
+    await expect(selected).to_have_value('粘贴的字幕.srt')
+    saved = await page.evaluate("window.taskWorkspaceFixture.calls.find(call => call.command === 'save_pasted_subtitle').args")
+    assert saved == {'name': '粘贴的字幕.srt', 'text': srt}, saved
+
+    await paste_text(selected, url)
+    await expect(field).to_have_value(url)
+    await page.evaluate("window.taskWorkspaceFixture.holdPaste = true")
+    await paste_text(field, srt)
+    await page.wait_for_function("window.taskWorkspaceFixture.pendingPastes.length === 1")
+    await expect(composer.get_by_role('button', name='生成文章')).to_be_disabled()
+    updated = 'https://www.youtube.com/watch?v=abcdefghij2'
+    await field.fill(updated)
+    await page.evaluate("window.taskWorkspaceFixture.pendingPastes.shift()(); window.taskWorkspaceFixture.holdPaste = false")
+    await expect(field).to_have_value(updated)
+
+    await field.evaluate('''(input, text) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.items.add(new File([text], 'Copied file.srt', {type:'application/x-subrip'}));
+      input.dispatchEvent(new ClipboardEvent('paste', {clipboardData, bubbles:true, cancelable:true}));
+    }''', srt)
+    await expect(selected).to_have_value('Copied file.srt')
+    await composer.get_by_role('button', name='生成文章').click()
+    await page.wait_for_function("window.taskWorkspaceFixture.pendingGenerations.length === 1")
+    args = await page.evaluate('window.taskWorkspaceFixture.pendingGenerations[0].args')
+    assert args['localFile'] is True and args['source'] == '/fixture/pasted/Copied file.srt', args
+    assert await page.evaluate("window.taskWorkspaceFixture.calls.every(call => call.command !== 'pick_subtitle')")
+    assert not errors, errors
+    RESULTS.append({'check': 'Finder, file URLs, timed text and web clipboard files import directly; normal links and newer drafts remain editable'})
+    await context.close()
+
+
 async def queue_video(page, index):
     source = 'https://www.youtube.com/watch?v=abcdefghij' + str(index)
     await page.get_by_role('textbox', name='视频或播客链接', exact=True).fill(source)
@@ -420,6 +474,7 @@ async def main():
         try:
             await verify_home_composer(browser, width=1060, dark=False)
             await verify_home_composer(browser, width=720, dark=True)
+            await verify_pasted_subtitles(browser)
             await verify_tasks(browser)
             await verify_unseen_visibility(browser)
             await verify_continue(browser)

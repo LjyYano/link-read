@@ -1,5 +1,5 @@
 import { localizedDetail, tr } from "./language.ts"
-import { normalizeVideoLink } from "./videoLinks"
+import type { ComposerPaste } from "./subtitlePaste"
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, Circle, CircleAlert, CircleCheck, FolderOpen,
@@ -53,6 +53,9 @@ type HomeProps = ArticleListProps & {
   setSource: (source: string) => void
   localPath: string | null
   onPick: () => void
+  onPaste: (paste: ComposerPaste) => void
+  nativePaste: boolean
+  pasting: boolean
   onClear: () => void
   onStart: () => void
   busy: boolean
@@ -531,6 +534,7 @@ function LibraryState({ library, error, onRefresh }: Pick<ArticleListProps, "lib
 
 export function Home({
   source, setSource, localPath, onPick, onClear, onStart, busy, dragging, jobs, onCancel, onRetry, onRemove, linkPreview,
+  onPaste, nativePaste, pasting,
   toolWarning, inputError, onSettings, onLibrary, library, error, onRead, onRefresh, onDelete, onRegenerate, onStateChange,
   onPreview, journalLoading, journalError, onRetryJournal,
   onTasks, taskSummary, resume, sourceReadiness, sourceBlocked, sourceNeedsAsr, existingArticle, existingTask, onViewExistingTask, onEdit, onExportMarkdown,
@@ -548,7 +552,7 @@ export function Home({
   const sourceKey = previewKey(source)
   const podcastPreview = sourceKey?.startsWith("apple_podcasts:")
   const existing = Boolean(existingArticle || existingTask)
-  const submitDisabled = (!existing && (journalLoading || sourceBlocked)) || (!localPath && !source.trim())
+  const submitDisabled = pasting || (!existing && (journalLoading || sourceBlocked)) || (!localPath && !source.trim())
   const configureAI = !existing && !sourceNeedsAsr && !submitDisabled && Boolean(toolWarning && (sourceKey || localPath))
 
   function showImportHint() {
@@ -587,7 +591,7 @@ export function Home({
 
   return (
     <div className="home-page">
-      <form className="home-form" onSubmit={submit}>
+      <form className="home-form" aria-busy={pasting} onSubmit={submit}>
         <div className={`home-dropzone${dragging ? " home-dropzone-active" : ""}`}>
           <div className="home-input-field">
             <span className="home-input-mark" aria-hidden="true">
@@ -599,12 +603,17 @@ export function Home({
                 title={selectedFile || undefined} placeholder={tr("粘贴视频或播客链接")}
                 onChange={event => setSource(event.target.value)}
                 onPaste={event => {
-                  if (localPath) return
-                  try {
-                    const link = normalizeVideoLink(event.clipboardData.getData("text"))
-                    event.preventDefault()
-                    setSource(link)
-                  } catch { /* Keep incomplete input editable; generation shows the validation error. */ }
+                  event.preventDefault()
+                  const { selectionStart, selectionEnd } = event.currentTarget
+                  onPaste({ clipboard: event.clipboardData, start: selectionStart ?? source.length, end: selectionEnd ?? source.length })
+                }}
+                onKeyDown={event => {
+                  if (!nativePaste || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "v"
+                      || event.altKey || event.shiftKey || event.nativeEvent.isComposing) return
+                  event.preventDefault()
+                  if (event.repeat) return
+                  const { selectionStart, selectionEnd } = event.currentTarget
+                  onPaste({ clipboard: null, start: selectionStart ?? source.length, end: selectionEnd ?? source.length })
                 }} />
               {dragging && <span className="home-drop-hint" role="status">{tr("松开以导入字幕文件")}</span>}
             </div>
@@ -642,7 +651,7 @@ export function Home({
               </button>
               {helpOpen && <div id="home-help-content" className="home-help-popover" role="note">
                 {tr("支持 YouTube、B 站视频和 Apple 播客单集。")}
-                <span>{tr("可选择或拖入 SRT、VTT、JSON 字幕。无字幕时可在设置中开启语音识别。")}</span>
+                <span>{tr("可粘贴、选择或拖入 SRT、VTT、JSON 字幕。无字幕时可在设置中开启语音识别。")}</span>
               </div>}
             </div>
             <button className="primary home-primary" type="submit" disabled={submitDisabled}

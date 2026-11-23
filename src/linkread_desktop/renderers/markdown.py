@@ -6,7 +6,7 @@ from typing import Literal
 from ..ai.models import NoteDocument
 from ..ai.polish import group_source_blocks
 from ..models import TranscriptDocument
-from ..translation import ReadingEdition, join_translation, page_locale
+from ..translation import ReadingEdition, page_locale, reading_translation
 from .formatting import display_title, duration_label, source_link, time_label, group_paragraphs
 from .shownotes import description_markdown
 
@@ -109,7 +109,10 @@ def render_markdown(document: TranscriptDocument | NoteDocument, *,
         if subheading and translations is None:
             metadata.extend([f"### {subheading}", ""])
         if translations is not None:
-            body = join_translation(translations[start:end + 1], language)
+            body = reading_translation(
+                [cue.text for cue in document.segments[start:end + 1]],
+                translations[start:end + 1], language, body,
+            )
             body = escape(body, quote=False)
         for paragraph in body.split("\n\n"):
             if paragraph.strip():
