@@ -400,6 +400,7 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
   const queued = job.status === "queued"
   const unsupportedAudio = job.status === "error"
     && (job.failure?.code === "protected_media" || job.failure?.code === "unsupported_audio_stream")
+  const subtitleLoginRequired = job.status === "error" && job.failure?.code === "subtitle_login_required"
   const activity = job.activity
   const outstanding = activeLanes(activity)
   const elapsed = activity ? elapsedLabel(Math.max(0, now - activity.startedAt)) : "00:00"
@@ -408,7 +409,8 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
     : job.status === "cancelling" ? tr("正在取消…")
     : active ? progressCaption(activity, tr(stages[job.step] ?? "正在处理"))
     : job.status === "interrupted" ? tr("任务已保留，等待继续")
-    : job.status === "cancelled" ? tr("已取消") : unsupportedAudio ? tr("暂不支持此音源") : tr("生成失败")
+    : job.status === "cancelled" ? tr("已取消") : subtitleLoginRequired ? tr("字幕需要登录查看")
+    : unsupportedAudio ? tr("暂不支持此音源") : tr("生成失败")
   const waitingLabel = job.status === "cancelling" ? tr("等待任务退出")
     : outstanding.some(item => item.label === tr("提取字幕")) ? tr("等待字幕平台响应")
     : outstanding.some(item => item.label === tr("生成阅读页")) ? tr("等待文件写入")

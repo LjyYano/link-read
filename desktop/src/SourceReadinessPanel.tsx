@@ -16,7 +16,9 @@ export function SourceReadinessPanel({ state, onImport, onOpenSource, onSettings
   const status = result?.status ?? "idle"
   const Icon = checking ? LoaderCircle : status === "blocked" ? LockKeyhole : status === "captions" ? CircleCheck : Info
   const title = checking ? tr("正在检查公开字幕…") : status === "captions" ? tr("公开字幕可读取")
-    : status === "needs_asr" ? tr("未找到公开字幕") : status === "blocked" ? tr("暂不支持此音源")
+    : status === "needs_asr" ? tr("未找到公开字幕")
+    : result?.code === "subtitle_login_required" ? tr("字幕需要登录查看")
+    : status === "blocked" ? tr("暂不支持此音源")
     : status === "unknown" ? tr("尚未确认内容可用性") : tr("内容可用性尚未检查")
   return <section className="source-readiness" data-state={checking ? "checking" : status} aria-label={tr("来源检查")}>
     <div className="source-readiness-copy" role="status" aria-live="polite">

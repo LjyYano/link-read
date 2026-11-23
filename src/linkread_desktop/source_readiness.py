@@ -13,7 +13,7 @@ from .links import canonical_link
 from .pipeline import extract
 
 CHECK_SECONDS = 30.0
-_BLOCKED_CODES = frozenset({"protected_media", "unsupported_audio_stream"})
+_BLOCKED_CODES = frozenset({"protected_media", "unsupported_audio_stream", "subtitle_login_required"})
 
 
 def _check(source: str) -> dict:

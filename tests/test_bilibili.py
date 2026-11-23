@@ -3,7 +3,9 @@ import json
 import pytest
 
 from linkread_desktop.errors import SubtitleUnavailableError, UnsupportedSourceError, ExtractionError
+from linkread_desktop.asr.config import AsrConfig
 from linkread_desktop.extractors.bilibili import extract_bilibili
+from linkread_desktop.pipeline import extract
 
 
 class Response:
@@ -20,10 +22,11 @@ class Response:
 
 
 class Session:
-    def __init__(self, *, subtitles=True, subtitle_host="i0.hdslb.com"):
+    def __init__(self, *, subtitles=True, subtitle_host="i0.hdslb.com", player_data=None):
         self.calls = []
         self.subtitles = subtitles
         self.subtitle_host = subtitle_host
+        self.player_data = player_data
 
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs.get("params")))
@@ -33,6 +36,8 @@ class Session:
                 "pages": [{"cid": 101, "duration": 100, "part": "上"}, {"cid": 202, "duration": 75, "part": "下"}],
             }})
         if "x/player/v2" in url:
+            if self.player_data is not None:
+                return Response(payload={"code": 0, "data": self.player_data})
             subtitles = ([{"lan": "en", "subtitle_url": "//i0.hdslb.com/en.json"},
                           {"lan": "zh-CN", "subtitle_url": f"//{self.subtitle_host}/zh.json"}]
                          if self.subtitles else [])
@@ -57,6 +62,37 @@ def test_bilibili_chooses_chinese_and_supports_page_2():
 def test_bilibili_no_subtitles_explains_next_stage():
     with pytest.raises(SubtitleUnavailableError, match="ASR"):
         extract_bilibili("https://www.bilibili.com/video/BV1rxqmBhE91", session=Session(subtitles=False))
+
+
+@pytest.mark.parametrize("player_data, code", [
+    ({"need_login_subtitle": True, "subtitle": {"subtitles": []}}, "subtitle_login_required"),
+    ({"need_login_subtitle": True, "subtitle": {"subtitles": [{"lan": "en", "subtitle_url": ""}]}}, "subtitle_login_required"),
+    ({"need_login_subtitle": False, "subtitle": {"subtitles": []}}, "subtitles_unavailable"),
+    ({}, "subtitle_response_invalid"),
+    ({"subtitle": {"subtitles": [{"lan": "en"}]}}, "subtitle_response_invalid"),
+])
+def test_bilibili_distinguishes_login_and_invalid_lists_from_missing_subtitles(player_data, code, monkeypatch):
+    session = Session(player_data=player_data)
+    share = r"https://www.bilibili.com/video/BV1rxqmBhE91/?share_medium=iphone\&p=2\&spm_id_from=333.788"
+    monkeypatch.setattr("linkread_desktop.pipeline.extract_bilibili",
+                        lambda link, **options: extract_bilibili(link, session=session, **options))
+    monkeypatch.setattr("linkread_desktop.asr.pipeline.transcribe_video",
+                        lambda *args, **kwargs: pytest.fail("ASR must not run for a login or subtitle list error"))
+    asr = None if code == "subtitles_unavailable" else AsrConfig()
+    with pytest.raises((ExtractionError, SubtitleUnavailableError)) as failure:
+        extract(share, asr=asr)
+    assert failure.value.code == code
+    assert len(session.calls) == 2
+    assert session.calls[-1][1] == {"bvid": "BV1rxqmBhE91", "cid": 202}
+
+
+def test_bilibili_uses_public_track_when_another_track_is_missing_its_url():
+    session = Session(player_data={"subtitle": {"subtitles": [
+        {"lan": "zh-CN", "subtitle_url": ""}, {"lan": "en", "subtitle_url": "//i0.hdslb.com/en.json"},
+    ]}})
+    doc = extract_bilibili("https://www.bilibili.com/video/BV1rxqmBhE91?p=2", session=session)
+    assert doc.language == "en"
+    assert session.calls[-1][0] == "https://i0.hdslb.com/en.json"
 
 
 def test_bilibili_rejects_out_of_range_page():

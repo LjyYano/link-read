@@ -101,8 +101,21 @@ def extract_bilibili(
     report(progress, "metadata_done", f"已获取视频：{source.title}（P{page}）", source=source)
     report(progress, "captions", "正在查询 B 站字幕列表")
     player = _fetch_json(session, "https://api.bilibili.com/x/player/v2", params={"bvid": bvid, "cid": cid})
-    subtitles = (player.get("subtitle") or {}).get("subtitles") or []
+    subtitle = player.get("subtitle")
+    tracks = subtitle.get("subtitles") if isinstance(subtitle, dict) else None
+    subtitles = [
+        track for track in tracks
+        if isinstance(track, dict) and isinstance(track.get("subtitle_url"), str) and track["subtitle_url"].strip()
+    ] if isinstance(tracks, list) else []
     if not subtitles:
+        # The player can suppress tracks behind login while returning HTTP 200.
+        # Only an explicit empty list without a login requirement permits ASR.
+        if player.get("need_login_subtitle") is True:
+            raise ExtractionError("B 站要求登录后查看字幕。可打开原视频，或导入已有字幕文件。",
+                                  code="subtitle_login_required")
+        if tracks != []:
+            raise ExtractionError("B 站返回的字幕列表不完整，请重试检查来源。",
+                                  code="subtitle_response_invalid", retryable=True, action="retry")
         raise SubtitleUnavailableError("该视频没有可获取的字幕；可启用 ASR", source=source)
     selected = _select_subtitle(subtitles)
     report(progress, "captions_done", f"选定字幕：{selected.get('lan') or '未知语言'}")

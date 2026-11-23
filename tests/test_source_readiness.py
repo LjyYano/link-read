@@ -8,7 +8,7 @@ import pytest
 import requests
 
 from linkread_desktop import desktop, source_readiness as readiness
-from linkread_desktop.errors import SubtitleUnavailableError
+from linkread_desktop.errors import ExtractionError, SubtitleUnavailableError
 from linkread_desktop.extractors import apple_podcasts as apple, podcast_http as http
 from test_apple_podcasts import Response, Session, feed
 from test_podcast_missing_feed import URL, HLS, FEED, GUID, episode_page, protected_master
@@ -63,6 +63,17 @@ def test_no_captions_never_submits_asr_or_downloads_audio(monkeypatch):
     assert result["status"] == "needs_asr"
     assert [url for url, _ in session.calls] == [URL]
     assert "仍会检查音频" in result["message"]
+
+
+def test_bilibili_login_requirement_is_a_source_restriction(monkeypatch):
+    def restrict(source, *, asr):
+        assert asr is None
+        raise ExtractionError("字幕需要登录查看", code="subtitle_login_required")
+
+    monkeypatch.setattr(readiness, "extract", restrict)
+    source = "https://www.bilibili.com/video/BV1BhKf6mEYR?p=2"
+    result = readiness.check_source(source)
+    assert (result["source"], result["status"], result["code"]) == (source, "blocked", "subtitle_login_required")
 
 
 @pytest.mark.parametrize("response", [requests.Timeout(), Response("broken RSS"), Response("Forbidden", status=403)])

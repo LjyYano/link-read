@@ -3,7 +3,7 @@ import type { GenerationFailure, SourceCheck } from "./api"
 import { previewKey } from "./previewState.ts"
 import { normalizeVideoLink } from "./videoLinks.ts"
 
-const blockedCodes = new Set(["protected_media", "unsupported_audio_stream"])
+const blockedCodes = new Set(["protected_media", "unsupported_audio_stream", "subtitle_login_required"])
 export const sourceCheckTtl = 10 * 60_000
 
 export function sourceCheckKey(source: string) {
