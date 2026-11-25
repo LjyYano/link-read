@@ -72,6 +72,8 @@ struct ArticleDetails {
     original_category: String,
     title_overridden: bool,
     category_overridden: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    linked_source_url: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1056,9 +1058,20 @@ async fn get_article_details(locations: State<'_, Locations>, id: String) -> App
 #[tauri::command]
 async fn update_article_details(
     locations: State<'_, Locations>, id: String, title: Option<String>, category: Option<String>,
+    source_url: Option<String>,
 ) -> AppResult<Article> {
     article_file(&locations.library, &id)?;
-    let values = serde_json::json!({"title": title, "category": category}).to_string();
+    let mut values = serde_json::json!({"title": title, "category": category});
+    if let Some(source) = source_url {
+        let source = source.trim();
+        if source.len() > 4096 { return Err("请输入有效的视频或播客单集链接".into()); }
+        values["sourceUrl"] = if source.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!(video_url(source)?.as_str())
+        };
+    }
+    let values = values.to_string();
     query(&locations, &["update-article-details", "--values", &values, "--", &id]).await
 }
 

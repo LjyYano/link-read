@@ -19,6 +19,8 @@ ENGINE = os.environ.get('LINKREAD_ENGINE', 'chromium')
 BASE = 'http://reading-refinements.linkread.test/'
 SOURCE_A = 'https://www.youtube.com/watch?v=abcdefghij1'
 SOURCE_B = 'https://www.youtube.com/watch?v=abcdefghij2'
+LINKED_VIDEO = 'https://www.bilibili.com/video/BV1BhKf6mEYR?p=2'
+LINKED_COVER = 'https://i0.hdslb.com/bfs/archive/linkread-qa-cover.jpg'
 RESULTS = []
 
 PREFS = {'provider': 'codex', 'paths': {'codex': '/fixture/codex', 'claude': ''},
@@ -41,6 +43,9 @@ def article(identity='qa-saved', title='Original research notes', source=SOURCE_
 
 
 async def routes(route):
+    if route.request.url == LINKED_COVER:
+        await route.fulfill(path=str(ROOT / 'desktop/src/assets/bilibili.png'), content_type='image/png')
+        return
     parsed = urlparse(route.request.url)
     if parsed.hostname != 'reading-refinements.linkread.test':
         await route.abort()
@@ -73,7 +78,8 @@ async def routes(route):
         await route.fulfill(path=str(path), content_type={'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css'}.get(path.suffix))
 
 
-async def open_app(browser, *, hold=False, missing_tool=False, missing_key=False, provider='codex', dark=False, width=1280):
+async def open_app(browser, *, hold=False, missing_tool=False, missing_key=False, provider='codex', dark=False, width=1280,
+                   saved_article=None):
     context = await browser.new_context(viewport={'width': width, 'height': 920},
                                         color_scheme='dark' if dark else 'light', reduced_motion='reduce', locale='zh-CN')
     await context.route('**/*', routes)
@@ -86,7 +92,8 @@ async def open_app(browser, *, hold=False, missing_tool=False, missing_key=False
         await dialog.accept()
 
     page.on('dialog', confirm)
-    config = {'library': [article()], 'positions': {article()['readingKey']: POSITION},
+    saved_article = saved_article or article()
+    config = {'library': [saved_article], 'positions': {saved_article['readingKey']: POSITION},
               'holdDuplicates': hold, 'missingTool': missing_tool, 'missingKey': missing_key}
     await page.add_init_script('''if(window===window.top){window.__readingRefinementsConfig=CONFIG;
       localStorage.setItem('linkread-preferences',JSON.stringify(PREFS));}'''
@@ -367,6 +374,41 @@ async def verify_dark_narrow(browser):
     await context.close()
 
 
+async def verify_local_subtitle_source_link(browser):
+    local = {**article(title='Imported subtitles', source=None), 'platform': 'local'}
+    context, page, errors, _ = await open_app(browser, saved_article=local)
+    dialog = page.get_by_role('dialog', name='编辑详情', exact=True)
+    source = dialog.get_by_role('textbox', name='原视频或播客单集链接', exact=True)
+    card = page.locator('.article-card')
+
+    await card.get_by_role('button', name='Imported subtitles的更多操作', exact=True).click()
+    await page.get_by_role('button', name='编辑详情', exact=True).click()
+    await expect(source).to_have_value('')
+    await source.fill(LINKED_VIDEO)
+    await page.evaluate('window.readingRefinementsFixture.failDetails=true')
+    await dialog.get_by_role('button', name='保存修改', exact=True).click()
+    await expect(dialog.get_by_role('alert')).to_contain_text('could not be saved')
+    await expect(card.locator('.article-card-title')).to_have_text('Imported subtitles')
+    await expect(source).to_have_value(LINKED_VIDEO)
+    await page.evaluate('window.readingRefinementsFixture.failDetails=false')
+    await dialog.get_by_role('button', name='保存修改', exact=True).click()
+    await expect(dialog).to_have_count(0)
+    await expect(card.locator('.article-card-title')).to_have_text('Linked Bilibili title - P2')
+    await expect(card.locator('.shelf-cover')).to_have_attribute('data-cover-loaded', 'true')
+    await expect(card.locator('.shelf-cover img')).to_have_attribute('src', LINKED_COVER)
+    assert await page.evaluate("window.readingRefinementsFixture.calls.every(call => call.command !== 'generate')")
+    await card.get_by_role('button', name='Linked Bilibili title - P2的更多操作', exact=True).click()
+    await page.get_by_role('button', name='编辑详情', exact=True).click()
+    await expect(source).to_have_value(LINKED_VIDEO)
+    await source.fill('')
+    await dialog.get_by_role('button', name='保存修改', exact=True).click()
+    await expect(card.locator('.article-card-title')).to_have_text('Imported subtitles')
+    await expect(card.locator('.shelf-cover img')).to_have_count(0)
+    assert not errors, errors
+    RESULTS.append({'check': 'Local subtitle link saves and reloads a cover and title, retains the draft on failure, and can be cleared'})
+    await context.close()
+
+
 async def main():
     OUT.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as playwright:
@@ -377,6 +419,7 @@ async def main():
             await verify_lookup_races_and_tasks(browser)
             await verify_read_during_regeneration(browser)
             await verify_details_and_export(browser)
+            await verify_local_subtitle_source_link(browser)
             await verify_dark_narrow(browser)
         except Exception:
             for context_index, context in enumerate(browser.contexts):

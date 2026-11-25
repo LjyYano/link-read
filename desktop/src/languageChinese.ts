@@ -8,6 +8,8 @@ export const chinese: Readonly<Record<string, string>> = {
   "Try again": "重试",
   "Loading article details…": "正在读取文章详情…",
   "Display title": "显示标题",
+  "Original video or episode link": "原视频或播客单集链接",
+  "Uses the source cover and title. A custom display title takes priority.": "使用来源的封面和标题。自定义显示标题优先。",
   "Original title:": "原标题",
   "Reset to original": "恢复原值",
   "Category": "分类",

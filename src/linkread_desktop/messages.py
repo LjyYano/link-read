@@ -44,6 +44,8 @@ _REQUESTS = {
 _ERRORS = {
     "unsupported_source": "Use a supported video, podcast episode, or subtitle file.",
     "source_missing": "Subtitle file not found. Select it again.",
+    "linked_source_unavailable": "Could not load the title or cover for this link. Your article details were kept.",
+    "linked_source_changed": "This article changed. Reopen Edit details and save again.",
     "subtitles_unavailable": "No usable subtitles are available for this source. Import subtitles or enable speech recognition in Settings.",
     "subtitle_login_required": "Bilibili requires sign-in to view subtitles. Open the original video or import a subtitle file.",
     "subtitle_response_invalid": "Bilibili returned an incomplete subtitle list. Check the source again.",

@@ -85,9 +85,13 @@ def video_metadata(source: str, *, session=None) -> VideoMetadata:
         bvid, part = bilibili_video_part(url)
         info = _fetch_json(client, "https://api.bilibili.com/x/web-interface/view", params={"bvid": bvid})
         pages = info.get("pages") or []
+        if info.get("bvid", bvid) != bvid or not isinstance(pages, list):
+            raise ExtractionError("B 站返回了不匹配的视频信息")
         if part > max(1, len(pages)):
             raise UnsupportedSourceError(f"视频不存在第 {part} P")
         page = pages[part - 1] if pages else info
+        if not isinstance(page, dict) or page.get("page", part) != part:
+            raise ExtractionError("B 站返回了不匹配的分 P 信息")
         cover = thumbnail_url(info.get("pic"))
         return VideoMetadata(source=bilibili_source_info(info, url, bvid, part, pages, page),
                              thumbnail_url=cover)

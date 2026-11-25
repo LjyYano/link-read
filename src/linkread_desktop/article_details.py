@@ -4,8 +4,10 @@ import json
 import os
 from pathlib import Path
 import stat
+from urllib.parse import urlsplit
 
 from .errors import LinkReadError
+from .links import SHORT_HOSTS, canonical_link
 from .storage import write_text
 
 
@@ -24,6 +26,21 @@ def detail_value(value: object, field: str) -> str | None:
     if (field == "title" and not value) or len(value) > limit or any(ord(c) < 32 or ord(c) == 127 for c in value):
         raise LinkReadError(f"{label}须为单行文字，最多 {limit} 个字符" + ("且不能为空" if field == "title" else ""))
     return value
+
+
+def linked_source_value(value: object) -> dict[str, str]:
+    """Validate saved presentation metadata without contacting the source."""
+    from .metadata import thumbnail_url
+
+    if not isinstance(value, dict):
+        raise LinkReadError("已关联的来源信息无效")
+    url, cover = value.get("url"), value.get("thumbnailUrl")
+    title = detail_value(value.get("title"), "title")
+    if (not isinstance(url, str) or len(url) > 4096 or canonical_link(url) != url
+            or urlsplit(url).hostname in SHORT_HOSTS or not title
+            or not isinstance(cover, str) or len(cover) > 8192 or thumbnail_url(cover) != cover):
+        raise LinkReadError("已关联的来源信息无效")
+    return {**value, "url": url, "title": title, "thumbnailUrl": cover}
 
 
 def read_article_details(folder: Path) -> dict | None:
@@ -46,16 +63,23 @@ def read_article_details(folder: Path) -> dict | None:
             raise ValueError("invalid metadata")
         for field in ("title", "category"):
             value[field] = detail_value(value[field], field)
+        if "linkedSource" in value:
+            value["linkedSource"] = linked_source_value(value["linkedSource"])
         return value
     except (OSError, ValueError, RecursionError, LinkReadError) as exc:
         raise LinkReadError("无法读取已保存的文章信息，请检查资料库中的 .article-details.json") from exc
 
 
-def save_article_details(folder: Path, *, title: str | None, category: str | None) -> None:
-    """Caller holds the archive mutation lock; one rename publishes both fields."""
+def save_article_details(folder: Path, *, title: str | None, category: str | None,
+                         linked_source: dict | None) -> None:
+    """Caller holds the archive mutation lock; one rename publishes the overlay."""
     previous = read_article_details(folder) or {}
     value = {**previous, "version": 1, "title": detail_value(title, "title"),
              "category": detail_value(category, "category")}
+    if linked_source is None:
+        value.pop("linkedSource", None)
+    else:
+        value["linkedSource"] = linked_source_value(linked_source)
     try:
         contents = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
     except (ValueError, RecursionError) as exc:

@@ -10,6 +10,7 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
 }) {
   const id = useId(), dialog = useArticleDialog()
   const [details, setDetails] = useState<ArticleDetails>()
+  const [sourceUrl, setSourceUrl] = useState("")
   const [title, setTitle] = useState("")
   const [category, setCategory] = useState("")
   const [resetTitle, setResetTitle] = useState(false)
@@ -26,6 +27,7 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
     getArticleDetails(article.id).then(value => {
       if (!current) return
       setDetails(value); setTitle(value.title); setCategory(value.category)
+      setSourceUrl(value.linkedSourceUrl ?? "")
       setResetTitle(!value.titleOverridden); setResetCategory(!value.categoryOverridden)
       requestAnimationFrame(() => { if (current) titleInput.current?.focus() })
     }, failure => { if (current) setError(String(failure)) })
@@ -38,7 +40,10 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
     if (!title.trim()) { setError(tr("Enter a display title.")); titleInput.current?.focus(); return }
     setSaving(true); setError("")
     try {
-      const updated = await updateArticleDetails(article.id, resetTitle ? null : title.trim(), resetCategory ? null : category.trim())
+      const link = sourceUrl.trim()
+      const changedLink = article.platform === "local" && link !== (details.linkedSourceUrl ?? "") ? link : undefined
+      const updated = await updateArticleDetails(article.id, resetTitle ? null : title.trim(),
+        resetCategory ? null : category.trim(), changedLink)
       if (mounted.current) { onSaved(updated); onClose() }
     } catch (failure) { if (mounted.current) setError(String(failure)) }
     finally { if (mounted.current) setSaving(false) }
@@ -54,6 +59,16 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
           : <><LoaderCircle className="spin" size={19} />{tr("Loading article details…")}</>}
       </div> : <>
         <div className="article-dialog-body">
+          {article.platform === "local" && <>
+            <label className="article-dialog-field" htmlFor={id + "-source-link"}>{tr("Original video or episode link")}
+              <input id={id + "-source-link"} inputMode="url" placeholder="https://" value={sourceUrl}
+                maxLength={4096} spellCheck={false} autoCapitalize="none" disabled={saving}
+                aria-describedby={id + "-source-link-hint"} onChange={event => setSourceUrl(event.target.value)} />
+            </label>
+            <div className="article-original" id={id + "-source-link-hint"}>
+              <span>{tr("Uses the source cover and title. A custom display title takes priority.")}</span>
+            </div>
+          </>}
           <label className="article-dialog-field" htmlFor={id + "-display-title"}>{tr("Display title")}
             <input ref={titleInput} id={id + "-display-title"} value={title} maxLength={300} required disabled={saving}
               onChange={event => { setTitle(event.target.value); setResetTitle(false) }} />

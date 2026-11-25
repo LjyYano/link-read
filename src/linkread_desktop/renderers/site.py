@@ -60,7 +60,9 @@ def article_metadata(
 ) -> dict:
     transcript = document.transcript if isinstance(document, NoteDocument) else document
     info = transcript.source
-    default_title = display_title(transcript)
+    details = read_article_details(source_file.parent)
+    linked = details.get("linkedSource") if details and info.platform == "local" else None
+    default_title = linked["title"] if linked else display_title(transcript)
     extra = load_user_metadata(source_file)
     catalog = load_catalog(source_file)
     tags = extra.get("tags")
@@ -80,7 +82,6 @@ def article_metadata(
     category_override = extra.get("category")
     if isinstance(category_override, str):
         category_override = category_override.strip()
-    details = read_article_details(source_file.parent)
     category = (details["category"] if details is not None and details["category"] is not None
                 else category_override or (catalog.category if catalog else ""))
     values = {

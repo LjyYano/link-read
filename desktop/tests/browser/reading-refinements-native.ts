@@ -81,14 +81,20 @@ export async function invoke<T>(command: string, args: any = {}): Promise<T> {
   else if (command === 'article_transcript_path') result = '/fixture/' + args.id + '.json'
   else if (command === 'get_article_details') {
     const article = findArticle(args.id), original: any = originals.get(args.id) || article, value = overrides.get(args.id)
-    result = { title: article.title, category: article.category, originalTitle: original.title, originalCategory: original.category,
+    const linked = article.platform === 'local' && article.sourceUrl
+    result = { title: article.title, category: article.category, originalTitle: linked ? 'Linked Bilibili title - P2' : original.title,
+      ...(linked ? { linkedSourceUrl: article.sourceUrl } : {}), originalCategory: original.category,
       titleOverridden: value?.title != null, categoryOverridden: value?.category != null }
   }
   else if (command === 'update_article_details') {
     if (fixture.failDetails) throw Error('QA: details could not be saved')
     const article = findArticle(args.id), original: any = originals.get(args.id) || article
     overrides.set(args.id, { title: args.title, category: args.category })
-    article.title = args.title ?? original.title
+    if (article.platform === 'local' && typeof args.sourceUrl === 'string') {
+      article.sourceUrl = args.sourceUrl || null
+      article.thumbnailUrl = args.sourceUrl ? 'https://i0.hdslb.com/bfs/archive/linkread-qa-cover.jpg' : null
+    }
+    article.title = args.title ?? (article.platform === 'local' && article.sourceUrl ? 'Linked Bilibili title - P2' : original.title)
     article.category = args.category ?? original.category
     revisions.set(args.id, (revisions.get(args.id) || 0) + 1)
     result = clone(article)

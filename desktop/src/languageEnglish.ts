@@ -64,6 +64,7 @@ export const english: Readonly<Record<string, string>> = {
   "AI 整理文章": "Enrich with AI",
   "重新整理": "Regenerate",
   "编辑详情": "Edit details",
+  "请输入有效的视频或播客单集链接": "Enter a valid video or podcast episode link.",
   "导出 HTML": "Export HTML",
   "导出 Markdown": "Export Markdown",
   "在访达显示": "Show in Finder",

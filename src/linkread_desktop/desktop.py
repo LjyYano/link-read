@@ -17,7 +17,7 @@ from .asr.config import AsrConfig
 from .asr.bailian import BailianAsr
 from .metadata import video_metadata, thumbnail_url, shownotes_metadata
 from .article_state import archive_mutation, patch_reading_state, reading_state, save_reading_state
-from .article_details import DETAILS_FILENAME, detail_value, read_article_details, save_article_details
+from .article_details import DETAILS_FILENAME, detail_value, linked_source_value, read_article_details, save_article_details
 from .ai.models import NoteDocument
 from .ai.openai_compatible import OpenAICompatibleProvider
 from .generation import _run_note, generate_article
@@ -63,7 +63,7 @@ def _article_path(library: Path, article_id: str) -> Path:
     return article
 
 
-def _article_source(article: Path):
+def _article_source(article: Path) -> tuple[Path, TranscriptDocument | NoteDocument, TranscriptDocument]:
     transcript = article.with_name("transcript.json")
     if transcript.is_symlink():
         raise LinkReadError("原始字幕路径不可用")
@@ -93,11 +93,16 @@ def _source_info_metadata(source: SourceInfo) -> dict:
     }
 
 
-def _article_record(article: Path) -> dict:
-    source, document, raw = _article_source(article)
+def _article_record(article: Path, *, archived: tuple[Path, TranscriptDocument | NoteDocument, TranscriptDocument] | None = None) -> dict:
+    source, document, raw = archived if archived is not None else _article_source(article)
     metadata = article_metadata(document, source, overview=load_extras(source).reading)
+    appearance = _source_metadata(raw)
+    details = read_article_details(article.parent) if raw.source.platform == "local" else None
+    linked = details.get("linkedSource") if details else None
+    if linked:
+        appearance.update(sourceUrl=linked["url"], thumbnailUrl=linked["thumbnailUrl"])
     return {
-        **_source_metadata(raw),
+        **appearance,
         "id": article.parent.name,
         "title": metadata["title"],
         "category": metadata["category"],
@@ -114,12 +119,14 @@ def _article_details_record(article: Path) -> dict:
     generated = load_catalog(source, include_user=False)
     user = load_user_metadata(source)
     details = read_article_details(article.parent)
+    linked = details.get("linkedSource") if details and raw.source.platform == "local" else None
     return {
         "title": metadata["title"], "category": metadata["category"],
-        "originalTitle": display_title(raw),
+        "originalTitle": linked["title"] if linked else display_title(raw),
         "originalCategory": generated.category if generated else "",
         "titleOverridden": details["title"] is not None if details is not None else bool(user.get("title")),
         "categoryOverridden": details["category"] is not None if details is not None else bool(user.get("category")),
+        **({"linkedSourceUrl": linked["url"]} if linked else {}),
     }
 
 
@@ -131,22 +138,75 @@ def _get_article_details(library: Path, article_id: str) -> dict:
         return _article_details_record(article)
 
 
+def _linked_appearance(url: str) -> dict[str, str]:
+    try:
+        preview = video_metadata(url)
+        resolved = source_info_link(preview.source)
+        key = video_source_key(url)
+        if not resolved or (key and key != video_source_key(resolved)):
+            raise LinkReadError("来源链接与返回的视频信息不匹配")
+        if urlsplit(url).hostname in BILIBILI_SHORT_HOSTS and preview.source.platform != "bilibili":
+            raise LinkReadError("B 站短链接返回了其他平台")
+        if preview.source.title == preview.source.video_id:
+            raise LinkReadError("来源未返回可用的标题")
+        return linked_source_value({
+            "url": canonical_link(resolved),
+            "title": " ".join(preview.source.title.split())[:300].strip(),
+            "thumbnailUrl": preview.thumbnail_url,
+        })
+    except LinkReadError as exc:
+        raise LinkReadError("无法读取该链接的标题或封面，文章详情未保存。", code="linked_source_unavailable") from exc
+
+
 def _update_article_details(library: Path, article_id: str, values: object) -> dict:
-    if not isinstance(values, dict) or set(values) != {"title", "category"}:
+    if (not isinstance(values, dict) or not {"title", "category"} <= values.keys()
+            or values.keys() - {"title", "category", "sourceUrl"}):
         raise LinkReadError("请同时提供标题和分类，恢复原始值时使用 null")
     title = detail_value(values["title"], "title")
     category = detail_value(values["category"], "category")
     _article_path(library, article_id)
+    change_link = "sourceUrl" in values
+    source_url = values.get("sourceUrl")
+    signature = None
+    linked = None
+    if change_link and source_url is not None:
+        if not isinstance(source_url, str) or len(source_url) > 4096:
+            raise LinkReadError("请输入有效的视频或播客单集链接")
+        source_url = source_url.strip()
+        if source_url:
+            source_url = canonical_link(source_url)
+            with archive_mutation(library):
+                article = _article_path(library, article_id)
+                signature = archive_signature(article.parent)
+                if _article_source(article)[2].source.platform != "local":
+                    raise LinkReadError("只有本地字幕文章可以关联来源链接")
+            linked = _linked_appearance(source_url)
+
     with archive_mutation(library):
         article = _article_path(library, article_id)
-        archive_signature(article.parent)
-        details = _article_details_record(article)
-        record = _article_record(article)
+        current_signature = archive_signature(article.parent)
+        if signature is not None and signature != current_signature:
+            raise LinkReadError("文章已更新，请重新打开详情后保存。", code="linked_source_changed")
+        archived = _article_source(article)
+        source, _, raw = archived
+        if change_link and raw.source.platform != "local":
+            raise LinkReadError("只有本地字幕文章可以关联来源链接")
+        if not change_link:
+            previous = read_article_details(article.parent)
+            linked = previous.get("linkedSource") if previous else None
+        generated = load_catalog(source, include_user=False)
+        record = _article_record(article, archived=archived)
         # Prepare the response before the atomic write. A later cache rebuild is
         # optional and must not turn a successful save into an apparent failure.
-        record.update(title=details["originalTitle"] if title is None else title,
-                      category=details["originalCategory"] if category is None else category)
-        save_article_details(article.parent, title=title, category=category)
+        default_title = linked["title"] if linked else display_title(raw)
+        default_category = generated.category if generated else ""
+        record.update(title=default_title if title is None else title,
+                      category=default_category if category is None else category)
+        if change_link:
+            original = _source_metadata(raw)
+            record.update(sourceUrl=linked["url"] if linked else original["sourceUrl"],
+                          thumbnailUrl=linked["thumbnailUrl"] if linked else original["thumbnailUrl"])
+        save_article_details(article.parent, title=title, category=category, linked_source=linked)
         return record
 
 

@@ -9,12 +9,112 @@ from linkread_desktop.ai.models import NoteAnalysis, NoteDocument
 from linkread_desktop.article_details import DETAILS_FILENAME
 from linkread_desktop.article_state import patch_reading_state
 from linkread_desktop.errors import LinkReadError
+from linkread_desktop.metadata import VideoMetadata
+from linkread_desktop.models import SourceInfo, TranscriptDocument, TranscriptSegment
+from linkread_desktop.renderers.site import build_site
+from linkread_desktop.workspace import workspace_dir
 from test_desktop import invoke
 from test_desktop_duplicate import make_archive
 
 
 def write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+
+
+VIDEO = "https://www.bilibili.com/video/BV1BhKf6mEYR?p=2"
+ARTWORK = "https://i0.hdslb.com/bfs/archive/fixture.jpg"
+VIDEO_TITLE = "原视频 <标题> - P2"
+
+
+def make_local_archive(library):
+    raw = TranscriptDocument(source=SourceInfo(platform="local", title="导入的字幕.srt"),
+                             transcript_source="local",
+                             segments=[TranscriptSegment(start_ms=1000, end_ms=2000, text="用户导入的原文")])
+    folder = workspace_dir(library, raw)
+    folder.mkdir(parents=True)
+    (folder / "transcript.json").write_text(raw.model_dump_json(), encoding="utf-8")
+    (folder / "article.html").write_text("Original offline article", encoding="utf-8")
+    return folder
+
+
+def video_preview(url):
+    assert url == VIDEO
+    return VideoMetadata(source=SourceInfo(platform="bilibili", video_id="BV1BhKf6mEYR", title=VIDEO_TITLE, url=url),
+                         thumbnail_url=ARTWORK)
+
+
+def test_linked_local_subtitles_use_source_cover_and_title_across_surfaces(tmp_path, monkeypatch):
+    library = tmp_path / "library"
+    folder = make_local_archive(library)
+    article = folder / "article.html"
+    before = desktop._article_record(article)
+    archived = (folder / "transcript.json").read_bytes()
+    reader = desktop._prepared_reader(article)
+    monkeypatch.setattr(desktop, "video_metadata", video_preview)
+
+    record = desktop._update_article_details(library, folder.name, {
+        "title": None, "category": "访谈", "sourceUrl": "分享链接 " + VIDEO + "&spm_id_from=tracking",
+    })
+    assert (record["title"], record["thumbnailUrl"], record["sourceUrl"]) == (VIDEO_TITLE, ARTWORK, VIDEO)
+    assert (record["id"], record["platform"], record["readingKey"]) == (before["id"], "local", before["readingKey"])
+    assert desktop._library_records(library)["articles"] == [record]
+    details = desktop._get_article_details(library, folder.name)
+    assert details["linkedSourceUrl"] == VIDEO and details["originalTitle"] == VIDEO_TITLE
+    assert not details["titleOverridden"]
+    updated_reader = desktop._prepared_reader(article)
+    assert updated_reader["readingKey"] == reader["readingKey"] and updated_reader["revision"] != reader["revision"]
+    rendered = (folder / ".reader.html").read_text()
+    assert "原视频 &lt;标题&gt; - P2" in rendered and VIDEO not in rendered
+    assert desktop._article_markdown(library, folder.name).startswith("# 原视频 &lt;标题&gt; - P2\n")
+    site = tmp_path / "site"
+    assert build_site(library, site) == 1
+    assert "原视频 &lt;标题&gt; - P2" in (site / "index.html").read_text()
+    assert (folder / "transcript.json").read_bytes() == archived
+    assert article.read_text() == "Original offline article"
+
+    def unexpected_fetch(url):
+        pytest.fail("Editing title or removing the link must use saved data")
+    monkeypatch.setattr(desktop, "video_metadata", unexpected_fetch)
+    custom = desktop._update_article_details(library, folder.name, {"title": "人工标题", "category": None})
+    assert (custom["title"], custom["thumbnailUrl"], custom["sourceUrl"]) == ("人工标题", ARTWORK, VIDEO)
+    cleared = desktop._update_article_details(library, folder.name, {"title": None, "category": None, "sourceUrl": None})
+    assert (cleared["title"], cleared["thumbnailUrl"], cleared["sourceUrl"]) == (before["title"], None, None)
+
+
+@pytest.mark.parametrize("bad_source", ["https://evil.example/video", "https://www.bilibili.com/video/BV1BhKf6mEYR?p=3"])
+def test_bad_link_keeps_prior_source_and_title(tmp_path, monkeypatch, bad_source):
+    folder = make_local_archive(tmp_path)
+    monkeypatch.setattr(desktop, "video_metadata", video_preview)
+    desktop._update_article_details(tmp_path, folder.name, {"title": None, "category": None, "sourceUrl": VIDEO})
+    before = (folder / DETAILS_FILENAME).read_bytes()
+    monkeypatch.setattr(desktop, "video_metadata", lambda _: video_preview(VIDEO))
+    with pytest.raises(LinkReadError):
+        desktop._update_article_details(tmp_path, folder.name, {"title": "别保存", "category": None, "sourceUrl": bad_source})
+    assert (folder / DETAILS_FILENAME).read_bytes() == before
+
+
+def test_link_save_detects_archive_change_during_public_lookup(tmp_path, monkeypatch):
+    folder = make_local_archive(tmp_path)
+
+    def preview_after_concurrent_edit(url):
+        desktop._update_article_details(tmp_path, folder.name, {"title": "别处刚改的标题", "category": None})
+        return video_preview(url)
+
+    monkeypatch.setattr(desktop, "video_metadata", preview_after_concurrent_edit)
+    with pytest.raises(LinkReadError, match="文章已更新"):
+        desktop._update_article_details(tmp_path, folder.name, {"title": None, "category": None, "sourceUrl": VIDEO})
+    record = desktop._article_record(folder / "article.html")
+    assert record["title"] == "别处刚改的标题" and record["sourceUrl"] is None
+
+
+def test_local_link_survives_archive_replacement(tmp_path, monkeypatch):
+    folder = make_local_archive(tmp_path)
+    stage = make_local_archive(tmp_path / ".stage")
+    monkeypatch.setattr(desktop, "video_metadata", video_preview)
+    desktop._update_article_details(tmp_path, folder.name, {"title": None, "category": None, "sourceUrl": VIDEO})
+    result = desktop._publish_replacement(stage / "article.html", tmp_path)
+    record = desktop._article_record(result)
+    assert result.parent == folder and record["title"] == VIDEO_TITLE and record["thumbnailUrl"] == ARTWORK
 
 
 def test_edit_is_consistent_in_library_reader_and_markdown_without_changing_source(tmp_path):

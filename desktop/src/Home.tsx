@@ -107,6 +107,8 @@ function PlatformIcon({ platform }: { platform?: Article["platform"] }) {
 
 function Cover({ platform, thumbnailUrl, title, sourceUrl, withBackdrop }: ArticleIdentity & { withBackdrop?: boolean }) {
   const text = coverText(title)
+  const coverPlatform = platform === "local" && sourceUrl && previewKey(sourceUrl)?.startsWith("apple_podcasts:")
+    ? "apple_podcasts" : platform
   const cover = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
   const [loaded, setLoaded] = useState<string>()
@@ -140,14 +142,14 @@ function Cover({ platform, thumbnailUrl, title, sourceUrl, withBackdrop }: Artic
   }, [showCover, loaded, resolved])
 
   return (
-    <span ref={cover} className="shelf-cover" data-platform={platform}
+    <span ref={cover} className="shelf-cover" data-platform={coverPlatform}
       data-cover-tone={text.tone} data-cover-loaded={Boolean(showCover && loaded === resolved)} aria-hidden="true">
       <span className="cover-typography">
         <span className="cover-kicker">LINKREAD / {platform === "local" ? tr("字幕笔记") : platform === "apple_podcasts" ? tr("播客笔记") : tr("阅读笔记")}</span>
         <span className="cover-title" data-compact={text.compact}>{text.label}</span>
         <span className="cover-rule" />
       </span>
-      {withBackdrop && showCover && loaded === resolved &&
+      {withBackdrop && coverPlatform === "apple_podcasts" && showCover && loaded === resolved &&
         <img className="cover-backdrop" alt="" src={resolved} referrerPolicy="no-referrer" />}
       {showCover && <img alt="" src={resolved} referrerPolicy="no-referrer"
         hidden={loaded !== resolved} onLoad={() => setLoaded(resolved)}
@@ -366,7 +368,7 @@ function ArticleCard({ article, onRead, onDelete, onRegenerate, onStateChange, o
   return (
     <li className="article-card" data-platform={article.platform} data-article-id={article.id}>
       <button type="button" className="article-card-link" onClick={() => onRead(article)}>
-        <span className="article-card-media"><Cover {...article} withBackdrop={article.platform === "apple_podcasts"} /></span>
+        <span className="article-card-media"><Cover {...article} withBackdrop /></span>
         <span className="article-card-info">
           <span className="article-card-title" title={article.title}>{article.title}</span>
           <SourceDetails {...article} />

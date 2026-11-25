@@ -20,6 +20,7 @@ export type MarkdownExportOptions = { content: "readable" | "full"; includeTimes
 export type ArticleDetails = {
   title: string; category: string; originalTitle: string; originalCategory: string
   titleOverridden: boolean; categoryOverridden: boolean
+  linkedSourceUrl?: string
 }
 export type ArticleState = { isRead: boolean; isStarred: boolean }
 export type ArticleStatePatch = Partial<ArticleState>
@@ -111,8 +112,8 @@ export const checkTool = (provider: Provider, executable: string) =>
 export const exportArticle = (id: string, format: ExportFormat, options?: MarkdownExportOptions) =>
   invoke<boolean>("export_article", { id, format, uiLanguage: locale(), ...(options ? { options } : {}) })
 export const getArticleDetails = (id: string) => invoke<ArticleDetails>("get_article_details", { id })
-export const updateArticleDetails = (id: string, title: string | null, category: string | null) =>
-  invoke<Article>("update_article_details", { id, title, category })
+export const updateArticleDetails = (id: string, title: string | null, category: string | null, sourceUrl?: string) =>
+  invoke<Article>("update_article_details", { id, title, category, ...(sourceUrl === undefined ? {} : { sourceUrl }) })
 export const openVideo = (source: string) => invoke("open_video", { source })
 export const openExternal = (url: string) => invoke("open_external", { url })
 export const pickSubtitle = () => invoke<string | null>("pick_subtitle", { uiLanguage: locale() })
