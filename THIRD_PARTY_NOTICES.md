@@ -18,6 +18,8 @@
 
 js-yaml 文本取自[固定上游提交](https://github.com/nodeca/js-yaml/blob/2321c0b9d1e25f9b8e6202744bc601a4998fe27f/LICENSE)，逐字节保留。以上表格不是对压缩 bundle 内全部传递依赖的穷尽识别。
 
+桌面版用哔哩哔哩视频页的官方 favicon 标识 B 站来源。32 × 32 像素图标无损转换为本地 PNG，标识属于哔哩哔哩。[原始图标](https://i0.hdslb.com/bfs/static/jinkela/long/images/favicon.ico)
+
 # 3. 阅读模板来源
 
 首页、阅读页及思维导图交互改编自 [LjyYano/html-library](https://github.com/LjyYano/html-library/tree/bca81c0d07a2849c154b3f621cfc92e32df5468b)，固定提交 `bca81c0d07a2849c154b3f621cfc92e32df5468b`：

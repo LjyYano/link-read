@@ -245,7 +245,6 @@ button.shelf-article-link:focus-visible { outline-offset: 1px; }
 .shelf-source-duration { flex-shrink: 0; }
 
 .shelf-youtube-icon { color: #e62125; }
-.shelf-bilibili-icon { color: #dc4b78; }
 .shelf-podcast-icon { color: #a34ad3; }
 
 .shelf-date {

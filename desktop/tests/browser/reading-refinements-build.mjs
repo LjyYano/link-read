@@ -13,6 +13,7 @@ await fs.mkdir(path.join(out, 'site'), { recursive: true })
 await build({
   entryPoints: [path.join(repo, 'desktop/src/main.tsx')], bundle: true,
   outfile: path.join(out, 'site/fixture.js'), jsx: 'automatic', format: 'iife', target: 'es2022',
+  loader: { '.png': 'dataurl' },
   define: { 'process.env.NODE_ENV': '"production"' },
   plugins: [{ name: 'reading-refinements-native-transport', setup(builder) {
     builder.onResolve({ filter: /^@tauri-apps\/api\/(core|webview|window)$/ },

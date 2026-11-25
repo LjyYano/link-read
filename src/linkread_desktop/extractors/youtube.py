@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from ..errors import ExtractionError, SubtitleUnavailableError
+from ..links import canonical_link
 from ..models import SourceInfo, TranscriptDocument
 from ..parsers import parse_srt_vtt
 from ..progress import ProgressCallback, report
@@ -15,6 +16,7 @@ _SUPPORTED_BROWSERS = frozenset({
     "brave", "chrome", "chromium", "edge", "firefox", "opera",
     "safari", "vivaldi", "whale",
 })
+_CAPTION_FIELDS = ("subtitles", "automatic_captions")
 
 
 class _QuietLogger:
@@ -28,6 +30,24 @@ class _QuietLogger:
 
     def error(self, message: str) -> None:
         pass
+
+
+class _CaptionLookupLogger(_QuietLogger):
+    """Retain failure signals when yt-dlp omits tracks from its result."""
+
+    def __init__(self) -> None:
+        self.incomplete = False
+
+    def debug(self, message: str) -> None:
+        reason = message.lower()
+        if any(marker in reason for marker in (
+            "subtitles require a po token", "missing subtitles languages",
+            "no supported javascript runtime", "signature solving failed", "challenge solving failed",
+        )):
+            self.incomplete = True
+
+    def warning(self, message: str) -> None:
+        self.debug(message)
 
 
 def _cookie_options(
@@ -68,11 +88,18 @@ def _choose_caption(info: dict) -> tuple[str, dict, bool] | None:
     candidates = []
     declared = info.get("language")
     source = declared.lower().split("-")[0] if isinstance(declared, str) else ""
-    for is_auto, field in enumerate(("subtitles", "automatic_captions")):
-        for language, tracks in (info.get(field) or {}).items():
+    for is_auto, field in enumerate(_CAPTION_FIELDS):
+        catalog = info.get(field)
+        if not isinstance(catalog, dict):
+            continue
+        for language, tracks in catalog.items():
+            if not isinstance(language, str) or language == "live_chat" or not isinstance(tracks, list):
+                continue
             for track in tracks:
-                ext = track.get("ext", "").lower()
-                if ext in {"vtt", "srt"} and track.get("url"):
+                if not isinstance(track, dict) or not isinstance(track.get("ext"), str):
+                    continue
+                ext = track["ext"].lower()
+                if ext in {"vtt", "srt"} and isinstance(track.get("url"), str) and track["url"].strip():
                     code = language.removesuffix("-orig")
                     query = parse_qs(urlsplit(track["url"]).query)
                     translated = bool(query.get("tlang")) and query.get("tlang") != query.get("lang")
@@ -111,7 +138,6 @@ def _source_info(info: dict, url: str) -> SourceInfo:
 
 def youtube_metadata(url: str) -> SourceInfo:
     """Explicit description refresh; metadata only, never captions or media."""
-    from ..links import canonical_link
     url = canonical_link(url)
     expected_id = url.rsplit("=", 1)[1]
     try:
@@ -143,11 +169,14 @@ def extract_youtube(
     cookies_from_browser: str | None = None,
     cookies_file: Path | None = None,
 ) -> TranscriptDocument:
+    url = canonical_link(url)
+    expected_id = url.rsplit("=", 1)[1]
     try:
         from yt_dlp import YoutubeDL
     except ImportError as exc:
         raise ExtractionError("提取 YouTube 字幕需要 yt-dlp，请检查桌面版后端是否完整安装") from exc
     cookie_options = _cookie_options(cookies_from_browser, cookies_file)
+    lookup = _CaptionLookupLogger()
     try:
         if cookies_from_browser:
             report(progress, "authentication", f"已选择从 {cookies_from_browser.lower()} 读取 Cookie（仅本次请求）")
@@ -156,25 +185,34 @@ def extract_youtube(
         report(progress, "metadata", "正在获取 YouTube 视频元数据（首次访问可能较慢）")
         options = {
             "quiet": True,
+            "verbose": True,  # yt-dlp reports some skipped subtitle tracks only at debug level.
             "no_warnings": True,
             "noplaylist": True,
             "skip_download": True,
             "socket_timeout": 20,
             "retries": 2,
             "extractor_retries": 2,
-            "logger": _QuietLogger(),
+            "logger": lookup,
         }
         options.update(cookie_options)
         with YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
-            if not isinstance(info, dict) or info.get("_type") in {"playlist", "multi_video"}:
-                raise ExtractionError("未能识别单个 YouTube 视频；请使用包含 v=视频ID 的 watch 链接")
-            source = _source_info(info, url)
+            if (not isinstance(info, dict) or info.get("_type") in {"playlist", "multi_video"}
+                    or info.get("id") != expected_id):
+                raise ExtractionError("YouTube 返回的字幕来源与当前视频不匹配")
+            source = _source_info(info, url).model_copy(update={"url": url})
             report(progress, "metadata_done", f"已获取视频：{source.title}", source=source)
             report(progress, "captions", "正在检查字幕列表")
             selected = _choose_caption(info)
             if selected is None:
-                raise SubtitleUnavailableError("该 YouTube 视频没有可获取的 VTT/SRT 字幕；可启用 ASR", source=source)
+                if info.get("availability") in ("needs_auth", "private", "premium_only", "subscriber_only"):
+                    raise ExtractionError("YouTube 视频需要授权访问，请打开原视频查看。", code="source_permission_denied")
+                catalog_empty = all(isinstance(info.get(field), dict) and not (info[field].keys() - {"live_chat"})
+                                    for field in _CAPTION_FIELDS)
+                if lookup.incomplete or not catalog_empty:
+                    raise ExtractionError("YouTube 字幕列表不完整或包含无法读取的字幕轨，请重新检查来源。",
+                                          code="youtube_subtitles_unconfirmed", retryable=True, action="retry")
+                raise SubtitleUnavailableError("该 YouTube 视频没有公开字幕；可启用 ASR", source=source)
             language, track, is_auto = selected
             caption_type = "自动字幕" if is_auto else "人工字幕"
             report(progress, "captions_done", f"选定字幕：{language}（{caption_type} / {track['ext'].upper()}）")
@@ -189,13 +227,17 @@ def extract_youtube(
                 or "sign in to verify" in reason):
             raise ExtractionError(
                 "YouTube 要求验证登录状态或触发了反机器人风控。"
-                "建议先更新 yt-dlp 并稍后重试；如果你有权使用该视频，"
-                "可显式添加 --cookies-from-browser chrome（或 edge/firefox/safari）。"
-                "此选项会读取本机浏览器会话，可能有账号风控风险，默认不启用。"
+                "请打开原视频确认访问权限，或导入已有字幕。"
+                "命令行可显式添加 --cookies-from-browser chrome（或 edge/firefox/safari）授权读取本机浏览器会话。",
+                code="youtube_verification_required",
             ) from exc
-        raise ExtractionError(f"YouTube 字幕提取失败：{str(exc)[:450]}") from exc
+        raise ExtractionError("YouTube 字幕提取失败，请检查来源或稍后重试。") from exc
     report(progress, "parse", "正在解析字幕时间戳和文本")
-    segments = parse_srt_vtt(content)
+    try:
+        segments = parse_srt_vtt(content)
+    except (ExtractionError, SubtitleUnavailableError) as exc:
+        raise ExtractionError("YouTube 已列出字幕轨，但返回的字幕正文为空或格式无效。请重新检查来源。",
+                              code="youtube_subtitle_invalid", retryable=True, action="retry") from exc
     report(progress, "parsed", f"字幕解析完成：{len(segments)} 个片段")
     return TranscriptDocument(
         source=source,

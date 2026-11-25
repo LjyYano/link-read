@@ -3,8 +3,9 @@ import type { ComposerPaste } from "./subtitlePaste"
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import {
   ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, Circle, CircleAlert, CircleCheck, FolderOpen,
-  FileUp, Link2, LoaderCircle, MoreHorizontal, Pencil, Plus, Search, Tv, X, CircleHelp, Sparkles, Trash2, Captions, Podcast, RotateCw, CircleStop, CirclePause, Star,
+  FileUp, Link2, LoaderCircle, MoreHorizontal, Pencil, Plus, Search, X, CircleHelp, Sparkles, Trash2, Captions, Podcast, RotateCw, CircleStop, CirclePause, Star,
 } from "lucide-react"
+import bilibiliIcon from "./assets/bilibili.png"
 import { exportArticle, openVideo, revealArticle, type Article, type ExportFormat, type Library, type GenerationFailure } from "./api"
 import { menuNavigation } from "./menu"
 import { activeLanes, elapsedLabel, stageRows, progressCaption, progressDetail, requestCaption, type TaskActivity } from "./taskProgress"
@@ -99,7 +100,7 @@ function PlatformIcon({ platform }: { platform?: Article["platform"] }) {
       </svg>
     )
   }
-  if (platform === "bilibili") return <Tv size={15} className="shelf-bilibili-icon" aria-hidden="true" />
+  if (platform === "bilibili") return <img src={bilibiliIcon} width={16} height={16} alt="" />
   if (platform === "apple_podcasts") return <Podcast size={16} strokeWidth={1.7} className="shelf-podcast-icon" aria-hidden="true" />
   return <Captions size={16} strokeWidth={1.7} className="shelf-local-icon" aria-hidden="true" />
 }

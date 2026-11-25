@@ -47,6 +47,9 @@ _ERRORS = {
     "subtitles_unavailable": "No usable subtitles are available for this source. Import subtitles or enable speech recognition in Settings.",
     "subtitle_login_required": "Bilibili requires sign-in to view subtitles. Open the original video or import a subtitle file.",
     "subtitle_response_invalid": "Bilibili returned an incomplete subtitle list. Check the source again.",
+    "youtube_verification_required": "YouTube requires sign-in verification before this video can be accessed. Open the original video to verify access or import a subtitle file.",
+    "youtube_subtitles_unconfirmed": "YouTube's subtitle list was incomplete or included unreadable tracks. Check the source again.",
+    "youtube_subtitle_invalid": "YouTube listed a subtitle track, but the downloaded captions were empty or invalid. Check the source again.",
     "invalid_pasted_subtitle": "Could not read the pasted subtitles. Check their format and timestamps.",
     "source_permission_denied": "Access to this source was denied. Check the source permissions.",
     "source_timeout": "The subtitle service timed out. Try again.",
@@ -112,7 +115,7 @@ def localize_event(kind: str, fields: dict) -> dict:
         code = fields.get("code")
         if code == "subtitle_login_required":
             return {**fields, "message": "Bilibili requires sign-in to view subtitles. Generation can transcribe publicly accessible audio."}
-        if code == "subtitle_response_invalid":
+        if code in {"subtitle_response_invalid", "youtube_verification_required", "youtube_subtitles_unconfirmed", "youtube_subtitle_invalid"}:
             return {**fields, "message": _ERRORS[code]}
         message = {
             "captions": "Public subtitles are available for this source.",

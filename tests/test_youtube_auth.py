@@ -91,10 +91,15 @@ def test_rejects_missing_or_unsupported_cookies(tmp_path):
     assert FakeYoutubeDL.options == []
 
 
-def test_youtube_antibot_diagnostic_does_not_dump_raw_error(capsys):
+def test_youtube_antibot_diagnostic_does_not_dump_raw_error_or_start_asr(capsys, monkeypatch):
+    from linkread_desktop.asr.config import AsrConfig
+
     FakeYoutubeDL.fail_auth = True
+    monkeypatch.setattr("linkread_desktop.asr.pipeline.transcribe_video",
+                        lambda *args, **kwargs: pytest.fail("Login verification must not trigger ASR"))
     with pytest.raises(ExtractionError, match="反机器人风控") as ex:
-        extract_youtube("https://www.youtube.com/watch?v=1-Fo8McCD9w")
+        extract("https://www.youtube.com/watch?v=1-Fo8McCD9w", asr=AsrConfig())
+    assert ex.value.code == "youtube_verification_required"
     assert "--cookies-from-browser chrome" in str(ex.value)
     assert "Sign in to confirm" not in str(ex.value)
     assert capsys.readouterr().err == ""
