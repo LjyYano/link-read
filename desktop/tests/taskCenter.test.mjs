@@ -14,12 +14,12 @@ const tasks = [
   { id: 'done', job: { status: 'done', article: { id: 'article' } } },
 ]
 
-test('task groups preserve FIFO order and keep finished articles out of pending work', () => {
+test('task groups preserve queue order and show the newest attention records first', () => {
   const snapshot = JSON.stringify(tasks)
   const groups = groupTasks(tasks)
   assert.deepEqual(groups.active.map(task => task.id), ['running', 'stopping'])
   assert.deepEqual(groups.queued.map(task => task.id), ['queued-1', 'queued-2'])
-  assert.deepEqual(groups.attention.map(task => task.id), ['error', 'cancelled', 'interrupted'])
+  assert.deepEqual(groups.attention.map(task => task.id), ['interrupted', 'cancelled', 'error'])
   assert.equal(activeTaskCount(tasks), 4)
   assert.equal(JSON.stringify(tasks), snapshot)
   assert.deepEqual(groupTasks([]), { active: [], queued: [], attention: [] })

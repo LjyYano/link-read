@@ -262,17 +262,20 @@ async def verify_tasks(browser):
     await expect(dialog.locator('.task-center-disclosure')).to_have_attribute('aria-expanded', 'false')
     await expect(dialog.locator('.task-card-active')).to_have_count(1)
     await page.screenshot(path=str(OUT / f'{ENGINE}-workspace-tasks.png'))
-    await dialog.locator('.task-center-queue > li').first.get_by_role('button', name='取消排队', exact=True).click()
+    queued_task = dialog.locator('.task-center-queue > li').first
+    cancelled_id = await queued_task.get_attribute('data-task-id')
+    await queued_task.get_by_role('button', name='取消排队', exact=True).click()
     await expect(dialog.locator('.task-center-queue > li')).to_have_count(1)
     assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='cancel_generation').length") == 0
     first_id = await page.evaluate('window.taskWorkspaceFixture.pendingGenerations[0].args.requestId')
     await page.evaluate('''id=>window.taskWorkspaceFixture.failGeneration(id,{message:'QA new failure: saved transcript remains available',code:'ai_unavailable',stage:'analysis',retryable:true,action:'retry'})''', first_id)
     await expect(dialog.locator('.task-center-queue > li')).to_have_count(0)
     await expect(dialog.locator('.task-center-disclosure')).to_have_attribute('aria-expanded', 'true')
-    await expect(dialog.locator('.task-center-unseen')).to_contain_text('1 条未查看')
-    assert first_id not in await page.evaluate("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1'))")
-    # The new failure is below the existing records: opening the drawer alone
-    # must not acknowledge or clear it without it entering the scroll viewport.
+    cards = dialog.locator('.task-center-attention .task-card')
+    await expect(cards.first).to_have_attribute('data-task-id', cancelled_id)
+    await expect(cards.nth(1)).to_have_attribute('data-task-id', first_id)
+    await cards.nth(1).locator('.task-error-summary').scroll_into_view_if_needed()
+    await page.wait_for_function("id => JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1')).includes(id)", arg=first_id)
     await page.evaluate('window.taskWorkspaceFixture.failJournal=true')
     before = await dialog.locator('.task-card').count()
     await dialog.get_by_role('button', name='清理已查看记录', exact=False).click()
@@ -283,10 +286,10 @@ async def verify_tasks(browser):
     await page.evaluate('window.taskWorkspaceFixture.failJournal=false')
     await dialog.get_by_role('button', name='清理已查看记录', exact=False).click()
     await page.wait_for_function("!window.taskWorkspaceFixture.journal.tasks.some(task=>task.id.startsWith('old-'))")
-    assert await page.evaluate('id=>window.taskWorkspaceFixture.journal.tasks.some(task=>task.id===id)', first_id)
+    assert not await page.evaluate('id=>window.taskWorkspaceFixture.journal.tasks.some(task=>task.id===id)', first_id)
     assert await page.evaluate("window.taskWorkspaceFixture.journal.tasks.some(task=>task.status==='running')")
     await check_no_overflow(page)
-    RESULTS.append({'check': 'One running plus two queued and 20 old failures shows one full Home card; queued cancellation is local; new unseen failures remain visible; clearing preserves records on journal write failure and removes only reviewed terminal records after successful persistence'})
+    RESULTS.append({'check': 'One running plus two queued and 20 old failures shows one full Home card; queued cancellation is local; new attention records appear above older ones; clearing preserves records on journal write failure and removes reviewed terminal records after successful persistence'})
 
     await page.keyboard.press('Escape')
     await expect(page.locator('.task-center')).to_have_count(0)
@@ -359,8 +362,11 @@ async def verify_unseen_visibility(browser):
     await expect(page.locator('.home-task-summary')).to_contain_text('20 个任务需要查看')
     await page.locator('.titlebar-tasks').click()
     await expect(page.locator('.task-center-disclosure')).to_have_attribute('aria-expanded', 'true')
-    await page.wait_for_function("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1')).includes('old-00')")
-    assert 'old-19' not in await page.evaluate("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1'))")
+    cards = page.locator('.task-center-attention .task-card')
+    await expect(cards.first).to_have_attribute('data-task-id', 'old-19')
+    await expect(cards.last).to_have_attribute('data-task-id', 'old-00')
+    await page.wait_for_function("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1')).includes('old-19')")
+    assert 'old-00' not in await page.evaluate("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1'))")
     # Expose only the final card's first 24px (its cover/title), keeping the
     # actual error reason below the viewport: the record must remain unseen.
     await page.evaluate('''() => {
@@ -369,9 +375,9 @@ async def verify_unseen_visibility(browser):
       area.scrollTop+=card.getBoundingClientRect().top-area.getBoundingClientRect().bottom+24;
     }''')
     await page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-    assert 'old-19' not in await page.evaluate("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1'))")
-    await page.locator('.task-center-attention .task-card').last.locator('.task-error-summary').scroll_into_view_if_needed()
-    await page.wait_for_function("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1')).includes('old-19')")
+    assert 'old-00' not in await page.evaluate("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1'))")
+    await cards.last.locator('.task-error-summary').scroll_into_view_if_needed()
+    await page.wait_for_function("JSON.parse(localStorage.getItem('linkread-reviewed-tasks-v1')).includes('old-00')")
     # Native modal focus remains inside the drawer while tabbing backward.
     await page.get_by_role('button', name='关闭任务中心', exact=True).focus()
     await page.keyboard.press('Shift+Tab')

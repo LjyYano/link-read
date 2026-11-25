@@ -52,7 +52,7 @@ export function groupTasks(jobs: readonly TaskJob[]) {
   return {
     active: jobs.filter(task => task.job.status === "running" || task.job.status === "cancelling"),
     queued: jobs.filter(task => task.job.status === "queued"),
-    attention: jobs.filter(task => isTerminalTask(task)),
+    attention: jobs.filter(isTerminalTask).reverse(),
   }
 }
 
