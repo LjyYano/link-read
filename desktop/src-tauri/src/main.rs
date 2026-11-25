@@ -74,6 +74,10 @@ struct ArticleDetails {
     category_overridden: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     linked_source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    linked_thumbnail_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle_title: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]

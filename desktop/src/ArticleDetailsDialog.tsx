@@ -3,6 +3,8 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react"
 import { LoaderCircle, X } from "lucide-react"
 import { getArticleDetails, updateArticleDetails, type Article, type ArticleDetails } from "./api"
 import { useArticleDialog } from "./articleDialog"
+import { thumbnailSource } from "./coverSource"
+import { useLinkPreview } from "./useLinkPreview"
 import "./article-dialog.css"
 
 export function ArticleDetailsDialog({ article, onSaved, onClose }: {
@@ -18,8 +20,20 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [loadAttempt, setLoadAttempt] = useState(0)
+  const [brokenCover, setBrokenCover] = useState<string>()
   const mounted = useRef(true)
   const titleInput = useRef<HTMLInputElement>(null)
+  const link = sourceUrl.trim()
+  const savedLink = details?.linkedSourceUrl ?? ""
+  const changedLink = article.platform === "local" && details && link !== savedLink ? link : undefined
+  const preview = useLinkPreview(changedLink ?? "", false)
+  const newSource = preview.status === "ready" ? preview.metadata : undefined
+  const sourceTitle = Array.from(newSource?.title.trim().replace(/\s+/g, " ") ?? "").slice(0, 300).join("").trimEnd()
+  const originalTitle = (changedLink === undefined ? details?.originalTitle
+    : sourceTitle || details?.subtitleTitle || details?.originalTitle) ?? ""
+  const displayTitle = resetTitle ? originalTitle : title
+  const cover = thumbnailSource(changedLink === undefined ? details?.linkedThumbnailUrl : newSource?.thumbnailUrl)
+
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     let current = true
@@ -37,11 +51,9 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
   async function save(event: FormEvent) {
     event.preventDefault()
     if (!details || saving) return
-    if (!title.trim()) { setError(tr("Enter a display title.")); titleInput.current?.focus(); return }
+    if (!displayTitle.trim()) { setError(tr("Enter a display title.")); titleInput.current?.focus(); return }
     setSaving(true); setError("")
     try {
-      const link = sourceUrl.trim()
-      const changedLink = article.platform === "local" && link !== (details.linkedSourceUrl ?? "") ? link : undefined
       const updated = await updateArticleDetails(article.id, resetTitle ? null : title.trim(),
         resetCategory ? null : category.trim(), changedLink)
       if (mounted.current) { onSaved(updated); onClose() }
@@ -68,13 +80,23 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
             <div className="article-original" id={id + "-source-link-hint"}>
               <span>{tr("Uses the source cover and title. A custom display title takes priority.")}</span>
             </div>
+            {cover && brokenCover !== cover && <img className="article-source-cover" src={cover} alt={tr("来源封面")}
+              referrerPolicy="no-referrer" onError={() => setBrokenCover(cover)} />}
+            {preview.status === "loading" && <div className="article-source-feedback" role="status">
+              <LoaderCircle className="spin" size={13} aria-hidden="true" />
+              {tr(preview.slow ? "获取信息较慢，仍在等待标题与封面" : "正在获取标题与封面…")}
+            </div>}
+            {preview.status === "error" && <div className="article-source-feedback">
+              <span role="status">{tr(preview.timedOut ? "来源预览等待超时" : "暂未获取到标题与封面")}</span>
+              <button className="text-button" type="button" disabled={saving} onClick={preview.retry}>{tr("重试预览")}</button>
+            </div>}
           </>}
           <label className="article-dialog-field" htmlFor={id + "-display-title"}>{tr("Display title")}
-            <input ref={titleInput} id={id + "-display-title"} value={title} maxLength={300} required disabled={saving}
+            <input ref={titleInput} id={id + "-display-title"} value={displayTitle} maxLength={300} required disabled={saving}
               onChange={event => { setTitle(event.target.value); setResetTitle(false) }} />
           </label>
-          <div className="article-original"><span>{tr("Original title:")} {details.originalTitle}</span>
-            <button className="text-button" type="button" disabled={saving || resetTitle} onClick={() => { setTitle(details.originalTitle); setResetTitle(true) }}>{tr("Reset to original")}</button></div>
+          <div className="article-original"><span>{tr("Original title:")} {originalTitle}</span>
+            <button className="text-button" type="button" disabled={saving || resetTitle} onClick={() => setResetTitle(true)}>{tr("Reset to original")}</button></div>
           <label className="article-dialog-field" htmlFor={id + "-category"}>{tr("Category")}
             <input id={id + "-category"} value={category} maxLength={80} disabled={saving}
               onChange={event => { setCategory(event.target.value); setResetCategory(false) }} />
@@ -84,7 +106,7 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
           {error && <p className="error-line" role="alert">{error}</p>}
         </div>
         <footer><button className="secondary" type="button" disabled={saving} onClick={onClose}>{tr("Cancel")}</button>
-          <button className="primary" type="submit" disabled={saving || !title.trim()}>{saving && <LoaderCircle className="spin" size={14} />}{tr("Save changes")}</button></footer>
+          <button className="primary" type="submit" disabled={saving || !displayTitle.trim()}>{saving && <LoaderCircle className="spin" size={14} />}{tr("Save changes")}</button></footer>
       </>}
     </form>
   </dialog>

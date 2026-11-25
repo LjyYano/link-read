@@ -136,6 +136,7 @@ export const english: Readonly<Record<string, string>> = {
   "正在识别来源": "Identifying source",
   "获取信息较慢，仍在等待标题与封面": "Still waiting for title and cover",
   "正在获取标题与封面…": "Loading title and cover…",
+  "来源封面": "Source cover",
   "来源预览": "Source preview",
   "来源预览等待超时": "Source preview timed out",
   "暂未获取到标题与封面": "Title and cover unavailable",

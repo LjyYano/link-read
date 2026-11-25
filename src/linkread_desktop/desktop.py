@@ -120,13 +120,18 @@ def _article_details_record(article: Path) -> dict:
     user = load_user_metadata(source)
     details = read_article_details(article.parent)
     linked = details.get("linkedSource") if details and raw.source.platform == "local" else None
+    source_title = display_title(raw)
     return {
         "title": metadata["title"], "category": metadata["category"],
-        "originalTitle": linked["title"] if linked else display_title(raw),
+        "originalTitle": linked["title"] if linked else source_title,
         "originalCategory": generated.category if generated else "",
         "titleOverridden": details["title"] is not None if details is not None else bool(user.get("title")),
         "categoryOverridden": details["category"] is not None if details is not None else bool(user.get("category")),
-        **({"linkedSourceUrl": linked["url"]} if linked else {}),
+        **({
+            "linkedSourceUrl": linked["url"],
+            "linkedThumbnailUrl": linked["thumbnailUrl"],
+            "subtitleTitle": source_title,
+        } if linked else {}),
     }
 
 

@@ -11,6 +11,8 @@ const fixture = {
   positions: clone(config.positions || {}),
   pendingDuplicates: [] as any[],
   pendingGenerations: [] as any[],
+  heldPreview: '',
+  releasePreview: undefined as (() => void) | undefined,
   holdDuplicates: Boolean(config.holdDuplicates),
   missingTool: Boolean(config.missingTool),
   failDetails: false,
@@ -42,6 +44,10 @@ function duplicate(source: string, localFile: boolean) {
   return { key: article?.sourceUrl || source, article: article ? clone(article) : null }
 }
 function metadata(source: string) {
+  if (source.includes('BV1BhKf6mEYR')) return {
+    title: 'Linked Bilibili title - P2', platform: 'bilibili', sourceUrl: source, author: 'Offline QA',
+    publishedAt: null, durationMs: 1_740_000, thumbnailUrl: 'https://i0.hdslb.com/bfs/archive/linkread-qa-cover.jpg',
+  }
   return { title: source.includes('abcdefghij1') ? 'Original research notes' : 'A new source',
     platform: 'youtube', sourceUrl: source, author: 'Offline QA', publishedAt: null,
     durationMs: 1_740_000, thumbnailUrl: null }
@@ -62,7 +68,12 @@ export async function invoke<T>(command: string, args: any = {}): Promise<T> {
   else if (command === 'list_articles') result = { articles: clone(fixture.library), unavailable: 0 }
   else if (command === 'check_tool') result = { executable: fixture.missingTool ? null : '/fixture/codex',
     keyAvailable: !fixture.missingTool && !config.missingKey }
-  else if (command === 'preview_video') result = metadata(args.source)
+  else if (command === 'preview_video') {
+    if (fixture.heldPreview === args.source) {
+      await new Promise<void>(resolve => { fixture.releasePreview = resolve })
+    }
+    result = metadata(args.source)
+  }
   else if (command === 'check_source') result = { source: args.source, status: 'blocked', code: 'protected_media',
     message: 'This source is currently unavailable for transcription.', checkedAt: Date.now() }
   else if (command === 'check_duplicate') {
@@ -83,7 +94,8 @@ export async function invoke<T>(command: string, args: any = {}): Promise<T> {
     const article = findArticle(args.id), original: any = originals.get(args.id) || article, value = overrides.get(args.id)
     const linked = article.platform === 'local' && article.sourceUrl
     result = { title: article.title, category: article.category, originalTitle: linked ? 'Linked Bilibili title - P2' : original.title,
-      ...(linked ? { linkedSourceUrl: article.sourceUrl } : {}), originalCategory: original.category,
+      ...(linked ? { linkedSourceUrl: article.sourceUrl, linkedThumbnailUrl: article.thumbnailUrl, subtitleTitle: original.title } : {}),
+      originalCategory: original.category,
       titleOverridden: value?.title != null, categoryOverridden: value?.category != null }
   }
   else if (command === 'update_article_details') {

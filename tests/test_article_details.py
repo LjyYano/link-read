@@ -60,6 +60,7 @@ def test_linked_local_subtitles_use_source_cover_and_title_across_surfaces(tmp_p
     assert desktop._library_records(library)["articles"] == [record]
     details = desktop._get_article_details(library, folder.name)
     assert details["linkedSourceUrl"] == VIDEO and details["originalTitle"] == VIDEO_TITLE
+    assert details["linkedThumbnailUrl"] == ARTWORK and details["subtitleTitle"] == before["title"]
     assert not details["titleOverridden"]
     updated_reader = desktop._prepared_reader(article)
     assert updated_reader["readingKey"] == reader["readingKey"] and updated_reader["revision"] != reader["revision"]

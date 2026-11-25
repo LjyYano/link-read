@@ -9,6 +9,8 @@
 .article-original{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;font-size:11px;line-height:1.6;color:var(--muted);margin-top:-6px}
 .article-original>span{overflow-wrap:anywhere;min-width:0}.article-original button{flex-shrink:0;font-size:11px;min-height:20px;padding:0}
 .article-original button:disabled{color:var(--muted);opacity:.65;text-decoration:none}
+.article-source-cover{width:auto;height:108px;max-width:min(100%,192px);border:1px solid var(--line);border-radius:7px;object-fit:contain}
+.article-source-feedback{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:12px}
 .article-dialog footer{display:flex;justify-content:flex-end;gap:9px;padding:15px 24px;border-top:1px solid var(--line)}
 .article-dialog .error-line{font-size:12px;line-height:1.6}.article-dialog-loading{padding:15px 24px 26px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;color:var(--muted);font-size:13px}
 .article-dialog-loading p{flex-basis:100%}

@@ -21,6 +21,8 @@ export type ArticleDetails = {
   title: string; category: string; originalTitle: string; originalCategory: string
   titleOverridden: boolean; categoryOverridden: boolean
   linkedSourceUrl?: string
+  linkedThumbnailUrl?: string
+  subtitleTitle?: string
 }
 export type ArticleState = { isRead: boolean; isStarred: boolean }
 export type ArticleStatePatch = Partial<ArticleState>
