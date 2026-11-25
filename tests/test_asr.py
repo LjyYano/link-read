@@ -138,23 +138,34 @@ def test_reject_wrong_asr_hosts_before_token_sent(base):
     with pytest.raises(AsrError): AsrConfig(base_url=base,token="private").credential()
 
 
-def test_full_desktop_asr_to_article_and_saved_transcript(monkeypatch, tmp_path):
+@pytest.mark.parametrize(("source", "platform"), [(URL, "youtube"), (BURL, "bilibili")])
+def test_full_desktop_asr_to_article_and_saved_transcript(monkeypatch, tmp_path, source, platform):
     from linkread_desktop.desktop import _generate_with_replacement
     from linkread_desktop.renderers.site import load_document
     from test_ai_notes import FakeProvider
+    from test_bilibili import Session, extract_bilibili
     def no_caption(*args, **kwargs): raise SubtitleUnavailableError("no subtitle")
     monkeypatch.setattr("linkread_desktop.pipeline.extract_youtube", no_caption)
+    session = Session(player_data={"need_login_subtitle": True, "subtitle": {"subtitles": []}},
+                      video_data={"desc": "视频原始简介"})
+    monkeypatch.setattr("linkread_desktop.pipeline.extract_bilibili",
+                        lambda link, **options: extract_bilibili(link, session=session, **options))
     def download(url, folder, config, **kw):
+        assert url == source
+        assert not kw.get("auth_options")
         audio = folder / "audio.m4a"; audio.write_bytes(b"sample")
-        return audio, SourceInfo(platform="youtube", title="ASR sample", url=URL, duration_ms=2000)
+        return audio, SourceInfo(platform=platform, title="ASR sample", url=url, duration_ms=2000)
     monkeypatch.setattr("linkread_desktop.asr.pipeline.download_audio", download)
     monkeypatch.setattr(BailianAsr, "transcribe", lambda *a, **k: segments_from_result(RESULT))
-    article = _generate_with_replacement(URL, tmp_path, lambda e: None, local_file=False,
+    article = _generate_with_replacement(source, tmp_path, lambda e: None, local_file=False,
                                          replace=False, provider=FakeProvider(), asr=CONFIG)
     assert article.is_file()
     note = load_document(article.with_name("note.json"))
     assert note.transcript.transcript_source == "asr"
     assert note.transcript.segments[0].start_ms == 125
+    if platform == "bilibili":
+        assert note.transcript.source.description == "视频原始简介"
+        assert session.calls[-1][1]["cid"] == 202
     assert "This transcript was generated from audio" not in article.read_text()
 
 

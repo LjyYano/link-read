@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from .errors import ExtractionError, UnsupportedSourceError, SubtitleUnavailableError
+from .errors import ExtractionError, SubtitleLoginRequiredError, SubtitleUnavailableError, UnsupportedSourceError
 from .asr.config import AsrConfig
 from .extractors.bilibili import BILIBILI_SHORT_HOSTS, BILIBILI_VIDEO_HOSTS, bilibili_video_part, extract_bilibili
 from .extractors.local import extract_local
@@ -58,7 +58,10 @@ def extract(
     def with_fallback(call, url):
         try:
             return call()
-        except SubtitleUnavailableError as exc:
+        except (SubtitleUnavailableError, SubtitleLoginRequiredError) as exc:
+            subtitle_login = isinstance(exc, SubtitleLoginRequiredError)
+            if subtitle_login and (asr is None or urlsplit(url).hostname not in _BILIBILI_DOMAINS):
+                raise
             if asr is None:
                 raise SubtitleUnavailableError("没有可获取的字幕；可在设置中开启语音识别，或导入字幕文件") from exc
             metadata = exc.source if isinstance(exc.source, SourceInfo) else None
@@ -66,8 +69,15 @@ def extract(
             metadata_key = video_source_key(metadata.url or "") if metadata is not None else None
             if metadata is not None and requested_key and metadata_key != requested_key:
                 raise ExtractionError("已获取的来源信息与当前单集不匹配，未启动语音识别") from exc
+            audio_url = url
+            if subtitle_login:
+                # Bind the audio request to the video and part that returned
+                # the flag, even if the original input was a short link.
+                if not metadata or not metadata.url or not metadata_key or not metadata_key.startswith("bilibili-"):
+                    raise ExtractionError("无法确认当前 B 站视频的分 P，未启动语音识别") from exc
+                audio_url = metadata.url
             from .asr.pipeline import transcribe_video
-            result = transcribe_video(url, asr, cache_dir=asr_cache_dir or Path("library/.asr"),
+            result = transcribe_video(audio_url, asr, cache_dir=asr_cache_dir or Path("library/.asr"),
                                       progress=progress, cookies_from_browser=cookies_from_browser,
                                       cookies_file=cookies_file)
             if metadata is not None and metadata.description:

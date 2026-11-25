@@ -110,7 +110,9 @@ def localize_event(kind: str, fields: dict) -> dict:
         return {**fields, "message": "Connected"}
     if kind == "source_check":
         code = fields.get("code")
-        if code in {"subtitle_login_required", "subtitle_response_invalid"}:
+        if code == "subtitle_login_required":
+            return {**fields, "message": "Bilibili requires sign-in to view subtitles. Generation can transcribe publicly accessible audio."}
+        if code == "subtitle_response_invalid":
             return {**fields, "message": _ERRORS[code]}
         message = {
             "captions": "Public subtitles are available for this source.",

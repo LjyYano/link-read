@@ -3,7 +3,7 @@ import type { GenerationFailure, SourceCheck } from "./api"
 import { previewKey } from "./previewState.ts"
 import { normalizeVideoLink } from "./videoLinks.ts"
 
-const blockedCodes = new Set(["protected_media", "unsupported_audio_stream", "subtitle_login_required"])
+const blockedCodes = new Set(["protected_media", "unsupported_audio_stream"])
 export const sourceCheckTtl = 10 * 60_000
 
 export function sourceCheckKey(source: string) {
@@ -65,12 +65,14 @@ export class SourceReadinessRequests {
 
   rememberFailure(source: string, failure: GenerationFailure, checkedAt = this.now()) {
     const key = sourceCheckKey(source)
-    if (!key || !blockedCodes.has(failure.code)) return
+    const subtitleLogin = failure.code === "subtitle_login_required"
+    if (!key || (!subtitleLogin && !blockedCodes.has(failure.code))) return
     if (!Number.isFinite(checkedAt) || checkedAt <= 0 || checkedAt > this.now() + 60_000
         || this.now() - checkedAt >= sourceCheckTtl) return
     this.revisions.set(key, (this.revisions.get(key) ?? 0) + 1)
-    this.save(key, { source: normalizeVideoLink(source), status: "blocked", code: failure.code,
-      message: failure.message, checkedAt, origin: "generation" })
+    this.save(key, { source: normalizeVideoLink(source), status: subtitleLogin ? "needs_asr" : "blocked", code: failure.code,
+      message: subtitleLogin ? tr("B 站要求登录后查看字幕。生成时可使用语音识别转写公开音轨。") : failure.message,
+      checkedAt, origin: "generation" })
     this.notify()
   }
 

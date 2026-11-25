@@ -85,7 +85,8 @@ async def routes(route):
         await route.fulfill(path=str(path), content_type={'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css'}.get(path.suffix))
 
 
-async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=1280, native_drag=False, locale='zh-CN'):
+async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=1280, native_drag=False, locale='zh-CN',
+                   asr_enabled=False, initial_tasks=None):
     context = await browser.new_context(viewport={'width': width, 'height': 980},
                                         color_scheme='dark' if dark else 'light', reduced_motion='reduce', locale=locale)
     await context.route('**/*', routes)
@@ -99,8 +100,9 @@ async def open_app(browser, *, old_count=0, reviewed=True, dark=False, width=128
 
     page.on('dialog', confirm)
     config = {'library': ARTICLES, 'positions': POSITIONS, 'nativeDrag': native_drag,
-              'journal': {'version': 1, 'tasks': [old_failure(index) for index in range(old_count)]}}
-    seed = {'config': config, 'preferences': PREFS, 'recent': RECENT,
+              'journal': {'version': 1, 'tasks': initial_tasks if initial_tasks is not None
+                          else [old_failure(index) for index in range(old_count)]}}
+    seed = {'config': config, 'preferences': {**PREFS, 'asr': {**ASR, 'enabled': asr_enabled}}, 'recent': RECENT,
             'reviewed': [f'old-{index:02}' for index in range(old_count)] if reviewed else []}
     await page.add_init_script('''if(window===window.top){const seed=SEED;window.__taskWorkspaceConfig=seed.config;
         localStorage.setItem('linkread-preferences',JSON.stringify(seed.preferences));
@@ -440,6 +442,44 @@ async def verify_source_checks(browser, *, dark=False, width=1280):
     await context.close()
 
 
+async def verify_bilibili_asr_without_confirmation(browser):
+    source = 'https://www.bilibili.com/video/BV1rxqmBhE91?p=2'
+    code = 'subtitle_login_required'
+    context, page, errors, confirmations = await open_app(browser, asr_enabled=True)
+    try:
+        await page.get_by_role('textbox', name='视频或播客链接', exact=True).fill(source)
+        panel = page.locator('.source-readiness')
+        await panel.get_by_role('button', name='检查来源', exact=True).click()
+        await page.wait_for_function('window.taskWorkspaceFixture.pendingSourceChecks.length === 1')
+        await page.evaluate('result => window.taskWorkspaceFixture.releaseSource(result.source, result)', {
+            'source': source, 'status': 'needs_asr', 'code': code, 'message': '可使用公开音轨',
+        })
+        await expect(panel).to_have_attribute('data-state', 'needs_asr')
+        await page.get_by_role('button', name='生成文章', exact=True).click()
+        await page.wait_for_function('window.taskWorkspaceFixture.pendingGenerations.length === 1')
+        actual = await page.evaluate('() => window.taskWorkspaceFixture.pendingGenerations[0].args')
+        assert actual['source'] == source and actual['asr']['enabled']
+        assert not confirmations and not errors, (confirmations, errors)
+    finally:
+        await context.close()
+
+    old = old_failure(0)
+    old['input'].update(source=source, sourceKey=source, localFile=False)
+    old['metadata'].update(platform='bilibili', sourceUrl=source)
+    old['failure'].update(code=code, message='字幕需要登录查看', stage='extract', retryable=False, action='source')
+    context, page, errors, confirmations = await open_app(browser, asr_enabled=True, initial_tasks=[old], reviewed=False)
+    try:
+        await page.locator('.titlebar-tasks').click()
+        await page.locator('.task-center-attention').get_by_role('button', name='重试', exact=True).click()
+        await page.wait_for_function('window.taskWorkspaceFixture.pendingGenerations.length === 1')
+        actual = await page.evaluate('() => window.taskWorkspaceFixture.pendingGenerations[0].args')
+        assert actual['source'] == source and actual['asr']['enabled']
+        assert not confirmations and not errors, (confirmations, errors)
+    finally:
+        await context.close()
+    RESULTS.append({'check': 'Bilibili subtitle login allows generation and retry of an old failed task without an ASR confirmation'})
+
+
 async def verify_language_preferences(browser):
     context, page, errors, _ = await open_app(browser, locale='fr-FR')
     await expect(page.locator('html')).to_have_attribute('lang', 'en')
@@ -480,6 +520,7 @@ async def main():
             await verify_continue(browser)
             await verify_source_checks(browser)
             await verify_source_checks(browser, dark=True, width=740)
+            await verify_bilibili_asr_without_confirmation(browser)
             await verify_language_preferences(browser)
         except Exception:
             for context_index, context in enumerate(browser.contexts):

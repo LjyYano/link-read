@@ -863,7 +863,9 @@ function App() {
         ? tr("《{0}》已在书架中。是否重新生成并替换？\n旧文章会在新版本成功后被替换。", duplicate.article.title)
         : tr("该内容已经在生成或排队。是否继续添加重新生成任务？\n新任务会排在后面，并替换前一个版本。"))) return
       const asr = { ...preferences.asr }
-      if (!original.localFile && !previewId && resumeNeedsAsrConfirmation(original.asr, asr) && !window.confirm(
+      const subtitleLogin = previous.status === "error" && previous.failure?.code === "subtitle_login_required"
+        && sourcePlatform(original.input) === "bilibili"
+      if (!subtitleLogin && !original.localFile && !previewId && resumeNeedsAsrConfirmation(original.asr, asr) && !window.confirm(
         tr("当前语音识别设置比此任务上次使用的范围更大，或服务/分片配置已改变。\n继续时只会在没有可读取字幕的情况下使用已启用的语音识别，可能产生新费用。是否继续？"))) return
       enqueueTask({ ...original, provider, executable,
         baseUrl: preferences.api.baseUrl, model: preferences.api.model, asr,

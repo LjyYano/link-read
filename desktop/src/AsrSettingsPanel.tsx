@@ -275,7 +275,7 @@ export function AsrSettingsPanel({ value, onChange, token, onToken, apiToken, sa
         <div className="settings-notice">
           <span>{tr("音频会上传至百炼，转写与测试会产生费用。")}</span>
           <SettingsHelp label={tr("语音转写说明")}>
-            <p>{tr("仅在来源明确没有字幕时转写。网络、登录或权限错误不会自动转成收费转写。")}</p>
+            <p>{tr("找不到公开字幕，或 B 站仅限制字幕登录查看时，使用公开音轨转写。网络错误和音轨访问受限会停止处理。")}</p>
             <p>{tr("百炼临时上传用于个人测试，文件保留 48 小时后自动清理，不适合直接用于生产服务。")}</p>
             <p>{tr("测试使用官方约 4 秒语音样本。选择复用后，使用本页当前填写的自定义 API 密钥，无需先保存；该密钥须有百炼语音服务权限，与 Codex / Claude Code 登录无关。")}</p>
             <p>{tr("离开设置页不会停止已提交的云端转写，请勿连续重复测试。")}</p>

@@ -85,6 +85,19 @@ test('old results expire and restored timestamps are not replaced by now', () =>
   assert.equal(checks.peek(source), undefined)
 })
 
+test('Bilibili subtitle sign-in can use configured ASR and does not mask protected audio', async () => {
+  const video = 'https://www.bilibili.com/video/BV1rxqmBhE91?p=2'
+  const checks = new SourceReadinessRequests(() => 1000)
+  checks.rememberFailure(video, { ...failure, code: 'subtitle_login_required' })
+  assert.equal(checks.peek(video).status, 'needs_asr')
+  await checks.request(video, async () => ({
+    source: video, status: 'needs_asr', code: 'subtitle_login_required', message: 'Speech fallback', checkedAt: 1000,
+  }))
+  assert.equal(checks.peek(video).origin, 'check')
+  checks.rememberFailure(video, failure)
+  assert.equal(checks.peek(video).status, 'blocked')
+})
+
 test('cache remains bounded and listeners observe explicit updates only', () => {
   const checks = new SourceReadinessRequests(() => 1000, 1)
   let changed = 0

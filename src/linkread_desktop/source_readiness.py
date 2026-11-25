@@ -8,12 +8,12 @@ from queue import Empty, Queue
 from threading import Thread
 import time
 
-from .errors import LinkReadError, SubtitleUnavailableError, error_details
+from .errors import LinkReadError, SubtitleLoginRequiredError, SubtitleUnavailableError, error_details
 from .links import canonical_link
 from .pipeline import extract
 
 CHECK_SECONDS = 30.0
-_BLOCKED_CODES = frozenset({"protected_media", "unsupported_audio_stream", "subtitle_login_required"})
+_BLOCKED_CODES = frozenset({"protected_media", "unsupported_audio_stream"})
 
 
 def _check(source: str) -> dict:
@@ -24,6 +24,9 @@ def _check(source: str) -> dict:
     except SubtitleUnavailableError:
         return {"status": "needs_asr", "code": "subtitles_unavailable",
                 "message": "未找到可读取的公开字幕；可启用语音识别。生成时仍会检查音频是否可用，本次检查未下载音频。"}
+    except SubtitleLoginRequiredError:
+        return {"status": "needs_asr", "code": "subtitle_login_required",
+                "message": "B 站要求登录后查看字幕。生成时可使用语音识别转写公开音轨。"}
     except LinkReadError as exc:
         failure = error_details(exc)
         return {"status": "blocked" if failure["code"] in _BLOCKED_CODES else "unknown",

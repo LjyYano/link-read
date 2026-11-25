@@ -6,7 +6,7 @@ import re
 
 import requests
 
-from ..errors import ExtractionError, SubtitleUnavailableError, UnsupportedSourceError
+from ..errors import ExtractionError, SubtitleLoginRequiredError, SubtitleUnavailableError, UnsupportedSourceError
 from ..links import bilibili_part, canonical_link
 from ..models import SourceInfo, TranscriptDocument
 from ..parsers import parse_bilibili_json
@@ -108,11 +108,19 @@ def extract_bilibili(
         if isinstance(track, dict) and isinstance(track.get("subtitle_url"), str) and track["subtitle_url"].strip()
     ] if isinstance(tracks, list) else []
     if not subtitles:
+        rights = info.get("rights")
+        upower_restricted = any(
+            info.get(key) == 1 for key in ("is_upower_exclusive", "is_upower_exclusive_with_qa", "is_upower_preview")
+        )
+        paid = isinstance(rights, dict) and any(
+            rights.get(key) == 1 for key in ("pay", "arc_pay", "ugc_pay", "ugc_pay_preview")
+        )
+        if upower_restricted or paid:
+            raise ExtractionError("此视频的音轨受访问限制，无法转写", code="protected_media")
         # The player can suppress tracks behind login while returning HTTP 200.
-        # Only an explicit empty list without a login requirement permits ASR.
         if player.get("need_login_subtitle") is True:
-            raise ExtractionError("B 站要求登录后查看字幕。可打开原视频，或导入已有字幕文件。",
-                                  code="subtitle_login_required")
+            raise SubtitleLoginRequiredError("B 站要求登录后查看字幕。可打开原视频，或导入已有字幕文件。",
+                                             source=source)
         if tracks != []:
             raise ExtractionError("B 站返回的字幕列表不完整，请重试检查来源。",
                                   code="subtitle_response_invalid", retryable=True, action="retry")

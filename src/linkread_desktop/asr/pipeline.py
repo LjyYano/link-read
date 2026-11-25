@@ -91,7 +91,7 @@ def download_audio(url, folder, config, *, progress=None, auth_options=None):
 @error_operation("asr")
 def transcribe_video(source, config: AsrConfig, *, cache_dir: Path, progress=None,
                      cookies_from_browser=None, cookies_file=None) -> TranscriptDocument:
-    token = config.credential()  # Only invoked after subtitle lookup established absence.
+    token = config.credential()
     url = canonical_video_url(source)
     key = video_source_key(url)
     account = sha256(token.encode()).hexdigest()
@@ -111,7 +111,7 @@ def transcribe_video(source, config: AsrConfig, *, cache_dir: Path, progress=Non
             raise AsrError("ASR 缓存与当前视频或播客单集不匹配")
         report(progress, "asr_reuse", "已复用语音识别字幕，无需再次上传或计费")
         return raw
-    report(progress, "asr_start", "没有可用字幕，已启用语音识别")
+    report(progress, "asr_start", "没有可读取的公开字幕，正在准备语音转写")
     metadata = folder / "audio.json"
     if metadata.is_file():
         data = json.loads(metadata.read_text())

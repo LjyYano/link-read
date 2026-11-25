@@ -22,11 +22,12 @@ class Response:
 
 
 class Session:
-    def __init__(self, *, subtitles=True, subtitle_host="i0.hdslb.com", player_data=None):
+    def __init__(self, *, subtitles=True, subtitle_host="i0.hdslb.com", player_data=None, video_data=None):
         self.calls = []
         self.subtitles = subtitles
         self.subtitle_host = subtitle_host
         self.player_data = player_data
+        self.video_data = video_data or {}
 
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs.get("params")))
@@ -34,6 +35,7 @@ class Session:
             return Response(payload={"code": 0, "data": {
                 "title": "示例视频", "owner": {"name": "作者"}, "pubdate": 1700000000,
                 "pages": [{"cid": 101, "duration": 100, "part": "上"}, {"cid": 202, "duration": 75, "part": "下"}],
+                **self.video_data,
             }})
         if "x/player/v2" in url:
             if self.player_data is not None:
@@ -78,12 +80,39 @@ def test_bilibili_distinguishes_login_and_invalid_lists_from_missing_subtitles(p
                         lambda link, **options: extract_bilibili(link, session=session, **options))
     monkeypatch.setattr("linkread_desktop.asr.pipeline.transcribe_video",
                         lambda *args, **kwargs: pytest.fail("ASR must not run for a login or subtitle list error"))
-    asr = None if code == "subtitles_unavailable" else AsrConfig()
+    asr = AsrConfig() if code == "subtitle_response_invalid" else None
     with pytest.raises((ExtractionError, SubtitleUnavailableError)) as failure:
         extract(share, asr=asr)
     assert failure.value.code == code
     assert len(session.calls) == 2
     assert session.calls[-1][1] == {"bvid": "BV1rxqmBhE91", "cid": 202}
+
+
+@pytest.mark.parametrize("video_data", [
+    {"is_upower_exclusive": True}, {"is_upower_preview": True},
+    {"rights": {"pay": 1}}, {"rights": {"ugc_pay_preview": 1}},
+])
+def test_login_required_subtitles_do_not_trigger_asr_for_paid_media(video_data, monkeypatch):
+    session = Session(video_data=video_data, player_data={"need_login_subtitle": True, "subtitle": {"subtitles": []}})
+    monkeypatch.setattr("linkread_desktop.pipeline.extract_bilibili",
+                        lambda link, **options: extract_bilibili(link, session=session, **options))
+    monkeypatch.setattr("linkread_desktop.asr.pipeline.transcribe_video",
+                        lambda *args, **kwargs: pytest.fail("Paid media must not trigger ASR"))
+    with pytest.raises(ExtractionError) as failure:
+        extract("https://www.bilibili.com/video/BV1rxqmBhE91/?p=2", asr=AsrConfig())
+    assert failure.value.code == "protected_media"
+
+
+def test_available_bilibili_captions_take_priority_over_login_flag(monkeypatch):
+    session = Session(player_data={"need_login_subtitle": True, "subtitle": {
+        "subtitles": [{"lan": "zh-CN", "subtitle_url": "//i0.hdslb.com/zh.json"}],
+    }})
+    monkeypatch.setattr("linkread_desktop.pipeline.extract_bilibili",
+                        lambda link, **options: extract_bilibili(link, session=session, **options))
+    monkeypatch.setattr("linkread_desktop.asr.pipeline.transcribe_video",
+                        lambda *args, **kwargs: pytest.fail("Available subtitles must win"))
+    transcript = extract("https://www.bilibili.com/video/BV1rxqmBhE91/?p=2", asr=AsrConfig())
+    assert transcript.transcript_source == "subtitle"
 
 
 def test_bilibili_uses_public_track_when_another_track_is_missing_its_url():

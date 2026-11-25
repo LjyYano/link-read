@@ -94,3 +94,11 @@ class ExtractionError(LinkReadError):
     """A supported source could not be extracted."""
     default_code = "extraction_failed"
     default_action = "source"
+
+
+class SubtitleLoginRequiredError(ExtractionError):
+    """Subtitle lookup reached the player, which requires sign-in."""
+
+    def __init__(self, message: str, *, source):
+        super().__init__(message, code="subtitle_login_required")
+        self.source = source
