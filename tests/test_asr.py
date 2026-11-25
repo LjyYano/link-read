@@ -165,7 +165,7 @@ def test_full_desktop_asr_to_article_and_saved_transcript(monkeypatch, tmp_path,
     assert note.transcript.segments[0].start_ms == 125
     if platform == "bilibili":
         assert note.transcript.source.description == "视频原始简介"
-        assert session.calls[-1][1]["cid"] == 202
+        assert session.calls[-1][1] == {"aid": 42, "oid": 202, "type": 1}
     assert "This transcript was generated from audio" not in article.read_text()
 
 
