@@ -79,7 +79,7 @@ async def routes(route):
 
 
 async def open_app(browser, *, hold=False, missing_tool=False, missing_key=False, provider='codex', dark=False, width=1280,
-                   saved_article=None):
+                   saved_article=None, native_menu=False):
     context = await browser.new_context(viewport={'width': width, 'height': 920},
                                         color_scheme='dark' if dark else 'light', reduced_motion='reduce', locale='zh-CN')
     await context.route('**/*', routes)
@@ -94,7 +94,7 @@ async def open_app(browser, *, hold=False, missing_tool=False, missing_key=False
     page.on('dialog', confirm)
     saved_article = saved_article or article()
     config = {'library': [saved_article], 'positions': {saved_article['readingKey']: POSITION},
-              'holdDuplicates': hold, 'missingTool': missing_tool, 'missingKey': missing_key}
+              'holdDuplicates': hold, 'missingTool': missing_tool, 'missingKey': missing_key, 'nativeMenu': native_menu}
     await page.add_init_script('''if(window===window.top){window.__readingRefinementsConfig=CONFIG;
       localStorage.setItem('linkread-preferences',JSON.stringify(PREFS));}'''
                               .replace('CONFIG', json.dumps(config)).replace('PREFS', json.dumps({**PREFS, 'provider': provider})))
@@ -442,6 +442,35 @@ async def verify_local_subtitle_source_link(browser):
     await context.close()
 
 
+async def verify_menu_and_updates(browser):
+    context, page, errors, _ = await open_app(browser, native_menu=True)
+    update = page.get_by_role('dialog', name='LinkRead 0.2.0 可用', exact=True)
+    await expect(update).to_be_visible()
+    await expect(update.get_by_role('status')).to_contain_text('当前版本 0.1.0')
+    assert await count_calls(page, 'check_app_update') == 1
+    await update.get_by_role('button', name='稍后', exact=True).click()
+    await expect(update).to_have_count(0)
+    assert await count_calls(page, 'install_app_update') == 0
+
+    await page.evaluate("window.readingRefinementsFixture.onMenu({payload:'open-settings'})")
+    await expect(page.get_by_role('heading', name='设置', exact=True)).to_be_visible()
+    await page.evaluate("window.readingRefinementsFixture.onMenu({payload:'check-updates'})")
+    await expect(update).to_be_visible()
+    await update.get_by_role('button', name='下载并安装', exact=True).click()
+    await expect(update.get_by_role('alert')).to_have_text('无法下载或验证更新，请重试。')
+    assert await page.evaluate("""window.readingRefinementsFixture.calls.find(call =>
+        call.command === 'install_app_update').args.version === '0.2.0'""")
+    await update.get_by_role('button', name='稍后', exact=True).click()
+
+    await page.evaluate("""window.readingRefinementsFixture.updateResult = {status:'current', currentVersion:'0.1.0'};
+        window.readingRefinementsFixture.onMenu({payload:'check-updates'})""")
+    await expect(page.get_by_role('dialog', name='检查更新', exact=True).get_by_role('status')).to_have_text(
+        'LinkRead 0.1.0 已是最新版本。')
+    assert not errors, errors
+    RESULTS.append({'check': 'The app menu opens settings, update checks prompt restarts only after confirmation, and failed downloads can be dismissed'})
+    await context.close()
+
+
 async def main():
     OUT.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as playwright:
@@ -453,6 +482,7 @@ async def main():
             await verify_read_during_regeneration(browser)
             await verify_details_and_export(browser)
             await verify_local_subtitle_source_link(browser)
+            await verify_menu_and_updates(browser)
             await verify_dark_narrow(browser)
         except Exception:
             for context_index, context in enumerate(browser.contexts):

@@ -30,10 +30,12 @@ licenses = desktop / "build" / "licenses"
 subprocess.run([
     python, desktop / "scripts/collect_licenses.py", "--target", target, "--output", licenses,
 ], cwd=root, check=True, timeout=360)
+identity = os.environ.get("LINKREAD_SIDECAR_SIGNING_IDENTITY")
 subprocess.run([
     python, "-m", "PyInstaller", "--noconfirm", "--onefile", "--bootloader-ignore-signals",
     "--target-arch", architecture, "--name", f"linkread-sidecar-{target}", "--paths", root / "src",
     "--collect-data", "linkread_desktop.renderers", "--add-data", f"{licenses}:licenses",
     "--distpath", binaries, "--workpath", build / "work",
     "--specpath", build, desktop / "scripts/sidecar.py",
+    *(["--codesign-identity", identity] if identity else []),
 ], cwd=root, env=environment, check=True, timeout=600)

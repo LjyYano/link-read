@@ -7,6 +7,9 @@ mod credentials;
 mod durable_state;
 mod environment;
 mod subtitle_clipboard;
+mod app_updates;
+#[cfg(target_os = "macos")]
+mod desktop_menu;
 
 use std::{
     collections::VecDeque,
@@ -204,6 +207,7 @@ struct Generation(Mutex<GenerationState>);
 #[derive(Default)]
 struct GenerationState {
     active: Option<ActiveProcess>,
+    updating: bool,
     cancelled_requests: VecDeque<String>,
     finished_requests: VecDeque<String>,
 }
@@ -214,7 +218,30 @@ struct ActiveProcess {
     cancelled: bool,
 }
 
+struct UpdateInstall<'a> {
+    generation: &'a Generation,
+}
+
+impl Drop for UpdateInstall<'_> {
+    fn drop(&mut self) {
+        self.generation.0.lock().unwrap().updating = false;
+    }
+}
+
 impl Generation {
+    fn begin_update(&self) -> AppResult<UpdateInstall<'_>> {
+        let mut state = self.0.lock().unwrap();
+        if state.active.is_some() || state.updating {
+            return Err("update_busy".into());
+        }
+        state.updating = true;
+        Ok(UpdateInstall { generation: self })
+    }
+
+    fn updating(&self) -> bool {
+        self.0.lock().unwrap().updating
+    }
+
     fn begin(&self, request_id: &str) -> AppResult<()> {
         validate_request_id(request_id)?;
         let mut state = self.0.lock().unwrap();
@@ -232,6 +259,9 @@ impl Generation {
         }
         if state.active.is_some() {
             return Err("已有文章正在生成".into());
+        }
+        if state.updating {
+            return Err("LinkRead 正在安装更新，请重启后再试".into());
         }
         state.active = Some(ActiveProcess {
             request_id: request_id.to_owned(),
@@ -340,9 +370,11 @@ impl Locations {
 }
 
 #[tauri::command]
-fn set_ui_language(locations: State<'_, Locations>, language: String) -> AppResult<()> {
+fn set_ui_language(app: AppHandle, locations: State<'_, Locations>, language: String) -> AppResult<()> {
     if !matches!(language.as_str(), "en" | "zh-CN") { return Err("Unsupported interface language".into()); }
     locations.english.store(language == "en", Ordering::Relaxed);
+    #[cfg(target_os = "macos")]
+    desktop_menu::localize(&app, language == "en").map_err(|error| details("无法更新菜单语言", error))?;
     Ok(())
 }
 
@@ -1405,13 +1437,20 @@ async fn reveal_article(locations: State<'_, Locations>, id: String) -> AppResul
 }
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(desktop_menu::build).on_menu_event(desktop_menu::dispatch);
+    builder
         .plugin(tauri_plugin_dialog::init())
         .register_uri_scheme_protocol("linkread-reader", |context, request| {
             preview_response(&context.app_handle().state::<Locations>(), request.uri())
         })
         .manage(Generation::default())
+        .manage(app_updates::AppUpdates::default())
         .setup(|app| {
+            if app.config().plugins.0.contains_key("updater") {
+                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             let data = app.path().app_data_dir()?;
             fs::create_dir_all(&data)?;
             let library = env::var_os("LINKREAD_DESKTOP_LIBRARY")
@@ -1423,6 +1462,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             set_ui_language,
+            app_updates::check_app_update,
+            app_updates::install_app_update,
             get_article_details,
             update_article_details,
             update_article_state,
@@ -1464,10 +1505,14 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("failed to initialize LinkRead")
-        .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
-                app.state::<Generation>().cancel_active();
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { code, api, .. }
+                if code != Some(tauri::RESTART_EXIT_CODE) && app.state::<Generation>().updating() =>
+            {
+                api.prevent_exit();
             }
+            tauri::RunEvent::Exit => app.state::<Generation>().cancel_active(),
+            _ => {}
         });
 }
 
@@ -1477,6 +1522,19 @@ mod tests {
     use std::{path::Path, process::Stdio, time::{Duration, Instant}};
     use std::sync::atomic::AtomicBool;
     use tokio::process::Command;
+
+    #[test]
+    fn installation_and_generation_cannot_overlap() {
+        let generation = Generation::default();
+        generation.begin("running").unwrap();
+        assert!(generation.begin_update().is_err());
+        generation.finish("running");
+        let install = generation.begin_update().unwrap();
+        assert!(generation.updating());
+        assert!(generation.begin("queued").is_err());
+        drop(install);
+        assert!(generation.begin("queued").is_ok());
+    }
 
     #[test]
     fn asr_test_uses_the_explicit_draft_and_never_falls_back_from_an_empty_draft() {

@@ -18,6 +18,8 @@ const fixture = {
   failDetails: false,
   cancelExport: false,
   failExport: false,
+  onMenu: undefined as ((event: { payload: string }) => void) | undefined,
+  updateResult: { status: 'available', currentVersion: '0.1.0', version: '0.2.0' },
   releaseDuplicate(source: string) {
     const index = fixture.pendingDuplicates.findIndex(pending => pending.source === source)
     if (index < 0) throw Error('No duplicate lookup waiting for ' + source)
@@ -56,14 +58,24 @@ export class Channel<T> {
   onmessage: (message: T) => void
   constructor(callback: (message: T) => void) { this.onmessage = callback }
 }
-export const isTauri = () => false
-export const getCurrentWebview = () => ({ onDragDropEvent: async () => () => {} })
-export const getCurrentWindow = () => ({})
+export const isTauri = () => Boolean(config.nativeMenu)
+export const getCurrentWebview = () => ({
+  onDragDropEvent: async () => () => {},
+  listen: async (name: string, callback: typeof fixture.onMenu) => {
+    if (name !== 'linkread-menu') throw Error('Unexpected native event: ' + name)
+    fixture.onMenu = callback
+    return () => { fixture.onMenu = undefined }
+  },
+})
+export const getCurrentWindow = () => ({ onCloseRequested: async () => () => {} })
 
 export async function invoke<T>(command: string, args: any = {}): Promise<T> {
   fixture.calls.push({ command, args: clone({ ...args, ...(args.progress ? { progress: 'test-channel' } : {}) }) })
   let result: any
-  if (command === 'load_task_journal') result = clone(fixture.journal)
+  if (command === 'set_ui_language') result = null
+  else if (command === 'check_app_update') result = clone(fixture.updateResult)
+  else if (command === 'install_app_update') throw 'update_download_failed'
+  else if (command === 'load_task_journal') result = clone(fixture.journal)
   else if (command === 'save_task_journal') { fixture.journal = clone(args.journal); result = null }
   else if (command === 'list_articles') result = { articles: clone(fixture.library), unavailable: 0 }
   else if (command === 'check_tool') result = { executable: fixture.missingTool ? null : '/fixture/codex',

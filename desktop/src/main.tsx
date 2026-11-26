@@ -3,7 +3,7 @@ import { isTauri } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
 import { titlebarMouseDown } from "./titlebarActions"
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 import { BookOpen, CircleCheck, ListTodo, Search, Settings as SettingsIcon, X } from "lucide-react"
 import {
@@ -16,6 +16,8 @@ import {
 import { Bookshelf, Home, type Job, type TaskJob } from "./Home"
 import { Reader } from "./Reader"
 import { ArticleDetailsDialog } from "./ArticleDetailsDialog"
+import { AppUpdateDialog } from "./AppUpdateDialog"
+import { useAppUpdates } from "./useAppUpdates"
 import { MarkdownExportDialog } from "./MarkdownExportDialog"
 import { useSourceDuplicate } from "./useSourceDuplicate"
 import { QuickOpen } from "./QuickOpen"
@@ -237,6 +239,30 @@ function App() {
   const existingArticle = duplicate?.article
     ? library?.articles.find(item => item.id === duplicate.article?.id) ?? duplicate.article : undefined
   const existingTask = matchingTask(duplicate?.key)
+  const canInstallUpdate = !busy && !journalLoading
+  const update = useAppUpdates(
+    () => canInstallUpdate && !submitting.current && allowSettingsNavigation(),
+    async () => {
+      if (journalReady.current) await persistJournal()
+      await flushReadingPositions()
+    },
+  )
+  const handleMenu = useEffectEvent((action: string) => {
+    if (action === "check-updates") update.check()
+    if (action === "open-settings" && !quickOpen && !taskCenterOpen
+        && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) void showSettings()
+  })
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void getCurrentWebview().listen<string>("linkread-menu", event => handleMenu(event.payload)).then(cleanup => {
+      if (disposed) cleanup()
+      else unlisten = cleanup
+    }).catch(() => {})
+    return () => { disposed = true; unlisten?.() }
+  }, [])
 
   function matchingTask(key: string | null | undefined) {
     if (!key) return undefined
@@ -961,6 +987,7 @@ function App() {
           event.preventDefault()
           showQuickOpen()
         } else if (event.key === ",") {
+          if (nativePaste && event.metaKey) return // macOS dispatches Command+, through the app menu.
           event.preventDefault()
           showSettings()
         } else if (event.key.toLowerCase() === "o" && screen !== "settings") {
@@ -1051,6 +1078,9 @@ function App() {
       </main>
       {detailsArticle && <ArticleDetailsDialog key={detailsArticle.id} article={detailsArticle} onSaved={articleDetailsSaved} onClose={() => setDetailsArticle(undefined)} />}
       {exportArticle && <MarkdownExportDialog key={exportArticle.id} article={exportArticle} onClose={() => setExportArticle(undefined)} />}
+      {update.prompt && !detailsArticle && !exportArticle && !quickOpen && !taskCenterOpen &&
+        <AppUpdateDialog prompt={update.prompt} busy={!canInstallUpdate} onClose={update.dismiss}
+          onCheck={() => update.check()} onInstall={() => void update.install()} />}
       {taskCenterOpen && <TaskCenter jobs={jobs} reviewedIds={reviewedTasks} onReviewed={markReviewed}
         completed={completedArticles(library?.articles ?? [], completedArticleIds)}
         initialTaskId={taskCenterFocusId}

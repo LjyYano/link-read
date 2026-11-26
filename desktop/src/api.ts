@@ -14,6 +14,14 @@ function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
 
 export const setNativeLanguage = (language: Locale) => invoke<void>("set_ui_language", { language })
 
+export type AppUpdateCheck =
+  | { status: "unconfigured" }
+  | { status: "current"; currentVersion: string }
+  | { status: "available"; currentVersion: string; version: string }
+
+export const checkAppUpdate = () => invokeNative<AppUpdateCheck>("check_app_update")
+export const installAppUpdate = (version: string) => invokeNative<void>("install_app_update", { version })
+
 export type Provider = "codex" | "claude" | "api"
 export type ExportFormat = "html" | "markdown"
 export type MarkdownExportOptions = { content: "readable" | "full"; includeTimestamped: boolean }
