@@ -8,10 +8,11 @@ import { createRoot } from "react-dom/client"
 import { BookOpen, CircleCheck, ListTodo, Search, Settings as SettingsIcon, X } from "lucide-react"
 import {
   cancelGeneration, checkDuplicate, checkTool, deleteArticle,
-  articleTranscriptPath, generateArticle, listArticles, pickSubtitle, providerNames, updateArticleState,
+  articleTranscriptPath, exportSubtitles, generateArticle, listArticles, pickSubtitle, providerNames, updateArticleState,
   loadTaskJournal, saveTaskJournal, normalizeGenerationFailure, openVideo, setNativeLanguage,
   readSubtitleClipboard, resolveSubtitlePath, savePastedSubtitle,
-  type Article, type ArticleStatePatch, type Library, type Progress, type ToolStatus,
+  type Article, type ArticleStatePatch, type DownloadedSubtitles, type Library, type Progress,
+  type SubtitleExportFormat, type ToolStatus,
 } from "./api"
 import { Bookshelf, Home, type Job, type TaskJob } from "./Home"
 import { Reader } from "./Reader"
@@ -28,6 +29,8 @@ import { loadRecentArticles, rememberArticle } from "./quickOpenState"
 import { useContinueReading } from "./useContinueReading"
 import { useSourceReadiness, rememberSourceFailure, forgetSourceReadiness } from "./useSourceReadiness"
 import { SourceReadinessPanel } from "./SourceReadinessPanel"
+import { useSubtitleDownload, forgetSubtitleDownload, clearSubtitleDownloadErrors } from "./useSubtitleDownload"
+import { defaultYoutubeCookies, loadYoutubeCookies, type YoutubeCookieOptions } from "./youtubeCookies"
 import { flushReadingPositions } from "./readingPositionBridge"
 import { progressFromEvent } from "./progress"
 import { SerialTaskQueue } from "./taskQueue"
@@ -48,7 +51,7 @@ import "./source-preview.css"
 
 type Screen = "create" | "library" | "settings" | "reader"
 type ReadingOrigin = { screen: Exclude<Screen, "reader">; scroll: number; tasks: boolean; completedArticleId?: string; taskId?: string }
-type ActiveGeneration = GenerationInput & { replacementArticleId?: string }
+type ActiveGeneration = GenerationInput & { replacementArticleId?: string; youtubeCookies?: YoutubeCookieOptions }
 const storageKey = "linkread-preferences"
 const settingsWriteKey = "linkread-settings-write-pending"
 
@@ -61,6 +64,7 @@ function loadPreferences(): Preferences {
     const saved = JSON.parse(localStorage.getItem(storageKey) || "{}")
     return {
       asr: loadAsrOptions(saved.asr),
+      youtubeCookies: loadYoutubeCookies(saved.youtubeCookies),
       provider: saved.provider === "claude" || saved.provider === "api" ? saved.provider : "codex",
       paths: {
         codex: typeof saved.paths?.codex === "string" ? saved.paths.codex : "",
@@ -72,7 +76,8 @@ function loadPreferences(): Preferences {
       },
     }
   } catch {
-    return { provider: "codex", paths: { codex: "", claude: "" }, api: { baseUrl: "", model: "" }, asr: { ...defaultAsr } }
+    return { provider: "codex", paths: { codex: "", claude: "" }, api: { baseUrl: "", model: "" },
+      asr: { ...defaultAsr }, youtubeCookies: { ...defaultYoutubeCookies } }
   }
 }
 
@@ -183,10 +188,11 @@ function App() {
   const [pasting, setPasting] = useState(false)
   const nativePaste = isTauri() && navigator.platform.startsWith("Mac")
   const [dragging, setDragging] = useState(false)
-  const linkPreview = useLinkPreview(source, localPath !== null)
-  const sourceReadiness = useSourceReadiness(source, localPath !== null)
   const [inputError, setInputError] = useState("")
   const [preferences, setPreferences] = useState(loadPreferences)
+  const linkPreview = useLinkPreview(source, localPath !== null)
+  const sourceReadiness = useSourceReadiness(source, localPath !== null, preferences.youtubeCookies)
+  const subtitleDownload = useSubtitleDownload(source, localPath !== null, preferences.youtubeCookies)
   const [settingsRecovery, setSettingsRecovery] = useState(hasPendingSettingsWrite)
   const settingsGate = useRef(new GenerationSettingsGate({
     readPreferences: loadPreferences,
@@ -224,6 +230,7 @@ function App() {
   const [exportArticle, setExportArticle] = useState<Article>()
   const [detailsRevisions, setDetailsRevisions] = useState<Record<string, number>>({})
   const [previewTaskId, setPreviewTaskId] = useState<string>()
+  const [standaloneDownload, setStandaloneDownload] = useState<DownloadedSubtitles>()
   const [completionNotice, setCompletionNotice] = useState<Article[]>([])
   const [jobs, setJobs] = useState<TaskJob[]>([])
   const jobsRef = useRef<TaskJob[]>([])
@@ -511,6 +518,10 @@ function App() {
 
   function configure(next: Preferences) {
     localStorage.setItem(storageKey, JSON.stringify(next))
+    if (JSON.stringify(next.youtubeCookies) !== JSON.stringify(preferences.youtubeCookies)) {
+      clearSubtitleDownloadErrors()
+      if (source.trim()) forgetSourceReadiness(source.trim())
+    }
     setPreferences(next)
   }
 
@@ -665,7 +676,7 @@ function App() {
           spec.identity = mergeArticleMetadata(spec.identity, event.metadata)
           if (event.previewId) spec.previewId = event.previewId
           updateTask(id, job => updateJob(job, event) ?? job)
-        }, () => releaseSettings?.(), id, spec.localFile, spec.replace, spec.baseUrl, spec.model, spec.asr, spec.previewId, spec.pageLanguage),
+        }, () => releaseSettings?.(), id, spec.localFile, spec.replace, spec.baseUrl, spec.model, spec.asr, spec.previewId, spec.pageLanguage, spec.youtubeCookies),
       onSuccess: generated => {
         if (!spec.localFile) forgetSourceReadiness(spec.input)
         updateTask(id, () => ({ status: "done", article: generated }))
@@ -693,10 +704,13 @@ function App() {
     })
   }
 
-  async function start() {
+  async function start(overrideDownloaded?: DownloadedSubtitles) {
     if (submitting.current || pasteRequest.current) return
-    const input = localPath ?? source.trim()
+    const localFile = overrideDownloaded ? false : localPath !== null
+    const input = overrideDownloaded ? overrideDownloaded.source : (localPath ?? source.trim())
     if (!input) return
+    const downloaded = overrideDownloaded
+      ?? (!localFile && subtitleDownload.downloaded && subtitleDownload.source === input ? subtitleDownload.downloaded : undefined)
     const version = inputVersion.current, navigation = navigationVersion.current
     const submission = Symbol("source submission")
     startSubmission.current = submission
@@ -704,14 +718,13 @@ function App() {
       && inputVersion.current === version && navigationVersion.current === navigation
     submitting.current = true
     try {
-      const localFile = localPath !== null
       // An active task may publish its archive while the native lookup is in
       // flight. Recheck after a task transition before deciding to create work.
       const taskState = () => jobsRef.current.map(task => `${task.id}:${task.job.status}`).join("|")
       let checked: Awaited<ReturnType<typeof checkDuplicate>> | undefined
       for (let attempt = 0; attempt < 3; attempt++) {
         const before = taskState()
-        const result = await checkDuplicate(input, localFile)
+        const result = await checkDuplicate(input, localFile, downloaded?.previewId)
         if (!current()) return
         if (before === taskState()) { checked = result; break }
       }
@@ -722,10 +735,10 @@ function App() {
       const inQueue = matchingTask(checked.key)
       if (inQueue) { setInputError(""); openTasks(inQueue.id); return }
       if (!journalReady.current) { setInputError(journalLoading ? tr("正在恢复任务记录，请稍候") : tr("请先重试读取保存的任务")); return }
-      if (!localFile && sourceReadiness.blocked) {
+      if (!localFile && !downloaded && sourceReadiness.blocked) {
         setInputError(tr("此来源已确认暂不支持处理，请导入字幕、查看来源或重新检查。")); return
       }
-      if (!localFile && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled) { void showSettings("asr"); return }
+      if (!localFile && !downloaded && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled) { void showSettings("asr"); return }
       if (toolWarning) { void showSettings("ai"); return }
       enqueueTask({
         input,
@@ -737,20 +750,29 @@ function App() {
         pageLanguage: language.pageLanguage,
         sourceKey: checked.key,
         replace: false,
+        previewId: downloaded?.previewId,
         asr: { ...preferences.asr },
+        youtubeCookies: preferences.youtubeCookies ? { ...preferences.youtubeCookies } : undefined,
         identity: {
           ...(linkPreview.status === "ready" && linkPreview.source === input ? linkPreview.metadata : {}),
+          ...(downloaded ? downloaded.metadata : {}),
           title: localFile ? input.split("/").pop()?.replace(subtitleExtension, "")
-            : linkPreview.status === "ready" && linkPreview.source === input ? linkPreview.metadata.title : undefined,
-          platform: localFile ? "local" : sourcePlatform(input),
+            : downloaded?.metadata.title
+            || (linkPreview.status === "ready" && linkPreview.source === input ? linkPreview.metadata.title : undefined),
+          platform: localFile ? "local" : downloaded?.metadata.platform ?? sourcePlatform(input),
         },
       })
+      if (downloaded) forgetSubtitleDownload(input)
       // Do not discard a new draft if the user typed while duplicate lookup was running.
-      if (draft.current === input) {
+      if (draft.current === input || (overrideDownloaded && draft.current.trim() === input)) {
         inputVersion.current++
         draft.current = ""
         setSource("")
         setLocalPath(null)
+      }
+      if (overrideDownloaded) {
+        setStandaloneDownload(undefined)
+        setScreen("create")
       }
       setInputError("")
     } catch (failure) {
@@ -914,6 +936,7 @@ function App() {
         tr("当前语音识别设置比此任务上次使用的范围更大，或服务/分片配置已改变。\n继续时只会在没有可读取字幕的情况下使用已启用的语音识别，可能产生新费用。是否继续？"))) return
       enqueueTask({ ...original, provider, executable,
         baseUrl: preferences.api.baseUrl, model: preferences.api.model, asr,
+        youtubeCookies: preferences.youtubeCookies ? { ...preferences.youtubeCookies } : undefined,
         sourceKey: duplicate.key, replace, previewId,
       }, id)
     } catch (error) {
@@ -962,6 +985,7 @@ function App() {
     setOpenedCompletion(latestCompletion(selected.id)?.id)
     if (screen === "reader" && article?.id === selected.id) setReaderSession(current => current + 1)
     setPreviewTaskId(undefined)
+    setStandaloneDownload(undefined)
     setCompletionNotice(current => current.filter(item => item.id !== selected.id))
     setArticle(articleStateChanges.current.reconcile([selected], 0)[0])
     setRecentArticles(current => rememberArticle(current, selected.id))
@@ -985,10 +1009,39 @@ function App() {
     setTaskCenterOpen(false)
     const identity = { ...taskInputs.current.get(id)?.identity, ...task.job }
     setPreviewTaskId(id)
+    setStandaloneDownload(undefined)
     setArticle({ id: "preview-" + previewId, previewId, title: identity.title || tr("Transcript preview"),
       hasAnalysis: false, category: "", platform: identity.platform || "local", updatedAt: Date.now(),
       sourceUrl: identity.sourceUrl ?? null, author: identity.author ?? null, publishedAt: identity.publishedAt ?? null,
       durationMs: identity.durationMs ?? null, thumbnailUrl: identity.thumbnailUrl ?? null,
+    })
+    setDragging(false)
+    setScreen("reader")
+  }
+
+  async function openDownloadedPreview(downloaded: DownloadedSubtitles) {
+    if (!allowSettingsNavigation()) return
+    const isCurrent = beginNavigation()
+    if (screen === "reader") await flushReadingPositions()
+    if (!isCurrent()) return
+    rememberReadingOrigin()
+    setTaskCenterOpen(false)
+    setPreviewTaskId(undefined)
+    setStandaloneDownload(downloaded)
+    setArticle({
+      id: "preview-" + downloaded.previewId,
+      previewId: downloaded.previewId,
+      title: downloaded.metadata.title || tr("Transcript preview"),
+      hasAnalysis: false,
+      category: "",
+      platform: downloaded.metadata.platform,
+      updatedAt: Date.now(),
+      sourceUrl: downloaded.metadata.sourceUrl ?? downloaded.source,
+      author: downloaded.metadata.author ?? null,
+      publishedAt: downloaded.metadata.publishedAt ?? null,
+      durationMs: downloaded.metadata.durationMs ?? null,
+      thumbnailUrl: downloaded.metadata.thumbnailUrl ?? null,
+      readingKey: downloaded.readingKey,
     })
     setDragging(false)
     setScreen("reader")
@@ -1058,6 +1111,9 @@ function App() {
   const groupedTasks = groupTasks(jobs)
   const unreadTaskIds = unreviewedTaskIds(jobs, reviewedTasks)
 
+  const hasDownloadedSubtitles = !localPath && Boolean(subtitleDownload.downloaded && subtitleDownload.source === source.trim())
+  const isYoutubeLink = !localPath && sourcePlatform(source.trim()) === "youtube"
+
   return (
     <div className="app-shell">
       <TitleBar screen={screen} taskCount={activeTaskCount(jobs)} unreadTasks={unreadTaskIds.length} onTasks={showTasks} onSettings={() => void showSettings()}
@@ -1066,14 +1122,19 @@ function App() {
         {screen === "create" && (
           <Home {...shelfActions} linkPreview={linkPreview} source={source} setSource={setLink} localPath={localPath}
             nativePaste={nativePaste} pasting={pasting} onPaste={paste}
-            onPick={pick} onClear={() => setLink("")} onStart={start} busy={busy} jobs={jobs}
+            onPick={pick} onClear={() => setLink("")} onStart={() => void start()} busy={busy} jobs={jobs}
             onCancel={cancel} onRetry={retry} onRemove={removeJob} toolWarning={toolWarning} inputError={inputError}
             onPreview={readPreview} journalLoading={journalLoading} journalError={journalError} onRetryJournal={retryJournal}
             onTasks={showTasks} taskSummary={{ queued: groupedTasks.queued.length, attention: groupedTasks.attention.length, unread: unreadTaskIds.length }} resume={resume}
             existingArticle={existingArticle} existingTask={Boolean(existingTask)}
             onViewExistingTask={() => openTasks(existingTask?.id)}
-            sourceBlocked={sourceReadiness.blocked} sourceNeedsAsr={sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled}
+            sourceBlocked={!hasDownloadedSubtitles && sourceReadiness.blocked}
+            sourceNeedsAsr={!hasDownloadedSubtitles && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled}
             sourceReadiness={<SourceReadinessPanel state={sourceReadiness}
+              subtitleDownload={subtitleDownload} isYoutube={isYoutubeLink}
+              onPreviewDownloaded={downloaded => { void openDownloadedPreview(downloaded) }}
+              onExportDownloaded={async (previewId, format: SubtitleExportFormat) => { await exportSubtitles(previewId, format, true) }}
+              onYoutubeSettings={() => void showSettings("youtube")}
               onImport={pick} onOpenSource={() => { void openVideo(sourceReadiness.source).catch(error => setInputError(String(error))) }}
               onSettings={() => void showSettings("asr")} asrEnabled={preferences.asr.enabled} />}
             onSettings={() => void showSettings("ai")} onLibrary={goToLibrary} dragging={dragging} />
@@ -1090,7 +1151,10 @@ function App() {
             onBack={() => navigateTo(previousScreen)} />
         )}
         {screen === "reader" && article && <Reader key={`${article.id}:${readerSession}`} article={article} onBack={returnFromReader} backLabel={backLabel}
-          onRegenerate={regenerate} onStateChange={changeArticleState} preview={preview} onNavigationStart={beginNavigation}
+          onRegenerate={regenerate} onStateChange={changeArticleState} preview={preview}
+          standalonePreview={standaloneDownload && article.previewId === standaloneDownload.previewId
+            ? { onGenerate: () => { void start(standaloneDownload) } } : undefined}
+          onNavigationStart={beginNavigation}
           onThemeChange={setReaderTheme}
           onViewRegeneration={readerTask ? () => openTasks(readerTask.id) : undefined}
           onOpenUpdated={readerUpdate ? () => void read(readerUpdate, true) : undefined}

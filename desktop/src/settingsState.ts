@@ -1,18 +1,21 @@
 import { tr } from "./language.ts"
 import type { Provider } from "./api"
 import type { AsrOptions } from "./asrSettings"
+import { isSupportedYoutubeBrowser, type YoutubeCookieOptions } from "./youtubeCookies.ts"
 
 export type Preferences = {
   provider: Provider
   paths: { codex: string; claude: string }
   api: { baseUrl: string; model: string }
   asr: AsrOptions
+  youtubeCookies?: YoutubeCookieOptions
 }
 
 export type SettingsDraft = { preferences: Preferences; apiToken: string; asrToken: string }
 export type SettingsField = "provider" | "codex-path" | "claude-path"
   | "api-url" | "api-model" | "api-token" | "asr-token" | "asr-url" | "asr-model"
   | "asr-max-minutes" | "asr-chunk-minutes" | "ffmpeg-path"
+  | "youtube-cookie-mode" | "youtube-cookie-browser" | "youtube-cookie-file"
 
 export class SettingsValidationError extends Error {
   readonly field: SettingsField
@@ -52,6 +55,14 @@ function normalizedAsr(value: AsrOptions): AsrOptions {
   }
 }
 
+function normalizedYoutubeCookies(value: YoutubeCookieOptions): YoutubeCookieOptions {
+  return {
+    mode: value.mode,
+    browser: clean(value.browser).toLowerCase() as YoutubeCookieOptions["browser"],
+    filePath: clean(value.filePath),
+  }
+}
+
 export function normalizeSettingsDraft(value: SettingsDraft): SettingsDraft {
   return {
     preferences: {
@@ -59,6 +70,8 @@ export function normalizeSettingsDraft(value: SettingsDraft): SettingsDraft {
       paths: { codex: clean(value.preferences.paths.codex), claude: clean(value.preferences.paths.claude) },
       api: { baseUrl: cleanUrl(value.preferences.api.baseUrl), model: clean(value.preferences.api.model) },
       asr: normalizedAsr(value.preferences.asr),
+      ...(value.preferences.youtubeCookies !== undefined
+        ? { youtubeCookies: normalizedYoutubeCookies(value.preferences.youtubeCookies) } : {}),
     },
     apiToken: clean(value.apiToken),
     asrToken: clean(value.asrToken),
@@ -149,6 +162,21 @@ export function validateSettingsDraft(value: SettingsDraft): SettingsDraft {
   if (preferences.asr.enabled) {
     if (preferences.asr.reuseToken) validateToken(apiToken, "api-token", true)
     validateAsrConfiguration(preferences.asr, preferences.asr.reuseToken ? apiToken : asrToken)
+  }
+  if (preferences.youtubeCookies) {
+    const yc = preferences.youtubeCookies
+    if (!["none", "browser", "file"].includes(yc.mode)) {
+      throw new SettingsValidationError("youtube-cookie-mode", tr("请选择有效的 YouTube 认证方式"))
+    }
+    if (yc.mode === "browser" && !isSupportedYoutubeBrowser(yc.browser)) {
+      throw new SettingsValidationError("youtube-cookie-browser", tr("请选择受支持的浏览器"))
+    }
+    if (yc.mode === "file" && !yc.filePath) {
+      throw new SettingsValidationError("youtube-cookie-file", tr("请选择本地 cookies.txt 文件"))
+    }
+    if (yc.filePath && (!yc.filePath.startsWith("/") || bytes(yc.filePath) > 4096 || controls.test(yc.filePath))) {
+      throw new SettingsValidationError("youtube-cookie-file", tr("请填写有效的 cookies.txt 完整路径"))
+    }
   }
   return next
 }

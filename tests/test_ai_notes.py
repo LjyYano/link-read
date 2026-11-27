@@ -478,6 +478,46 @@ def test_quote_punctuation_falls_back_on_word_changes():
     assert any(event.stage == 'quote_warning' for event in events)
 
 
+def test_publication_accepts_english_lengths_and_retries_once_on_validation_error(tmp_path):
+    class FlakyPublication(FakeProvider):
+        def __init__(self):
+            super().__init__()
+            self.pub_prompts = []
+
+        def generate(self, prompt, schema, *, timeout_seconds):
+            result = super().generate(prompt, schema, timeout_seconds=timeout_seconds)
+            if 'reading' in result:
+                self.pub_prompts.append(prompt)
+                if len(self.pub_prompts) == 1:
+                    # First response forgets index 0 on the opening section.
+                    result['reading']['sections'][0]['index'] = 99
+                    return result
+                result['reading']['lead'] = (
+                    "Lauren Tan shares how her team at SpaceXSI turned AI-generated code from "
+                    "unpredictable slop into 3,000 production pull requests per month by investing "
+                    "in automated verification loops, review proofs, and deterministic agent sandboxes."
+                )
+                result['reading']['sections'][0]['label'] = "Shipping 3,000 PRs with Verification Loops"
+                result['reading']['sections'][0]['summary'] = (
+                    "Explains why code volume alone is not the bottleneck once automated review proofs, "
+                    "deterministic test suites, and isolated agent sandboxes replace slow manual line-by-line inspection."
+                )
+                result['quotes'][0].pop('bold', None)
+                result['quotes'][0].pop('red', None)
+            return result
+
+    note = enrich(make_transcript(), FakeProvider())
+    provider = FlakyPublication()
+    extras = complete_extras(note, ArticleExtras(), provider, timeout_seconds=30, cache_dir=tmp_path)
+    assert len(provider.pub_prompts) == 2
+    assert '【格式修正重试】' in provider.pub_prompts[1]
+    assert '目录索引必须从选项 0 开始' in provider.pub_prompts[1]
+    assert len(extras.reading.lead) > 180
+    assert len(extras.reading.sections[0].summary) > 160
+    assert len(extras.reading.sections[0].label) > 30
+    assert len(list(tmp_path.glob('*.json'))) == 1  # Only the valid retry was cached.
+
+
 def test_run_recovers_after_bookshelf_write_failure(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     doc = make_transcript(num=1)

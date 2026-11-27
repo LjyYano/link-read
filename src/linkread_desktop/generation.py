@@ -25,7 +25,7 @@ from .renderers.extras import load_extras, save_missing_extras
 from .renderers.html import render_html
 from .renderers.site import article_metadata, build_site, load_document
 from .storage import write_text
-from .translation import LANGUAGE_NAMES, PageLanguage, page_locale, prepare_edition
+from .translation import LANGUAGE_NAMES, PageLanguage, load_edition, needs_translation, page_locale, prepare_edition, source_language
 from .workspace import find_workspace, keep_transcript, load_saved_transcript, workspace_dir
 
 
@@ -65,10 +65,27 @@ def _run_note(folder: Path, raw: TranscriptDocument) -> tuple[Path, NoteDocument
     return note_path, None
 
 
+def _output_language(raw: TranscriptDocument, page_language: PageLanguage) -> str | None:
+    if page_language != "original":
+        return LANGUAGE_NAMES[page_language]
+    source = source_language(raw)
+    if source:
+        if source.split("-")[0] == "en":
+            return LANGUAGE_NAMES["en"]
+        return None
+    sample = "".join(cue.text for cue in raw.segments[:40])[:3000]
+    han = sum(1 for ch in sample if "\u3400" <= ch <= "\u9fff")
+    other = any("\u3040" <= ch <= "\u30ff" or "\uac00" <= ch <= "\ud7af" for ch in sample)
+    latin = sum(1 for ch in sample if "A" <= ch <= "Z" or "a" <= ch <= "z")
+    if latin >= 20 and latin > han * 3 and not other:
+        return LANGUAGE_NAMES["en"]
+    return None
+
+
 def generate_article(
     source: str, agent: StructuredProvider, *, library: Path, output: Path | None = None,
     site: Path | None = None, progress: ProgressCallback | None = None,
-    max_chars: int = 4500, timeout: int = 300, jobs: int = 4, polish: bool = True,
+    max_chars: int | None = None, timeout: int = 300, jobs: int = 4, polish: bool = True,
     cookies_from_browser: str | None = None, cookies_file: Path | None = None,
     asr: AsrConfig | None = None, asr_cache_dir: Path | None = None, page_language: PageLanguage = "original",
 ) -> Path:
@@ -94,7 +111,14 @@ def generate_article(
     note_path, saved_note = _run_note(folder, raw)
     cache_dir = folder / ".ai-checkpoints"
     extras = load_extras(note_path)
-    language_options = {"language": LANGUAGE_NAMES[page_language]} if page_language != "original" else {}
+    target_language = _output_language(raw, page_language)
+    language_options = {"language": target_language} if target_language else {}
+    translating = needs_translation(raw, page_language)
+    # Full translated editions render the target-language cues directly, so
+    # spending extra batches proofreading the original-language text is unnecessary.
+    effective_polish = polish and not translating
+    polish_max_chars = 5000 if max_chars is None else max_chars
+    translation_max_chars = 5000 if max_chars is None else min(max_chars, 5000)
 
     def analyze(workers):
         result = enrich(raw, agent, max_chars=max_chars, timeout_seconds=timeout,
@@ -113,16 +137,37 @@ def generate_article(
             save_catalog(note_path, result.catalog, document)
         return result
 
+    def translate(workers):
+        return prepare_edition(folder, raw, page_language, agent, max_chars=translation_max_chars,
+                               timeout_seconds=timeout, workers=workers, progress=progress, cache_dir=cache_dir)
+
+    saved_edition = load_edition(folder, raw)
+    edition_ready = saved_edition is not None and saved_edition.language == page_language
+    edition = saved_edition if edition_ready else None
+
     note = saved_note
-    if note is None and polish and jobs >= 3:
+    if translating and not edition_ready and jobs >= 2:
+        # Translation depends only on raw cues; overlap it with analysis and
+        # publication inside the same shared global concurrency budget.
+        report(progress, "parallel_start", "提炼与字幕翻译同时开始，使用统一并发上限")
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-translate") as pool:
+            translation_future = pool.submit(translate, jobs)
+            if note is None:
+                note = analyze(min(3, jobs))
+            else:
+                report(progress, "reuse", "已复用完整的 AI 提炼结果")
+            publication = pool.submit(publish, note)
+            completed = publication.result()
+            edition = translation_future.result()
+    elif note is None and effective_polish and jobs >= 3:
         # Punctuation edits depend only on source text, not its AI summary. Start
         # immediately, then split verified text at the real chapter boundaries.
         report(progress, "parallel_start", "提炼与正文校对同时开始，使用统一并发上限")
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-stages") as pool:
             early_reading = pool.submit(polish_reading, reading_seed(raw, agent), agent,
-                max_chars=max_chars, timeout_seconds=timeout, progress=progress,
+                max_chars=polish_max_chars, timeout_seconds=timeout, progress=progress,
                 workers=jobs, cache_dir=cache_dir)
-            note = analyze(min(2, jobs))
+            note = analyze(min(3, jobs))
             publication = pool.submit(publish, note)
             note = attach_reading(note, early_reading.result())
             _save_json(note, note_path)
@@ -132,14 +177,14 @@ def generate_article(
             note = analyze(jobs)
         else:
             report(progress, "reuse", "已复用完整的 AI 提炼结果")
-        needs_polish = polish and not note.analysis.reading_paragraphs
+        needs_polish = effective_polish and not note.analysis.reading_paragraphs
         needs_publication = any(getattr(extras, name) is None for name in ("reading", "mindmap", "quotes", "catalog"))
         if needs_polish and needs_publication and jobs >= 2:
             report(progress, "parallel_start", "并行执行全文校对与阅读信息生成")
             with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-publish") as pool:
                 publication = pool.submit(publish, note)
                 proof = polish_reading(reading_seed(raw, agent) if jobs >= 3 else note, agent,
-                    max_chars=max_chars, timeout_seconds=timeout, progress=progress,
+                    max_chars=polish_max_chars, timeout_seconds=timeout, progress=progress,
                     workers=jobs, cache_dir=cache_dir)
                 note = attach_reading(note, proof) if jobs >= 3 else proof
                 _save_json(note, note_path)
@@ -147,18 +192,18 @@ def generate_article(
         else:
             if needs_polish:
                 proof = polish_reading(reading_seed(raw, agent) if jobs >= 3 else note, agent,
-                    max_chars=max_chars, timeout_seconds=timeout, progress=progress,
+                    max_chars=polish_max_chars, timeout_seconds=timeout, progress=progress,
                     workers=jobs, cache_dir=cache_dir)
                 note = attach_reading(note, proof) if jobs >= 3 else proof
                 _save_json(note, note_path)
             completed = publish(note)
         if not needs_polish:
-            report(progress, "polish_reuse" if polish else "polish_skipped",
-                   "已复用完整校对正文" if polish else "已跳过全文校对")
+            report(progress, "polish_reuse" if effective_polish else "polish_skipped",
+                   "已复用完整校对正文" if effective_polish else "已跳过全文校对")
     report(progress, "article_ai_done", "AI 整理与阅读信息生成完成")
     completed = load_extras(note_path)
-    edition = prepare_edition(folder, raw, page_language, agent, max_chars=max_chars,
-                              timeout_seconds=timeout, workers=jobs, progress=progress, cache_dir=cache_dir)
+    if edition is None:
+        edition = translate(jobs)
 
     article = folder / ("article.html" if output is None else "index.html")
     home = site / "index.html" if site is not None else None

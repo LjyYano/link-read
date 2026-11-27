@@ -63,7 +63,7 @@ def _reading_paragraphs(document: TranscriptDocument, note: NoteDocument | None)
 
 def _article(
     document: TranscriptDocument, note: NoteDocument | None, chapters: list[ReadingSection],
-    cards: list[QuoteCard], edition: ReadingEdition | None = None,
+    cards: list[QuoteCard], edition: ReadingEdition | None = None, *, language: str | None = None,
 ) -> tuple[str, str, str]:
     next_chapter = 0
     sections = []
@@ -83,7 +83,7 @@ def _article(
             if sections:
                 sections.append("</section>")
             target = f"chapter-{chapter.start_segment_index}"
-            title = escape(section_title(next_chapter, chapter.title))
+            title = escape(section_title(next_chapter, chapter.title, language=language))
             sections.append(f'<section class="transcript-section" id="{target}"><h2>{title}</h2>')
             toc.append(f'<button type="button" data-go-section="{target}">{title}</button>')
         if not sections:
@@ -160,7 +160,7 @@ def render_html(
         cards = extras.quotes.cards
     else:
         cards = note_quotes(note, language=language) if note else []
-    article, toc, signature = _article(transcript, note, chapters, cards, edition)
+    article, toc, signature = _article(transcript, note, chapters, cards, edition, language=language)
     panels = note_fragments(note, language=language) if note else {}
     if overview:
         panels["summary"] = overview_panel(overview, language=language)

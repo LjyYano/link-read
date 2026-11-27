@@ -73,5 +73,11 @@ export const chinese: Readonly<Record<string, string>> = {
   "Not set": "未设置",
   "Quick open": "快速打开",
   "New Article": "新建文章",
-  "Search Library": "搜索书架"
+  "Search Library": "搜索书架",
+  "SRT subtitles": "SRT 字幕",
+  "WebVTT subtitles": "WebVTT 字幕",
+  "Original transcript · Downloaded subtitles": "原始字幕 · 已下载",
+  "Generate article": "生成文章",
+  "Export SRT": "导出 SRT",
+  "Export VTT": "导出 VTT"
 }

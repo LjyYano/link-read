@@ -254,3 +254,24 @@ test("the save operates on a snapshot rather than later form mutations", async (
   assert.equal(saved.preferences.api.model, "example-model")
   assert.deepEqual(target.value, saved)
 })
+
+test("youtube cookie settings validate browser and absolute file paths explicitly", () => {
+  const value = draft()
+  value.preferences.youtubeCookies = { mode: "none", browser: "chrome", filePath: "" }
+  assert.equal(validateSettingsDraft(value).preferences.youtubeCookies.mode, "none")
+
+  value.preferences.youtubeCookies = { mode: "browser", browser: " Safari ", filePath: "" }
+  assert.equal(validateSettingsDraft(value).preferences.youtubeCookies.browser, "safari")
+
+  value.preferences.youtubeCookies = { mode: "browser", browser: "unknown", filePath: "" }
+  assert.throws(() => validateSettingsDraft(value), fieldError("youtube-cookie-browser"))
+
+  value.preferences.youtubeCookies = { mode: "file", browser: "chrome", filePath: "" }
+  assert.throws(() => validateSettingsDraft(value), fieldError("youtube-cookie-file"))
+
+  value.preferences.youtubeCookies = { mode: "file", browser: "chrome", filePath: "relative/cookies.txt" }
+  assert.throws(() => validateSettingsDraft(value), fieldError("youtube-cookie-file"))
+
+  value.preferences.youtubeCookies = { mode: "file", browser: "chrome", filePath: " /Users/yano/cookies.txt " }
+  assert.equal(validateSettingsDraft(value).preferences.youtubeCookies.filePath, "/Users/yano/cookies.txt")
+})

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer } from "react"
 import { checkSource, type GenerationFailure, type SourceCheck } from "./api"
 import { SourceReadinessRequests, sourceCheckKey, sourceCheckTtl } from "./sourceReadinessState"
+import type { YoutubeCookieOptions } from "./youtubeCookies"
 
 const requests = new SourceReadinessRequests()
 
@@ -19,7 +20,11 @@ export function rememberSourceFailure(source: string, failure: GenerationFailure
 
 export function forgetSourceReadiness(source: string) { requests.forget(source) }
 
-export function useSourceReadiness(input: string, localFile: boolean): SourceReadiness {
+export function useSourceReadiness(
+  input: string,
+  localFile: boolean,
+  youtubeCookies?: YoutubeCookieOptions,
+): SourceReadiness {
   const source = input.trim()
   const [, refresh] = useReducer(value => value + 1, 0)
   useEffect(() => requests.subscribe(refresh), [])
@@ -32,8 +37,8 @@ export function useSourceReadiness(input: string, localFile: boolean): SourceRea
     return () => window.clearTimeout(timer)
   }, [result])
   const check = useCallback(() => {
-    if (eligible) void requests.request(source, () => checkSource(source))
-  }, [source, eligible])
+    if (eligible) void requests.request(source, () => checkSource(source, youtubeCookies))
+  }, [source, eligible, youtubeCookies])
   return { source, eligible, result, phase: checking ? "checking" : result ? "checked" : "idle",
     blocked: result?.status === "blocked", check }
 }

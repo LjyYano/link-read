@@ -62,12 +62,14 @@ def _json_object(payload: str, name: str) -> dict:
 
 class CodexProvider:
     name = "codex"
+    supports_reasoning_effort = True
 
     def __init__(self, model: str | None = None, *, executable: str = "codex"):
         self.model = model
         self.executable = executable
 
-    def generate(self, prompt: str, schema: dict, *, timeout_seconds: int) -> dict:
+    def generate(self, prompt: str, schema: dict, *, timeout_seconds: int,
+                 reasoning_effort: str | None = None) -> dict:
         if not shutil.which(self.executable):
             raise ProviderError("没有找到 codex。请安装 Codex CLI 并完成登录", code="dependency_missing", retryable=False, action="setup")
         with TemporaryDirectory(prefix="linkread-codex-") as directory:
@@ -80,6 +82,8 @@ class CodexProvider:
             ]
             if self.model:
                 cmd.extend(["--model", self.model])
+            if reasoning_effort in {"low", "medium", "high"}:
+                cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
             cmd.append("-")
             proc = _process(cmd, prompt, cwd=directory, timeout_seconds=timeout_seconds)
             if proc.returncode != 0:

@@ -664,6 +664,54 @@ async fn preview_video(locations: State<'_, Locations>, source: String) -> AppRe
         "来源预览暂时超时，可以重试或直接开始生成").await
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct YoutubeCookieOptions {
+    mode: String,
+    #[serde(default)]
+    browser: String,
+    #[serde(default)]
+    file_path: String,
+}
+
+const YOUTUBE_COOKIE_BROWSERS: &[&str] = &[
+    "brave", "chrome", "chromium", "edge", "firefox", "opera", "safari", "vivaldi", "whale",
+];
+
+fn is_youtube_source(source: &str) -> bool {
+    video_url(source).ok().and_then(|url| url.host_str().map(str::to_owned)).is_some_and(|host| {
+        let host = host.to_ascii_lowercase();
+        host == "youtu.be" || host == "www.youtu.be" || host == "youtube.com" || host.ends_with(".youtube.com")
+    })
+}
+
+fn youtube_cookie_args(source: &str, options: Option<&YoutubeCookieOptions>) -> AppResult<Vec<String>> {
+    let Some(options) = options else { return Ok(Vec::new()) };
+    if options.mode == "none" || !is_youtube_source(source) {
+        return Ok(Vec::new());
+    }
+    match options.mode.as_str() {
+        "browser" => {
+            let browser = options.browser.trim().to_ascii_lowercase();
+            if !YOUTUBE_COOKIE_BROWSERS.contains(&browser.as_str()) {
+                return Err("不支持所选浏览器，请选择 Chrome、Safari、Edge、Firefox 或 Brave 等".into());
+            }
+            Ok(vec!["--cookies-from-browser".into(), browser])
+        }
+        "file" => {
+            let path = options.file_path.trim();
+            let target = Path::new(path);
+            if path.is_empty() || path.len() > 4096 || path.chars().any(char::is_control)
+                || !target.is_absolute() || target.is_symlink() || !target.is_file()
+            {
+                return Err("YouTube Cookie 文件不存在或不可读取，请在设置中重新选择".into());
+            }
+            Ok(vec!["--cookies".into(), path.to_owned()])
+        }
+        _ => Err("YouTube Cookie 认证模式无效".into()),
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SourceCheck {
@@ -675,10 +723,79 @@ struct SourceCheck {
 }
 
 #[tauri::command]
-async fn check_source(locations: State<'_, Locations>, source: String) -> AppResult<SourceCheck> {
+async fn check_source(
+    locations: State<'_, Locations>,
+    source: String,
+    youtube_cookies: Option<YoutubeCookieOptions>,
+) -> AppResult<SourceCheck> {
     video_url(&source)?;
-    query_with_timeout(&locations, &["check-source", "--", &source], Duration::from_secs(35),
+    let cookies = youtube_cookie_args(&source, youtube_cookies.as_ref())?;
+    let mut owned: Vec<String> = vec!["check-source".into()];
+    owned.extend(cookies);
+    owned.push("--".into());
+    owned.push(source);
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+    query_with_timeout(&locations, &args, Duration::from_secs(35),
         "来源检查暂时超时，尚未确认内容是否可用；请重试检查或查看来源").await
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadedSubtitles {
+    preview_id: String,
+    source: String,
+    source_key: String,
+    reading_key: String,
+    language: Option<String>,
+    segment_count: u32,
+    metadata: SourceMetadata,
+}
+
+#[tauri::command]
+async fn download_subtitles(
+    locations: State<'_, Locations>,
+    source: String,
+    youtube_cookies: Option<YoutubeCookieOptions>,
+) -> AppResult<DownloadedSubtitles> {
+    video_url(&source)?;
+    let cookies = youtube_cookie_args(&source, youtube_cookies.as_ref())?;
+    let mut owned: Vec<String> = vec!["download-subtitles".into()];
+    owned.extend(cookies);
+    owned.push("--".into());
+    owned.push(source);
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+    query_with_timeout(&locations, &args, Duration::from_secs(60),
+        "下载字幕超时，请检查网络或稍后重试").await
+}
+
+#[tauri::command]
+async fn pick_cookies_file(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    ui_language: Option<String>,
+) -> AppResult<Option<PathBuf>> {
+    let (send, receive) = oneshot::channel();
+    app.dialog()
+        .file()
+        .set_parent(&window)
+        .set_title(translated(ui_language.as_deref(), "选择 YouTube Cookie 文件", "Choose YouTube cookies file"))
+        .add_filter(translated(ui_language.as_deref(), "Cookie 文本文件", "Cookies text file"), &["txt"])
+        .pick_file(move |file| {
+            let _ = send.send(file);
+        });
+    let Some(file) = receive
+        .await
+        .map_err(|error| details("无法打开文件选择窗口", error))?
+    else {
+        return Ok(None);
+    };
+    let path = file
+        .into_path()
+        .map_err(|error| details("无法访问所选 Cookie 文件", error))?;
+    if !path.is_absolute() || path.is_symlink() || !path.is_file() {
+        return Err("请选择有效的本地 cookies.txt 文件".into());
+    }
+    Ok(Some(path))
 }
 
 #[tauri::command]
@@ -788,6 +905,9 @@ fn sidecar(locations: &Locations) -> AppResult<Command> {
         command.env_remove("PYTHONPATH").env_remove("PYTHONHOME");
         command
     };
+    if let Ok(path) = env::join_paths(command_paths()) {
+        command.env("PATH", path);
+    }
     command
         .args([
             OsString::from("--library"),
@@ -913,11 +1033,13 @@ async fn generate(
     resume_preview: Option<String>,
     page_language: Option<String>,
     ui_language: Option<String>,
+    youtube_cookies: Option<YoutubeCookieOptions>,
 ) -> GenerationResult<Article> {
     state.begin(&request_id).map_err(|error| if error == "已取消生成" { GenerationFailure::cancelled() } else { GenerationFailure::core(error) })?;
     let command = generation_command(&locations, &source, provider, &executable,
         base_url.as_deref(), model.as_deref(), replace.unwrap_or(false),
-        local_file.unwrap_or(false), asr.as_ref(), resume_preview.as_deref(), page_language.as_deref());
+        local_file.unwrap_or(false), asr.as_ref(), resume_preview.as_deref(), page_language.as_deref(),
+        youtube_cookies.as_ref());
     let result = match command {
         Ok(mut command) => {
             // The command owns the credential snapshot. Settings can now commit
@@ -946,6 +1068,7 @@ fn generation_command(
     asr: Option<&AsrOptions>,
     resume_preview: Option<&str>,
     page_language: Option<&str>,
+    youtube_cookies: Option<&YoutubeCookieOptions>,
 ) -> GenerationResult<Command> {
     if let Some(id) = resume_preview { preview_id(id).map_err(|e| GenerationFailure::context(e, "source", "source"))?; }
     if local_file {
@@ -954,7 +1077,7 @@ fn generation_command(
     } else { video_url(source).map_err(|e| GenerationFailure::context(e, "source", "source"))?; }
     let command = sidecar(locations).map_err(|e| GenerationFailure::context(e, "core_setup", "setup"))?;
     configure_generation_with_resume(command, locations, source, provider, executable,
-                         base_url, model, replace, local_file, asr, resume_preview, page_language)
+                         base_url, model, replace, local_file, asr, resume_preview, page_language, youtube_cookies)
         .map_err(|e| GenerationFailure::context(e, "configuration", "settings"))
 }
 
@@ -971,13 +1094,13 @@ fn configure_generation(
     local_file: bool,
     asr: Option<&AsrOptions>,
 ) -> AppResult<Command> {
-    configure_generation_with_resume(command, locations, source, provider, executable, base_url, model, replace, local_file, asr, None, None)
+    configure_generation_with_resume(command, locations, source, provider, executable, base_url, model, replace, local_file, asr, None, None, None)
 }
 
 fn configure_generation_with_resume(
     mut command: Command, locations: &Locations, source: &str, provider: Provider, executable: &str,
     base_url: Option<&str>, model: Option<&str>, replace: bool, local_file: bool, asr: Option<&AsrOptions>, resume_preview: Option<&str>,
-    page_language: Option<&str>,
+    page_language: Option<&str>, youtube_cookies: Option<&YoutubeCookieOptions>,
 ) -> AppResult<Command> {
     // Validate the source independently from configuring the selected provider.
     // File imports must carry the same API/Codex/Claude options as videos.
@@ -1000,6 +1123,11 @@ fn configure_generation_with_resume(
     if let Some(id) = resume_preview { preview_id(id)?; command.args(["--resume-preview", id]); }
     if replace { command.arg("--replace"); }
     if local_file { command.arg("--local-file"); }
+    if !local_file && resume_preview.is_none() {
+        for arg in youtube_cookie_args(&source, youtube_cookies)? {
+            command.arg(arg);
+        }
+    }
     if let Some(config) = asr.filter(|config| config.enabled && !local_file) {
         config.validate()?;
         command.args(["--asr", "--asr-base-url", config.base_url.trim(), "--asr-model", &config.model]);
@@ -1494,6 +1622,78 @@ async fn export_article(
     Ok(true)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SubtitleExportFormat {
+    Srt,
+    Vtt,
+}
+
+#[tauri::command]
+async fn export_subtitles(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    locations: State<'_, Locations>,
+    id: String,
+    format: SubtitleExportFormat,
+    preview: Option<bool>,
+    ui_language: Option<String>,
+) -> AppResult<bool> {
+    #[derive(Deserialize)]
+    struct ExportedSubtitles {
+        text: String,
+        title: String,
+    }
+
+    let is_preview = preview.unwrap_or(false);
+    if is_preview {
+        preview_id(&id)?;
+    } else {
+        article_file(&locations.library, &id)?;
+    }
+    let (kind, extension) = match format {
+        SubtitleExportFormat::Srt => ("SRT", "srt"),
+        SubtitleExportFormat::Vtt => ("WebVTT", "vtt"),
+    };
+    let mut args = vec!["export-subtitles", "--format", extension];
+    if is_preview {
+        args.push("--preview");
+    }
+    args.extend(["--", &id]);
+    let exported: ExportedSubtitles = query(&locations, &args).await?;
+    let title = export_file_stem(&exported.title);
+    let (send, receive) = oneshot::channel();
+    app.dialog()
+        .file()
+        .set_parent(&window)
+        .set_title(format!("{} {kind}", translated(ui_language.as_deref(), "导出字幕", "Export subtitles")))
+        .add_filter(kind, &[extension])
+        .set_file_name(format!("{title}.{extension}"))
+        .save_file(move |file| {
+            let _ = send.send(file);
+        });
+    let Some(target) = receive
+        .await
+        .map_err(|error| details("无法打开保存窗口", error))?
+    else {
+        return Ok(false);
+    };
+    let target = target
+        .into_path()
+        .map_err(|error| details("无法访问所选保存位置", error))?;
+    tauri::async_runtime::spawn_blocking(move || -> io::Result<()> {
+        let parent = target.parent().ok_or(io::ErrorKind::InvalidInput)?;
+        let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+        temp.write_all(exported.text.as_bytes())?;
+        temp.persist(target)?;
+        Ok(())
+    })
+    .await
+    .map_err(|error| details("导出字幕失败", error))?
+    .map_err(|error| details("导出字幕失败", error))?;
+    Ok(true)
+}
+
 #[tauri::command]
 async fn open_video(source: String) -> AppResult<()> {
     let url = video_url(&source)?;
@@ -1612,6 +1812,9 @@ fn main() {
             check_tool,
             preview_video,
             check_source,
+            download_subtitles,
+            export_subtitles,
+            pick_cookies_file,
             load_asr_token,
             save_asr_token,
             delete_asr_token,
@@ -2192,5 +2395,42 @@ mod tests {
         result.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
         worker.join().unwrap();
         assert!(!folder.exists());
+    }
+
+    #[test]
+    fn youtube_cookie_args_apply_only_to_explicit_youtube_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let cookies_txt = dir.path().join("cookies.txt");
+        fs::write(&cookies_txt, "# Netscape\n").unwrap();
+
+        let browser = super::YoutubeCookieOptions {
+            mode: "browser".into(), browser: "Chrome".into(), file_path: String::new(),
+        };
+        assert_eq!(
+            super::youtube_cookie_args("https://www.youtube.com/watch?v=1-Fo8McCD9w", Some(&browser)).unwrap(),
+            vec!["--cookies-from-browser", "chrome"],
+        );
+        // Non-YouTube links ignore YouTube cookie settings cleanly.
+        assert!(super::youtube_cookie_args("https://www.bilibili.com/video/BV1rxqmBhE91", Some(&browser)).unwrap().is_empty());
+
+        let file = super::YoutubeCookieOptions {
+            mode: "file".into(), browser: String::new(), file_path: cookies_txt.to_string_lossy().into_owned(),
+        };
+        assert_eq!(
+            super::youtube_cookie_args("https://youtu.be/1-Fo8McCD9w", Some(&file)).unwrap(),
+            vec!["--cookies".to_owned(), cookies_txt.to_string_lossy().into_owned()],
+        );
+
+        let symlink = dir.path().join("link.txt");
+        std::os::unix::fs::symlink(&cookies_txt, &symlink).unwrap();
+        let bad_link = super::YoutubeCookieOptions {
+            mode: "file".into(), browser: String::new(), file_path: symlink.to_string_lossy().into_owned(),
+        };
+        assert!(super::youtube_cookie_args("https://www.youtube.com/watch?v=1-Fo8McCD9w", Some(&bad_link)).is_err());
+
+        let bad_browser = super::YoutubeCookieOptions {
+            mode: "browser".into(), browser: "unknown".into(), file_path: String::new(),
+        };
+        assert!(super::youtube_cookie_args("https://www.youtube.com/watch?v=1-Fo8McCD9w", Some(&bad_browser)).is_err());
     }
 }

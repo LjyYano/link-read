@@ -122,3 +122,91 @@ def test_api_connection_rejects_non_chat_completions(monkeypatch):
     api = OpenAICompatibleProvider(base_url="https://api.example.com/v1", model="model-1", token="secret")
     with pytest.raises(ProviderError, match="兼容 Chat Completions"):
         api.test_connection()
+
+
+def test_dashscope_disables_thinking_by_default_and_falls_back_on_http_400(monkeypatch):
+    bodies = []
+
+    class Response:
+        def __init__(self, status_code, payload=None):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, **kwargs):
+        bodies.append(dict(kwargs["json"]))
+        if kwargs["json"].get("enable_thinking") is False and len(bodies) == 1:
+            return Response(400, {"error": {"message": "enable_thinking unsupported"}})
+        return Response(200, {"choices": [{"message": {"content": '{"ok": true}'}}]})
+
+    monkeypatch.setattr("linkread_desktop.ai.openai_compatible.requests.post", fake_post)
+    api = OpenAICompatibleProvider(
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model="qwq-thinking-only",
+        token="secret",
+    )
+    assert api.generate("hello", {"type": "object"}, timeout_seconds=30) == {"ok": True}
+    assert bodies[0]["enable_thinking"] is False
+    assert bodies[0]["response_format"] == {"type": "json_object"}
+    assert "enable_thinking" not in bodies[1]
+    assert "response_format" not in bodies[1]
+    # Subsequent call remembers fallback and does not trigger another 400.
+    assert api.generate("hello again", {"type": "object"}, timeout_seconds=30) == {"ok": True}
+    assert len(bodies) == 3 and "enable_thinking" not in bodies[2] and "response_format" not in bodies[2]
+
+
+def test_non_dashscope_endpoint_does_not_send_enable_thinking(monkeypatch):
+    seen = {}
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"ok": true}'}}]}
+
+    def fake_post(url, **kwargs):
+        seen.update(kwargs["json"])
+        return Response()
+
+    monkeypatch.setattr("linkread_desktop.ai.openai_compatible.requests.post", fake_post)
+    api = OpenAICompatibleProvider(base_url="https://api.example.com/v1", model="gpt-4o-mini", token="secret")
+    assert api.generate("hello", {"type": "object"}, timeout_seconds=30) == {"ok": True}
+    assert "enable_thinking" not in seen
+
+
+def test_pooled_connection_reset_retries_once_but_timeout_never_retries(monkeypatch):
+    import requests as req
+
+    api = OpenAICompatibleProvider(base_url="https://api.example.com/v1", model="gpt-4o-mini", token="secret")
+    attempts = 0
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"ok": true}'}}]}
+
+    def flaky_session_post(url, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise req.ConnectionError("remote closed idle socket")
+        return Response()
+
+    monkeypatch.setattr(api._session, "post", flaky_session_post)
+    assert api.generate("hello", {"type": "object"}, timeout_seconds=30) == {"ok": True}
+    assert attempts == 2
+
+    timeouts = 0
+
+    def slow_session_post(url, **kwargs):
+        nonlocal timeouts
+        timeouts += 1
+        raise req.Timeout("timed out")
+
+    monkeypatch.setattr(api._session, "post", slow_session_post)
+    with pytest.raises(ProviderError, match="超时"):
+        api.generate("hello", {"type": "object"}, timeout_seconds=30)
+    assert timeouts == 1

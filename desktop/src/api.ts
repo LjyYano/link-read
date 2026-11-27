@@ -2,6 +2,7 @@ import { tr, locale, localizedDetail, type PageLanguage, type Locale } from "./l
 import { Channel, invoke as invokeNative, type InvokeArgs } from "@tauri-apps/api/core"
 import type { AsrOptions } from "./asrSettings"
 import type { TaskJournal } from "./taskJournal"
+import type { YoutubeCookieOptions } from "./youtubeCookies"
 
 function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
   return invokeNative<T>(command, args).catch(error => {
@@ -24,6 +25,7 @@ export const installAppUpdate = (version: string) => invokeNative<void>("install
 
 export type Provider = "codex" | "claude" | "api"
 export type ExportFormat = "html" | "markdown"
+export type SubtitleExportFormat = "srt" | "vtt"
 export type MarkdownExportOptions = { content: "readable" | "full"; includeTimestamped: boolean }
 export type ArticleDetails = {
   title: string; category: string; originalTitle: string; originalCategory: string
@@ -110,11 +112,13 @@ export function generateArticle(
   asr?: AsrOptions,
   resumePreview?: string,
   pageLanguage: PageLanguage = "original",
+  youtubeCookies?: YoutubeCookieOptions,
 ) {
   const progress = new Channel<Progress>(onProgress)
   const credentialsRead = new Channel<null>(onCredentialsRead)
   return invoke<Article>("generate", { source, provider, executable, progress, requestId, localFile, replace, baseUrl, model, asr,
-    resumePreview, pageLanguage, uiLanguage: locale(), credentialsRead })
+    resumePreview, pageLanguage, uiLanguage: locale(), credentialsRead,
+    ...(youtubeCookies && youtubeCookies.mode !== "none" ? { youtubeCookies } : {}) })
 }
 
 export const cancelGeneration = (requestId: string) => invoke("cancel_generation", { requestId })
@@ -123,6 +127,9 @@ export const checkTool = (provider: Provider, executable: string) =>
   invoke<ToolStatus>("check_tool", { provider, executable })
 export const exportArticle = (id: string, format: ExportFormat, options?: MarkdownExportOptions) =>
   invoke<boolean>("export_article", { id, format, uiLanguage: locale(), ...(options ? { options } : {}) })
+export const exportSubtitles = (id: string, format: SubtitleExportFormat, preview = false) =>
+  invoke<boolean>("export_subtitles", { id, format, preview, uiLanguage: locale() })
+export const pickCookiesFile = () => invoke<string | null>("pick_cookies_file", { uiLanguage: locale() })
 export const getArticleDetails = (id: string) => invoke<ArticleDetails>("get_article_details", { id })
 export const updateArticleDetails = (id: string, title: string | null, category: string | null, sourceUrl?: string) =>
   invoke<Article>("update_article_details", { id, title, category, ...(sourceUrl === undefined ? {} : { sourceUrl }) })
@@ -168,7 +175,25 @@ export type SourceCheck = {
   checkedAt: number
   origin?: "check" | "generation"
 }
-export const checkSource = (source: string) => invoke<SourceCheck>("check_source", { source })
+export type DownloadedSubtitles = {
+  previewId: string
+  source: string
+  sourceKey: string
+  readingKey: string
+  language: string | null
+  segmentCount: number
+  metadata: ArticleMetadata
+}
+export const checkSource = (source: string, youtubeCookies?: YoutubeCookieOptions) =>
+  invoke<SourceCheck>("check_source", {
+    source,
+    ...(youtubeCookies && youtubeCookies.mode !== "none" ? { youtubeCookies } : {}),
+  })
+export const downloadSubtitles = (source: string, youtubeCookies?: YoutubeCookieOptions) =>
+  invoke<DownloadedSubtitles>("download_subtitles", {
+    source,
+    ...(youtubeCookies && youtubeCookies.mode !== "none" ? { youtubeCookies } : {}),
+  })
 export const loadAsrToken = () => invoke<string | null>("load_asr_token")
 export const saveAsrToken = (token: string) => invoke<void>("save_asr_token", { token })
 export const deleteAsrToken = () => invoke<void>("delete_asr_token")

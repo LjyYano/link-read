@@ -41,7 +41,7 @@ def _iter_cues(content: str):
             continue
         left, right = lines[idx].split("-->", 1)
         end_token = right.strip().split()[0] if right.strip() else ""
-        yield left, end_token, " ".join(lines[idx + 1 :])
+        yield left, end_token, lines[idx + 1 :]
 
 
 def has_rolling_caption_markers(content: str) -> bool:
@@ -54,9 +54,18 @@ def has_rolling_caption_markers(content: str) -> bool:
       ``<MM:SS.mmm>``) or a WebVTT ``<c>`` / ``<c.class>`` class tag.
     """
     return any(
-        _VTT_TIMESTAMPS.search(raw_text) or _VTT_CLASS_TAG.search(raw_text)
-        for _, _, raw_text in _iter_cues(content)
+        _VTT_TIMESTAMPS.search(line) or _VTT_CLASS_TAG.search(line)
+        for _, _, raw_lines in _iter_cues(content)
+        for line in raw_lines
     )
+
+
+def _line_overlap(previous_lines: list[str], cue_lines: list[str]) -> int:
+    limit = min(len(previous_lines), len(cue_lines))
+    for count in range(limit, 0, -1):
+        if previous_lines[-count:] == cue_lines[:count]:
+            return count
+    return 0
 
 
 def parse_srt_vtt(content: str, *, rolling: bool = False) -> list[TranscriptSegment]:
@@ -65,34 +74,70 @@ def parse_srt_vtt(content: str, *, rolling: bool = False) -> list[TranscriptSegm
     By default (``rolling=False``), every non-empty cue and its original
     timestamps are preserved intact, including overlapping dialogue. Set
     ``rolling=True`` only for rolling auto-caption streams (such as YouTube
-    automatic captions), where overlapping snapshots are suppressed or trimmed
-    to newly introduced text while non-overlapping repetitions remain intact.
+    automatic captions), where overlapping snapshots, contiguous 10ms scroll
+    frames, and two-line rolling windows are reduced to newly introduced text
+    while non-overlapping spoken repetitions remain intact.
     """
     cues: list[TranscriptSegment] = []
     previous = ""
+    previous_lines: list[str] = []
     previous_start = -1
     previous_end = -1
-    for left, end_token, raw_text in _iter_cues(content):
+    previous_short = False
+    for left, end_token, raw_lines in _iter_cues(content):
         start_ms = _milliseconds(left)
         end_ms = _milliseconds(end_token)
-        text = _text(raw_text)
+        text = _text(" ".join(raw_lines))
         if not text:
             continue
         if rolling:
             original_text = text
+            cue_lines = [cleaned for line in raw_lines if (cleaned := _text(line))]
+            is_short = 0 < end_ms - start_ms <= 50
             overlaps_previous = previous_start <= start_ms < previous_end
-            if overlaps_previous and (text == previous or previous.endswith(text)):
+            contiguous = previous_end >= 0 and previous_end <= start_ms <= previous_end + 10
+            # YouTube rolling WebVTT emits ~10ms transition frames repeating the
+            # bottom line right as it scrolls to the top line of the next cue.
+            if contiguous and is_short and previous and (text == previous or previous.endswith(text)):
+                previous = original_text
+                previous_lines = cue_lines
+                previous_end = max(previous_end, end_ms)
+                previous_short = True
+                continue
+            if (overlaps_previous or (contiguous and previous_short)) and (text == previous or previous.endswith(text)):
                 # A repeated snapshot can extend the display interval even when
                 # it contributes no new words. Keep it for the next overlap check.
                 previous_end = max(previous_end, end_ms)
+                if is_short:
+                    previous = original_text
+                    previous_lines = cue_lines
+                    previous_short = True
                 continue
             # YouTube auto-caption cues often repeat all the previous words.
-            if overlaps_previous and previous and text.startswith(previous) and len(text) > len(previous):
+            if ((overlaps_previous or (contiguous and previous_short))
+                    and previous and text.startswith(previous) and len(text) > len(previous)):
                 text = text[len(previous) :].strip()
                 if not text:
+                    previous = original_text
+                    previous_lines = cue_lines
+                    previous_start, previous_end, previous_short = start_ms, end_ms, is_short
+                    continue
+            elif (overlaps_previous or contiguous) and len(cue_lines) >= 2 and len(previous_lines) >= 2:
+                # Two-line rolling window without an intermediate 10ms frame.
+                overlap = _line_overlap(previous_lines, cue_lines)
+                if overlap:
+                    remaining = cue_lines[overlap:]
+                    previous = original_text
+                    previous_lines = cue_lines
+                    previous_start, previous_end, previous_short = start_ms, end_ms, is_short
+                    if not remaining:
+                        continue
+                    text = " ".join(remaining)
+                    cues.append(TranscriptSegment(start_ms=start_ms, end_ms=end_ms, text=text))
                     continue
             previous = original_text
-            previous_start, previous_end = start_ms, end_ms
+            previous_lines = cue_lines
+            previous_start, previous_end, previous_short = start_ms, end_ms, is_short
         cues.append(TranscriptSegment(start_ms=start_ms, end_ms=end_ms, text=text))
     if not cues:
         raise SubtitleUnavailableError("字幕文件没有可识别的时间戳和内容")

@@ -1,7 +1,7 @@
 import { tr } from "./language.ts"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowLeft, ArrowUpRight, CircleAlert, Ellipsis, ExternalLink, FileText, FolderOpen, LoaderCircle, Pencil, Printer, RotateCw, Share, SunMoon, Sparkles, X } from "lucide-react"
-import { exportArticle, openArticle, openExternal, openVideo, prepareArticle, preparePreview, refreshShownotes, revealArticle, loadReadingPosition, saveReadingPosition, type Article, type ExportFormat } from "./api"
+import { ArrowLeft, ArrowUpRight, CircleAlert, Download, Ellipsis, ExternalLink, FileText, FolderOpen, LoaderCircle, Pencil, Printer, RotateCw, Share, SunMoon, Sparkles, X } from "lucide-react"
+import { exportArticle, exportSubtitles, openArticle, openExternal, openVideo, prepareArticle, preparePreview, refreshShownotes, revealArticle, loadReadingPosition, saveReadingPosition, type Article, type ExportFormat, type SubtitleExportFormat } from "./api"
 import { menuNavigation } from "./menu"
 import { ReadingActions, type ChangeArticleState } from "./ReadingActions"
 import { ReadingPositionBridge } from "./readingPositionBridge"
@@ -16,11 +16,13 @@ type PreparedReader = { status: "loading" } | { status: "ready"; revision: strin
 type ShownotesRefresh = { status: "idle" | "loading" | "empty" } | { status: "error"; message: string }
 
 export type PreviewTask = { id: string; status: Job["status"]; message?: string; activity?: TaskActivity; article?: Article; onOpenComplete: () => void }
+export type StandaloneSubtitlePreview = { onGenerate: () => void }
 
-export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onStateChange, preview,
+export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onStateChange, preview, standalonePreview,
   onNavigationStart, onEdit, onExportMarkdown, detailsRevision = 0, onThemeChange, onViewRegeneration, onOpenUpdated }: {
   article: Article; onBack: () => void; onRegenerate: (article: Article) => Promise<void>; onStateChange: ChangeArticleState
   preview?: PreviewTask
+  standalonePreview?: StandaloneSubtitlePreview
   backLabel?: string
   onThemeChange?: (theme: "light" | "dark") => void
   onViewRegeneration?: () => void
@@ -223,6 +225,16 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
     }
   }
 
+  async function saveSubtitles(format: SubtitleExportFormat) {
+    setExporting(true)
+    try {
+      const targetId = article.previewId ?? article.id
+      await open(() => exportSubtitles(targetId, format, Boolean(article.previewId)))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <section className="desktop-reader" aria-label={tr("Article reader")}>
       <header className="desktop-reader-toolbar">
@@ -249,6 +261,8 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
               <div className="desktop-reader-menu" role="group" aria-label={tr("Export format")} data-action-menu>
                 <button type="button" onClick={() => void save("html")}><FileText size={15} aria-hidden="true" />HTML</button>
                 <button type="button" onClick={() => void save("markdown")}><FileText size={15} aria-hidden="true" />Markdown</button>
+                <button type="button" onClick={() => void saveSubtitles("srt")}><Download size={15} aria-hidden="true" />{tr("SRT subtitles")}</button>
+                <button type="button" onClick={() => void saveSubtitles("vtt")}><Download size={15} aria-hidden="true" />{tr("WebVTT subtitles")}</button>
                 <button type="button" disabled={prepared.status !== "ready"} onClick={() => {
                   frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")
                   setMenu(undefined)
@@ -304,15 +318,27 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
           onViewRegeneration()
         }}>{tr("View task")}</button>
       </div>}
-      {isPreview && <div className="reader-preview-notice" role="status" data-status={preview?.status ?? "interrupted"}>
+      {isPreview && <div className="reader-preview-notice" role="status" data-status={preview?.status ?? (standalonePreview ? "done" : "interrupted")}>
         {preview?.status === "running" && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
         <span>{preview?.status === "done" ? tr("Finished article ready")
           : preview?.status === "running" ? tr("Original transcript · AI in progress")
           : preview?.status === "queued" ? tr("Original transcript · AI queued")
+          : standalonePreview ? tr("Original transcript · Downloaded subtitles")
           : tr("Original transcript · AI stopped")}</span>
         {preview?.status === "done" && preview.article && <button className="text-button" type="button" onClick={() => void leave(preview.onOpenComplete)}>
           {tr("View finished article")}<ArrowUpRight size={13} aria-hidden="true" />
         </button>}
+        {standalonePreview && !preview && <>
+          <button className="text-button" type="button" onClick={() => void leave(standalonePreview.onGenerate)}>
+            <Sparkles size={13} aria-hidden="true" />{tr("Generate article")}
+          </button>
+          <button className="text-button" type="button" disabled={exporting} onClick={() => void saveSubtitles("srt")}>
+            <Download size={13} aria-hidden="true" />{tr("Export SRT")}
+          </button>
+          <button className="text-button" type="button" disabled={exporting} onClick={() => void saveSubtitles("vtt")}>
+            <Download size={13} aria-hidden="true" />{tr("Export VTT")}
+          </button>
+        </>}
         {article.sourceUrl && <button className="text-button" type="button" onClick={() => void open(() => openVideo(article.sourceUrl!))}>{tr("Original Source")}</button>}
       </div>}
       {positionError && <div className="reader-position-error" role="status"><span>{positionError}</span>

@@ -26,12 +26,13 @@ from .messages import english_mode, localize_event
 from .extractors.bilibili import BILIBILI_SHORT_HOSTS
 from .extractors.local import extract_local
 from .models import SourceInfo, TranscriptDocument
-from .pipeline import video_source_key
+from .pipeline import extract as extract_source, video_source_key
 from .progress import ProgressCallback, ProgressEvent, report
 from .renderers.extras import load_extras
 from .renderers.formatting import display_title, source_link, source_info_link
 from .renderers.catalog import load_catalog, load_user_metadata
 from .renderers.markdown import render_markdown
+from .renderers.subtitles import SubtitleFormat, render_subtitles
 from .renderers.html import render_html
 from .renderers.reading_state import reading_state_key
 from .renderers.shownotes import description_html
@@ -39,7 +40,7 @@ from .renderers.site import article_metadata, load_transcript, load_document
 from .storage import write_text
 from .source_notes import MAX_SOURCE_NOTES_BYTES, with_source_notes
 from .workspace import find_workspace, _source_key
-from .transcript_previews import save_preview, prepare_preview, resume_preview, preview_folder, snapshot_id
+from .transcript_previews import load_preview, save_preview, prepare_preview, resume_preview, preview_folder, snapshot_id
 from .translation import PageLanguage, load_edition
 from .reader_cache import (CACHE_VERSION, LIBRARY_INDEX, archive_signature, implementation_signature,
                            cached_reader, remember_reader, read_cache, save_cache)
@@ -509,13 +510,65 @@ def _publish_replacement_locked(generated: Path, library: Path) -> Path:
     return destination / "article.html"
 
 
+def _youtube_auth_options(
+    source: str, *, local_file: bool, cookies_from_browser: str | None = None, cookies_file: Path | None = None,
+) -> dict:
+    if local_file or not (video_source_key(source) or "").startswith("youtube-"):
+        return {}
+    options: dict = {}
+    if cookies_from_browser:
+        options["cookies_from_browser"] = cookies_from_browser
+    if cookies_file is not None:
+        options["cookies_file"] = cookies_file
+    return options
+
+
+def _download_subtitles(
+    source: str, library: Path, *, cookies_from_browser: str | None = None, cookies_file: Path | None = None,
+) -> dict:
+    url = _video_url(source.strip())
+    auth = _youtube_auth_options(url, local_file=False, cookies_from_browser=cookies_from_browser, cookies_file=cookies_file)
+    with error_context("extract"):
+        # Explicitly disable ASR: downloading subtitles must never download audio or incur transcription charges.
+        raw = extract_source(url, asr=None, **auth)
+    preview_id = save_preview(library, raw, source=url, local_file=False)
+    return {
+        "previewId": preview_id,
+        "source": url,
+        "sourceKey": _source_key(raw),
+        "readingKey": reading_state_key(raw),
+        "language": raw.language,
+        "segmentCount": len(raw.segments),
+        "metadata": _source_metadata(raw),
+    }
+
+
+def _export_subtitles(library: Path, target_id: str, *, fmt: SubtitleFormat, preview: bool) -> dict:
+    if preview:
+        _, raw = load_preview(library, target_id)
+    else:
+        _article_path(library, target_id)
+        with archive_mutation(library):
+            article = _article_path(library, target_id)
+            _, _, raw = _article_source(article)
+    return {
+        "text": render_subtitles(raw, fmt),
+        "title": display_title(raw),
+        "format": fmt,
+    }
+
+
 def _generate_with_replacement(
     source: str, library: Path, progress: ProgressCallback, *,
     local_file: bool, replace: bool, provider, asr: AsrConfig | None = None, page_language: PageLanguage = "original",
+    cookies_from_browser: str | None = None, cookies_file: Path | None = None,
 ) -> Path:
     # Files and videos share the same enrichment, polish and publication pipeline.
     # ASR is irrelevant to subtitle files and must never be invoked for them.
-    options = {"asr": asr, "asr_cache_dir": library / ".asr"} if asr and not local_file else {}
+    options: dict = {"asr": asr, "asr_cache_dir": library / ".asr"} if asr and not local_file else {}
+    options.update(_youtube_auth_options(
+        source, local_file=local_file, cookies_from_browser=cookies_from_browser, cookies_file=cookies_file,
+    ))
     duplicate = _duplicate(source, library, local_file=local_file)
     if duplicate["article"] is not None and not replace:
         raise LinkReadError("这篇文章已存在，请确认重新生成并替换")
@@ -636,6 +689,8 @@ def main() -> int:
     generate.add_argument("--asr-max-minutes", type=int, default=120)
     generate.add_argument("--asr-chunk-minutes", type=int, default=5)
     generate.add_argument("--ffmpeg-path", default="")
+    generate.add_argument("--cookies-from-browser")
+    generate.add_argument("--cookies", type=Path)
     generate.add_argument("source")
     check_api = commands.add_parser("test-api")
     check_api.add_argument("--base-url", required=True)
@@ -646,7 +701,18 @@ def main() -> int:
     duplicate.add_argument("source")
     commands.add_parser("validate-subtitle").add_argument("source")
     commands.add_parser("preview").add_argument("source")
-    commands.add_parser("check-source").add_argument("source")
+    source_check = commands.add_parser("check-source")
+    source_check.add_argument("--cookies-from-browser")
+    source_check.add_argument("--cookies", type=Path)
+    source_check.add_argument("source")
+    download_sub = commands.add_parser("download-subtitles")
+    download_sub.add_argument("--cookies-from-browser")
+    download_sub.add_argument("--cookies", type=Path)
+    download_sub.add_argument("source")
+    export_sub = commands.add_parser("export-subtitles")
+    export_sub.add_argument("--format", choices=("srt", "vtt"), default="srt")
+    export_sub.add_argument("--preview", action="store_true")
+    export_sub.add_argument("target_id")
     test_asr = commands.add_parser("test-asr")
     test_asr.add_argument("--base-url", required=True)
     test_asr.add_argument("--model", default="paraformer-v2")
@@ -702,6 +768,7 @@ def main() -> int:
             article = _generate_with_replacement(
                 source, library, send_progress, local_file=local_input,
                 replace=args.replace, provider=provider, page_language=args.page_language,
+                cookies_from_browser=args.cookies_from_browser, cookies_file=args.cookies,
                 asr=(AsrConfig(base_url=args.asr_base_url, model=args.asr_model,
                                max_minutes=args.asr_max_minutes, chunk_minutes=args.asr_chunk_minutes,
                                ffmpeg_path=args.ffmpeg_path) if args.asr else None))
@@ -710,7 +777,17 @@ def main() -> int:
             _emit("preview", **video_metadata(args.source).public())
         elif args.command == "check-source":
             from .source_readiness import check_source
-            _emit("source_check", **check_source(args.source))
+            _emit("source_check", **check_source(
+                args.source, cookies_from_browser=args.cookies_from_browser, cookies_file=args.cookies,
+            ))
+        elif args.command == "download-subtitles":
+            _emit("subtitles_downloaded", **_download_subtitles(
+                args.source, library, cookies_from_browser=args.cookies_from_browser, cookies_file=args.cookies,
+            ))
+        elif args.command == "export-subtitles":
+            _emit("subtitles", **_export_subtitles(
+                library, args.target_id, fmt=args.format, preview=args.preview,
+            ))
         elif args.command == "test-asr":
             client = BailianAsr(AsrConfig(base_url=args.base_url, model=args.model))
             segments = client.test_connection()

@@ -13,6 +13,8 @@ import { AsrSettingsPanel } from "./AsrSettingsPanel"
 import { ConnectionRevision } from "./connectionState"
 import { SettingsHelp } from "./SettingsHelp"
 import { SettingsSecretField } from "./SettingsSecretField"
+import { YoutubeCookiesPanel } from "./YoutubeCookiesPanel"
+import { defaultYoutubeCookies } from "./youtubeCookies"
 import type { GenerationSettingsGate } from "./generationSettings"
 import {
   saveSettingsDraft, settingsDraftEqual, SettingsSaveError, SettingsValidationError,
@@ -20,7 +22,7 @@ import {
 } from "./settingsState"
 import "./settings.css"
 
-export type SettingsTarget = "ai" | "asr"
+export type SettingsTarget = "ai" | "asr" | "youtube"
 
 export function Settings({ preferences, onSave, onBack, onTokenChanged, settingsGate, settingsRecovery,
   leaveGuard, target, language, onLanguageChange, languageError }: {
@@ -60,13 +62,14 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   latest.current = { dirty, saving, asrTesting, onBack }
   const closing = useRef(false)
   const { provider, paths, api, asr } = draft.preferences
+  const youtubeCookies = draft.preferences.youtubeCookies ?? defaultYoutubeCookies
   const disabled = loading || saving || Boolean(loadError)
   const pendingTarget = useRef(target)
 
   useLayoutEffect(() => {
     const destination = pendingTarget.current
     if (disabled || !destination) return
-    let field = "asr-enabled"
+    let field = destination === "youtube" ? "youtube-cookie-mode" : "asr-enabled"
     if (destination === "ai") {
       if (provider === "api") {
         field = "api-token"
@@ -381,6 +384,9 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
         onToken={asrToken => update(current => ({ ...current, asrToken }))}
         onClearToken={testing || asrTesting ? undefined : () => void clearCredential("asrToken")}
         disabled={disabled} onTestingChange={setAsrTesting} />
+      <YoutubeCookiesPanel value={youtubeCookies}
+        onChange={next => update(current => ({ ...current, preferences: { ...current.preferences, youtubeCookies: next } }))}
+        disabled={disabled} />
       {error && <p id="settings-error" className="settings-error" role="alert" tabIndex={-1}>{error}</p>}
       {settingsRecovery && !saving && <p className="settings-error" role="alert">
         {tr("上次未能完成设置保存。请核对服务地址和密钥，然后重新保存设置。")}

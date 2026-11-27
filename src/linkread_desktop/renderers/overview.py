@@ -7,12 +7,20 @@ from .extras import MAX_READING_SECTIONS, ReadingOverview, ReadingSection
 
 
 _ORDINALS = "一二三四五六"
-_CHAPTER_PREFIX = re.compile(r"^(?:[一二三四五六七八九十百零两\d]+[、.．]\s*|第[一二三四五六七八九十百零两\d]+[章节部分]+\s*[：:、.．]?\s*)")
+_CHAPTER_PREFIX = re.compile(
+    r"^(?:[一二三四五六七八九十百零两\d]+[、.．]\s*"
+    r"|第[一二三四五六七八九十百零两\d]+[章节部分]+\s*[：:、.．]?\s*"
+    r"|Chapter\s+\d+\s*[:.\-–—]\s*)",
+    re.IGNORECASE,
+)
+_HAN = re.compile(r"[\u3400-\u9fff]")
 
 
-def section_title(position: int, title: str) -> str:
+def section_title(position: int, title: str, *, language: str | None = None) -> str:
     title = _CHAPTER_PREFIX.sub("", title).strip() or title
-    return f"{_ORDINALS[position - 1]}、{title}"
+    if language == "zh-CN" or _HAN.search(title):
+        return f"{_ORDINALS[position - 1]}、{title}"
+    return f"{position}. {title}"
 
 
 def _excerpt(text: str, limit: int) -> str:

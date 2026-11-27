@@ -52,7 +52,7 @@ _ERRORS = {
     "subtitles_unavailable": "No usable subtitles are available for this source. Import subtitles or enable speech recognition in Settings.",
     "subtitle_login_required": "Bilibili requires sign-in to view subtitles. Open the original video or import a subtitle file.",
     "subtitle_response_invalid": "Bilibili returned an incomplete subtitle list. Check the source again.",
-    "youtube_verification_required": "YouTube requires sign-in verification before this video can be accessed. Open the original video to verify access or import a subtitle file.",
+    "youtube_verification_required": "YouTube requires sign-in verification before this video can be accessed. Configure YouTube cookies in Settings, open the original video, or import a subtitle file.",
     "youtube_subtitles_unconfirmed": "YouTube's subtitle list was incomplete or included unreadable tracks. Check the source again.",
     "youtube_subtitle_invalid": "YouTube listed a subtitle track, but the downloaded captions were empty or invalid. Check the source again.",
     "invalid_pasted_subtitle": "Could not read the pasted subtitles. Check their format and timestamps.",
@@ -100,7 +100,14 @@ def localize_event(kind: str, fields: dict) -> dict:
     if kind == "progress":
         request = fields.get("request") or {}
         stage = fields.get("stage", "")
-        message = _REQUESTS.get(request.get("phase")) if request else _PROGRESS.get(stage)
+        if request:
+            phase = request.get("phase")
+            if phase == "failed" and original == "模型结果未通过原文与结构校验":
+                message = "Response did not match original wording or schema"
+            else:
+                message = _REQUESTS.get(phase)
+        else:
+            message = _PROGRESS.get(stage)
         if stage == "performance":
             values = re.findall(r"\d+(?:\.\d+)?", original)
             if len(values) == 4:

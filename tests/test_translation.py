@@ -105,3 +105,100 @@ def test_english_diagnostics_keep_counts_metadata_and_recovery_fields(monkeypatc
     failure = {"code": "model_timeout", "message": "请求超时", "retryable": True, "action": "retry"}
     assert localize_event("error", failure) == {**failure,
         "message": "The model request timed out. Retry to resume from verified batches."}
+    validation_fail = {
+        "stage": "polish_request",
+        "message": "模型结果未通过原文与结构校验",
+        "request": {"phase": "failed", "stage": "polish"},
+    }
+    assert localize_event("progress", validation_fail)["message"] == "Response did not match original wording or schema"
+    network_fail = {
+        "stage": "polish_request",
+        "message": "本次模型请求未完成",
+        "request": {"phase": "failed", "stage": "polish"},
+    }
+    assert localize_event("progress", network_fail)["message"] == "Model request failed"
+
+
+def test_bilibili_simplified_ai_zh_skips_redundant_zh_cn_translation(tmp_path):
+    from linkread_desktop.models import SourceInfo, TranscriptDocument, TranscriptSegment
+    from linkread_desktop.translation import needs_translation
+
+    simplified = TranscriptDocument(
+        source=SourceInfo(platform="bilibili", title="中文技术视频"),
+        transcript_source="subtitle", language="ai-zh",
+        segments=[TranscriptSegment(start_ms=0, end_ms=1000, text="今天我们来讨论开发效率与系统设计问题。")],
+    )
+    assert needs_translation(simplified, "zh-CN") is False
+    assert needs_translation(simplified, "en") is True
+
+    traditional = TranscriptDocument(
+        source=SourceInfo(platform="youtube", title="繁體影片"),
+        transcript_source="subtitle", language="zh",
+        segments=[TranscriptSegment(start_ms=0, end_ms=1000, text="這是一個關於開發與系統設計的討論問題，我們還會繼續學習。")],
+    )
+    assert needs_translation(traditional, "zh-CN") is True
+
+
+def test_translated_generation_skips_original_language_proofreading(tmp_path, monkeypatch):
+    raw = make_transcript(10, "Original English subtitle sentence").model_copy(update={"language": "en-US"})
+    monkeypatch.setattr("linkread_desktop.generation.extract_document", lambda *args, **kwargs: raw)
+    provider = TranslationProvider()
+    finished = generate_article(raw.source.url, provider, library=tmp_path / "library", page_language="zh-CN")
+    assert finished.is_file()
+    assert ["blocks"] not in provider.calls
+    assert provider.sent == [cue.text for cue in raw.segments]
+
+
+def test_english_original_uses_english_prompts_and_arabic_section_numbers(tmp_path, monkeypatch):
+    from linkread_desktop.ai.pipeline import CHUNK_SCHEMA
+    from linkread_desktop.ai.polish import POLISH_SCHEMA
+    from linkread_desktop.renderers.overview import section_title
+
+    raw = make_transcript(8, "Shipping reliable code with automated verification loops").model_copy(
+        update={"language": "en"},
+    )
+    monkeypatch.setattr("linkread_desktop.generation.extract_document", lambda *args, **kwargs: raw)
+
+    class EnglishPromptCheckProvider:
+        name = "api"
+
+        def __init__(self):
+            self.seen = []
+
+        def generate(self, prompt, schema, *, timeout_seconds):
+            self.seen.append((schema["required"], prompt))
+            if schema == POLISH_SCHEMA:
+                assert "Subtitle blocks JSON" in prompt
+                assert "Never write Chinese" in prompt
+                rows = json.loads(prompt.split("Subtitle blocks JSON (index is local to this batch):\n", 1)[1])
+                return {"blocks": [{"index": r["index"], "text": None, "subheading": None} for r in rows]}
+            if schema == CHUNK_SCHEMA:
+                assert "Subtitle JSON" in prompt
+                assert "strictly in English" in prompt
+                return {
+                    "summary": "A concise English chunk summary.",
+                    "takeaways": ["Build deterministic verification loops."],
+                    "chapters": [{"start_index": 0, "title": "Building High Trust", "summary": "Introduces the shift."}],
+                    "highlights": [{"start_index": 0, "end_index": 1}],
+                    "keywords": ["AI Agents", "Verification"],
+                }
+            assert "Source JSON:\n" in prompt
+            assert "Do NOT reply in Chinese" in prompt
+            assert "技术与 AI" not in prompt
+            return {
+                "reading": {
+                    "lead": "How to build high-trust agent environments for high-velocity engineering.",
+                    "sections": [{"index": 0, "title": "Building High Trust", "label": "High Trust", "summary": "Introduces the core thesis."}],
+                },
+                "mindmap": {"root": "High-Trust Agents", "nodes": [{"parent": 0, "text": "Deterministic Checks", "index": 0}]},
+                "quotes": [],
+                "catalog": {"category": "Technology & AI", "tags": ["AI Agents", "Code Quality"]},
+            }
+
+    provider = EnglishPromptCheckProvider()
+    article = generate_article(raw.source.url, provider, library=tmp_path / "library", page_language="original")
+    html = article.read_text(encoding="utf-8")
+    assert "<h2>1. Building High Trust</h2>" in html
+    assert "一、" not in html
+    assert section_title(1, "Chapter 1: Building High Trust", language="en") == "1. Building High Trust"
+    assert section_title(1, "玩法与创新", language="zh-CN") == "一、玩法与创新"

@@ -84,7 +84,10 @@ class RunProvider:
         output_chars = 0
         try:
             with error_context(stage):
-                payload = self.provider.generate(prompt, schema, timeout_seconds=timeout_seconds)
+                if stage in {"polish", "translation"} and getattr(self.provider, "supports_reasoning_effort", False):
+                    payload = self.provider.generate(prompt, schema, timeout_seconds=timeout_seconds, reasoning_effort="low")
+                else:
+                    payload = self.provider.generate(prompt, schema, timeout_seconds=timeout_seconds)
             # Count only characters; never persist prompts, model text or tokens.
             try:
                 output_chars = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))

@@ -135,3 +135,34 @@ def test_generation_forwards_explicit_auth(monkeypatch, tmp_path):
                          types.SimpleNamespace(name="codex"), library=tmp_path,
                          cookies_from_browser="edge")
     assert seen == {"cookies_from_browser": "edge"}
+
+
+def test_desktop_download_and_export_subtitles_with_explicit_cookies(tmp_path, monkeypatch, capsys):
+    import json
+    from linkread_desktop import desktop
+
+    cookie_file = tmp_path / "cookies.txt"
+    cookie_file.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", [
+        "linkread", "--library", str(tmp_path / "library"),
+        "download-subtitles", "--cookies", str(cookie_file),
+        "--", "https://www.youtube.com/watch?v=1-Fo8McCD9w",
+    ])
+    assert desktop.main() == 0
+    downloaded = json.loads(capsys.readouterr().out)
+    assert downloaded["type"] == "subtitles_downloaded"
+    assert downloaded["segmentCount"] == 1
+    assert downloaded["metadata"]["title"] == "Video"
+    assert FakeYoutubeDL.options[-1]["cookiefile"] == str(cookie_file.resolve())
+
+    # Export SRT directly from the downloaded preview without touching YouTube again.
+    FakeYoutubeDL.fail_auth = True
+    monkeypatch.setattr(sys, "argv", [
+        "linkread", "--library", str(tmp_path / "library"),
+        "export-subtitles", "--format", "srt", "--preview",
+        "--", downloaded["previewId"],
+    ])
+    assert desktop.main() == 0
+    exported = json.loads(capsys.readouterr().out)
+    assert exported["type"] == "subtitles"
+    assert "00:00:01,000 --> 00:00:02,000\nHello world" in exported["text"]

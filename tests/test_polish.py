@@ -121,6 +121,22 @@ def test_ai_rewriting_or_omission_falls_back_without_losing_lexical_content():
     assert NoteDocument.model_validate_json(note.model_dump_json()) == note
 
 
+def test_polish_retry_prompt_adds_strict_case_and_symbol_reminder():
+    class FailFirst(AccurateProvider):
+        def generate(self, prompt, schema, *, timeout_seconds):
+            obj = super().generate(prompt, schema, timeout_seconds=timeout_seconds)
+            if len(self.calls) == 1:
+                obj['blocks'][0]['text'] = '改了字的内容。'
+            return obj
+
+    provider = FailFirst()
+    note = polish_reading(fixture_note(), provider)
+    assert len(provider.calls) == 2
+    assert '【严格重试】' not in provider.calls[0]
+    assert '【严格重试】' in provider.calls[1]
+    assert all(p.edited for p in note.analysis.reading_paragraphs)
+
+
 def test_invalid_model_block_indexes_produce_a_clear_error():
     class WrongIndex(AccurateProvider):
         def generate(self, prompt, schema, *, timeout_seconds):

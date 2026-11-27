@@ -4,23 +4,30 @@ Use the same exact-episode caption rules as generation, with ASR disabled. A
 successful check verifies captions, not future AI availability. No result here
 grants permission to transcribe, and no temporary media/archive is written.
 """
+from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
 import time
 
 from .errors import LinkReadError, SubtitleLoginRequiredError, SubtitleUnavailableError, error_details
 from .links import canonical_link
-from .pipeline import extract
+from .pipeline import extract, video_source_key
 
 CHECK_SECONDS = 30.0
 _BLOCKED_CODES = frozenset({"protected_media", "unsupported_audio_stream"})
 
 
-def _check(source: str) -> dict:
+def _check(source: str, *, cookies_from_browser: str | None = None, cookies_file: Path | None = None) -> dict:
+    auth = {}
+    if (video_source_key(source) or "").startswith("youtube-"):
+        if cookies_from_browser is not None:
+            auth["cookies_from_browser"] = cookies_from_browser
+        if cookies_file is not None:
+            auth["cookies_file"] = cookies_file
     try:
         # Explicit None is intentional: this path must never submit paid ASR,
         # read credentials, or switch to downloading audio when captions lack.
-        extract(source, asr=None)
+        extract(source, asr=None, **auth)
     except SubtitleUnavailableError:
         return {"status": "needs_asr", "code": "subtitles_unavailable",
                 "message": "未找到可读取的公开字幕；可启用语音识别。生成时仍会检查音频是否可用，本次检查未下载音频。"}
@@ -35,7 +42,10 @@ def _check(source: str) -> dict:
             "message": "已读取并校验该内容的公开字幕，可以开始生成。"}
 
 
-def check_source(source: str, *, timeout: float = CHECK_SECONDS) -> dict:
+def check_source(
+    source: str, *, timeout: float = CHECK_SECONDS,
+    cookies_from_browser: str | None = None, cookies_file: Path | None = None,
+) -> dict:
     """Bound DNS, extractors and trickling responses with one wall-clock budget.
 
     The desktop runs this in a dedicated sidecar with its own process-group
@@ -47,7 +57,7 @@ def check_source(source: str, *, timeout: float = CHECK_SECONDS) -> dict:
 
     def run():
         try:
-            results.put(_check(source))
+            results.put(_check(source, cookies_from_browser=cookies_from_browser, cookies_file=cookies_file))
         except Exception as exc:
             results.put(exc)
 

@@ -26,14 +26,14 @@ class ReadingSection(BaseModel):
 
     start_segment_index: int = Field(ge=0)
     title: str = Field(min_length=1, max_length=160)
-    label: str | None = Field(default=None, min_length=1, max_length=30)
-    summary: str = Field(min_length=1, max_length=160)
+    label: str | None = Field(default=None, min_length=1, max_length=60)
+    summary: str = Field(min_length=1, max_length=400)
 
 
 class ReadingOverview(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    lead: str = Field(min_length=1, max_length=180)
+    lead: str = Field(min_length=1, max_length=500)
     sections: list[ReadingSection] = Field(default_factory=list, max_length=MAX_READING_SECTIONS)
     source_note: str | None = Field(default=None, max_length=200)
 

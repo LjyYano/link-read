@@ -74,7 +74,7 @@ def test_long_asr_cue_is_bounded_and_reassembled_after_out_of_order_results(max_
     result = polish_reading(original, provider, max_chars=max_chars, workers=4, progress=events.append)
     assert len(provider.prompts) > 3
     for prompt in provider.prompts:
-        assert len(prompt.split(POLISH_DATA)[1]) <= min(1800, max_chars)
+        assert len(prompt.split(POLISH_DATA)[1]) <= min(4200, max_chars)
     assert [(p.start_segment_index, p.end_segment_index) for p in result.analysis.reading_paragraphs] == [
         (0, 0), (1, 1), (2, 2),
     ]
@@ -309,3 +309,26 @@ def test_analysis_preserves_oversized_cue_instead_of_inventing_timestamps():
     assert result.transcript == original
     assert result.analysis.chapters[0].start_ms == original.segments[0].start_ms
     assert result.analysis.highlights[0].text == original.segments[0].text
+
+
+def test_codex_uses_low_reasoning_effort_only_for_mechanical_stages(monkeypatch):
+    from linkread_desktop.ai.provider import CodexProvider
+    import subprocess
+    from pathlib import Path
+
+    seen_cmds = []
+    monkeypatch.setattr("linkread_desktop.ai.provider.shutil.which", lambda name: "/mock/" + name)
+
+    def fake_run(cmd, **kwargs):
+        seen_cmds.append(cmd)
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text('{"ok": true}', encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr("linkread_desktop.ai.provider.subprocess.run", fake_run)
+    bounded = RunProvider(CodexProvider(), 2)
+    bounded.execute("p1", {}, lambda v: v, timeout_seconds=30, stage="analysis")
+    bounded.execute("p2", {}, lambda v: v, timeout_seconds=30, stage="polish")
+    bounded.execute("p3", {}, lambda v: v, timeout_seconds=30, stage="translation")
+    assert 'model_reasoning_effort="low"' not in seen_cmds[0]
+    assert ["-c", 'model_reasoning_effort="low"'] == seen_cmds[1][-3:-1]
+    assert ["-c", 'model_reasoning_effort="low"'] == seen_cmds[2][-3:-1]

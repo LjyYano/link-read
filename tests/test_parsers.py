@@ -174,3 +174,82 @@ def test_invalid_bilibili_content():
         parse_bilibili_json('{"foo": []}')
     with pytest.raises(ExtractionError):
         parse_bilibili_json('{"body": [{"from": "x", "to": 1, "content": "x"}]}')
+
+
+def test_youtube_contiguous_10ms_two_line_rolling_vtt_deduplicates_cleanly():
+    source = """WEBVTT
+
+00:00:16.289 --> 00:00:16.299
+>> All right. Um so again I'm my name is
+
+00:00:16.299 --> 00:00:19.990
+>> All right. Um so again I'm my name is
+Potato. Uh I work on Grokbot at SpaceX
+
+00:00:19.990 --> 00:00:20.000
+Potato. Uh I work on Grokbot at SpaceX
+
+00:00:20.000 --> 00:00:21.190
+Potato. Uh I work on Grokbot at SpaceX
+SI.
+
+00:00:21.190 --> 00:00:21.200
+SI.
+
+00:00:21.200 --> 00:00:22.790
+SI.
+And can I just get a quick show of
+"""
+    deduped = parse_srt_vtt(source, rolling=True)
+    assert [(c.start_ms, c.end_ms, c.text) for c in deduped] == [
+        (16289, 16299, ">> All right. Um so again I'm my name is"),
+        (16299, 19990, "Potato. Uh I work on Grokbot at SpaceX"),
+        (20000, 21190, "SI."),
+        (21200, 22790, "And can I just get a quick show of"),
+    ]
+    # Without rolling=True, every cue remains untouched.
+    assert len(parse_srt_vtt(source, rolling=False)) == 6
+
+
+def test_youtube_two_line_rolling_vtt_without_transition_frames_deduplicates():
+    source = """WEBVTT
+
+00:00:01.000 --> 00:00:03.000
+First line
+Second line
+
+00:00:03.000 --> 00:00:05.000
+Second line
+Third line
+"""
+    deduped = parse_srt_vtt(source, rolling=True)
+    assert [(c.start_ms, c.end_ms, c.text) for c in deduped] == [
+        (1000, 3000, "First line Second line"),
+        (3000, 5000, "Third line"),
+    ]
+
+
+def test_render_subtitles_srt_and_vtt_roundtrip_timestamps_and_text():
+    from linkread_desktop.models import SourceInfo, TranscriptDocument, TranscriptSegment
+    from linkread_desktop.renderers.subtitles import render_subtitles
+
+    doc = TranscriptDocument(
+        source=SourceInfo(platform="youtube", title="Demo"),
+        transcript_source="subtitle",
+        segments=[
+            TranscriptSegment(start_ms=1250, end_ms=3400, text="Hello world"),
+            TranscriptSegment(start_ms=65000, end_ms=None, text="第二句"),
+        ],
+    )
+    srt = render_subtitles(doc, "srt")
+    vtt = render_subtitles(doc, "vtt")
+    assert "00:00:01,250 --> 00:00:03,400" in srt
+    assert vtt.startswith("WEBVTT\n\n00:00:01.250 --> 00:00:03.400")
+    assert [(s.start_ms, s.end_ms, s.text) for s in parse_srt_vtt(srt)] == [
+        (1250, 3400, "Hello world"),
+        (65000, 65000, "第二句"),
+    ]
+    assert [(s.start_ms, s.end_ms, s.text) for s in parse_srt_vtt(vtt)] == [
+        (1250, 3400, "Hello world"),
+        (65000, 65000, "第二句"),
+    ]

@@ -4,10 +4,13 @@ from .models import Chapter, NoteAnalysis, NoteDocument, ReadingParagraph, lexic
 
 def reading_seed(raw, provider):
     # Transient context only; never written as the article's analysis.
+    # Keep a short placeholder chapter title so every block does not repeat a long video title.
+    declared = (raw.language or "").lower().replace("_", "-").removeprefix("ai-")
+    label = "Full" if (declared == "en" or declared.startswith("en-")) else "全文"
     return NoteDocument(transcript=raw, provider=provider.name,
         analysis=NoteAnalysis(summary="等待内容提炼", chapters=[Chapter(
             start_segment_index=0, start_ms=raw.segments[0].start_ms,
-            title=raw.source.title, summary="全文")]))
+            title=label, summary=label)]))
 
 
 def attach_reading(note: NoteDocument, polished: NoteDocument) -> NoteDocument:

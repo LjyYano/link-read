@@ -41,13 +41,35 @@ def page_locale(document: TranscriptDocument, language: PageLanguage) -> Languag
     return "zh-CN" if han >= 3 and han > latin and not other else "en"
 
 
+_SIMPLIFIED_MARKERS = frozenset("这为说们与还会点个时来过国对开关机学体实当从现进经动问发无种头产让应义变专题画视频语")
+_TRADITIONAL_MARKERS = frozenset("這為說們與還會點個時來過國對開關機學體實當從現進經動問發無種頭產讓應義變專題畫視頻語")
+
+
+def _looks_simplified_chinese(document: TranscriptDocument) -> bool:
+    sample = "".join(cue.text for cue in document.segments[:60])[:4000]
+    simplified = sum(1 for ch in sample if ch in _SIMPLIFIED_MARKERS)
+    traditional = sum(1 for ch in sample if ch in _TRADITIONAL_MARKERS)
+    if simplified > 0 and traditional == 0:
+        return True
+    if simplified >= 3 and simplified >= traditional * 4:
+        return True
+    return document.source.platform == "bilibili" and (document.language or "").lower() == "ai-zh" and traditional == 0
+
+
 def _needs_translation(document: TranscriptDocument, language: PageLanguage) -> bool:
     if language == "original":
         return False
     source = source_language(document) or ""
     if language == "en":
         return source.split("-")[0] != "en"
-    return source not in {"zh-cn", "zh-hans"} and not source.startswith("zh-hans-")
+    if source in {"zh-cn", "zh-hans"} or source.startswith("zh-hans-"):
+        return False
+    if source in {"zh", "cmn"} and _looks_simplified_chinese(document):
+        return False
+    return True
+
+
+needs_translation = _needs_translation
 
 
 def join_translation(cues: list[str], language: str) -> str:
