@@ -73,13 +73,9 @@ def notarize(submission, staple_target, credentials):
 
 
 def build_dmg(app, dmg, product, identity, credentials, directory):
-    contents = directory / "dmg-contents"
-    contents.mkdir()
-    subprocess.run(["ditto", app, contents / app.name], check=True)
-    (contents / "Applications").symlink_to("/Applications")
     image = directory / dmg.name
-    subprocess.run(["hdiutil", "create", "-volname", product, "-srcfolder", contents,
-                    "-fs", "HFS+", "-format", "UDZO", image], check=True)
+    python = Path(os.environ.get("LINKREAD_PYTHON", DESKTOP.parent / ".venv/bin/python")).expanduser()
+    subprocess.run([python, DESKTOP / "scripts/build_dmg_image.py", app, image, product], check=True)
     subprocess.run(["codesign", "--sign", identity, "--timestamp", image], check=True)
     notarize(image, image, credentials)
     subprocess.run(["codesign", "--verify", "--strict", image], check=True)

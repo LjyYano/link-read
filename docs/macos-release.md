@@ -16,9 +16,10 @@ npm run tauri -- signer generate -w "$HOME/.tauri/linkread.key"
 
 ## 每次发布
 
-在 `desktop/src-tauri/tauri.conf.json` 设置要发布的版本号，首次编译前按仓库 README 准备 Python 环境和 PyInstaller。使用钥匙串公证时，设置证书名称与公证配置。
+在 `desktop/src-tauri/tauri.conf.json` 设置要发布的版本号，首次编译前按仓库 README 准备 Python 环境和 PyInstaller。DMG 的 Finder 布局由 `dmgbuild` 写入镜像，构建时将它装在同一 Python 环境。使用钥匙串公证时，设置证书名称与公证配置。
 
 ```bash
+.venv/bin/python -m pip install 'dmgbuild>=1.6,<2'
 cd desktop
 export APPLE_SIGNING_IDENTITY='Developer ID Application: 你的证书名称'
 export LINKREAD_NOTARY_PROFILE='LinkRead'
