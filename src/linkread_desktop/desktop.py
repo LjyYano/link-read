@@ -19,6 +19,7 @@ from .article_state import archive_mutation, patch_reading_state, reading_state,
 from .article_details import DETAILS_FILENAME, detail_value, linked_source_value, read_article_details, save_article_details
 from .ai.models import NoteDocument
 from .ai.openai_compatible import OpenAICompatibleProvider
+from .covers import copy_local_cover, fetch_cover_bytes, find_local_cover, local_cover_url, remove_local_cover, save_cover_bytes
 from .generation import _run_note, generate_article
 from .errors import LinkReadError, error_context, error_details
 from .links import canonical_link
@@ -110,6 +111,7 @@ def _article_record(article: Path, *, archived: tuple[Path, TranscriptDocument |
         "hasAnalysis": isinstance(document, NoteDocument),
         "updatedAt": int(article.stat().st_mtime * 1000),
         "readingKey": reading_state_key(raw),
+        "localCover": local_cover_url(article.parent),
         **reading_state(article.parent),
     }
 
@@ -175,6 +177,7 @@ def _update_article_details(library: Path, article_id: str, values: object) -> d
     source_url = values.get("sourceUrl")
     signature = None
     linked = None
+    fetched_cover = None
     if change_link and source_url is not None:
         if not isinstance(source_url, str) or len(source_url) > 4096:
             raise LinkReadError("请输入有效的视频或播客单集链接")
@@ -187,6 +190,7 @@ def _update_article_details(library: Path, article_id: str, values: object) -> d
                 if _article_source(article)[2].source.platform != "local":
                     raise LinkReadError("只有本地字幕文章可以关联来源链接")
             linked = _linked_appearance(source_url)
+            fetched_cover = fetch_cover_bytes(linked.get("thumbnailUrl")) if linked else None
 
     with archive_mutation(library):
         article = _article_path(library, article_id)
@@ -213,6 +217,12 @@ def _update_article_details(library: Path, article_id: str, values: object) -> d
             record.update(sourceUrl=linked["url"] if linked else original["sourceUrl"],
                           thumbnailUrl=linked["thumbnailUrl"] if linked else original["thumbnailUrl"])
         save_article_details(article.parent, title=title, category=category, linked_source=linked)
+        if change_link:
+            if fetched_cover is not None:
+                save_cover_bytes(article.parent, *fetched_cover)
+            else:
+                remove_local_cover(article.parent)
+        record["localCover"] = local_cover_url(article.parent)
         return record
 
 
@@ -233,7 +243,8 @@ def _valid_cached_record(record: object, article_id: str) -> bool:
     if not isinstance(record, dict) or record.get("id") != article_id:
         return False
     if set(record) != {"id", "title", "category", "hasAnalysis", "updatedAt", "isRead", "isStarred",
-                       "platform", "sourceUrl", "author", "publishedAt", "durationMs", "thumbnailUrl", "readingKey"}:
+                       "platform", "sourceUrl", "author", "publishedAt", "durationMs", "thumbnailUrl",
+                       "localCover", "readingKey"}:
         return False
     if not isinstance(record["platform"], str) or record["platform"] not in {"local", "youtube", "bilibili", "apple_podcasts"}:
         return False
@@ -245,6 +256,13 @@ def _valid_cached_record(record: object, article_id: str) -> bool:
         return False
     if any(record[key] is not None and not isinstance(record[key], str)
            for key in ("sourceUrl", "author", "publishedAt", "thumbnailUrl")):
+        return False
+    local_cover = record["localCover"]
+    if local_cover is not None and (
+        not isinstance(local_cover, str)
+        or not local_cover.startswith("linkread-reader://localhost/cover/")
+        or len(local_cover) > 2048
+    ):
         return False
     return (type(record["updatedAt"]) is int and record["updatedAt"] >= 0
             and (record["durationMs"] is None
@@ -493,6 +511,8 @@ def _publish_replacement_locked(generated: Path, library: Path) -> Path:
         if previous_metadata.is_file() and not previous_metadata.is_symlink():
             _reader_source(destination / "article.html")  # Validate identity before carrying it over.
             write_text(generated.parent / ".source-metadata.json", previous_metadata.read_text(encoding="utf-8"))
+        if find_local_cover(generated.parent) is None:
+            copy_local_cover(destination, generated.parent)
         destination.rename(backup)
     try:
         generated.parent.rename(destination)
@@ -716,6 +736,9 @@ def main() -> int:
     test_asr = commands.add_parser("test-asr")
     test_asr.add_argument("--base-url", required=True)
     test_asr.add_argument("--model", default="paraformer-v2")
+    test_yt = commands.add_parser("test-youtube-cookies")
+    test_yt.add_argument("--cookies-from-browser")
+    test_yt.add_argument("--cookies", type=Path)
     commands.add_parser("library")
     markdown = commands.add_parser("markdown")
     markdown.add_argument("--content", choices=("readable", "full"), default="full")
@@ -792,6 +815,11 @@ def main() -> int:
             client = BailianAsr(AsrConfig(base_url=args.base_url, model=args.model))
             segments = client.test_connection()
             _emit("connection", ok=True, message="已连接", sentences=len(segments))
+        elif args.command == "test-youtube-cookies":
+            from .extractors.youtube import test_youtube_cookies
+            _emit("youtube_cookies_test", **test_youtube_cookies(
+                cookies_from_browser=args.cookies_from_browser, cookies_file=args.cookies,
+            ))
         elif args.command == "test-api":
             api = OpenAICompatibleProvider(base_url=args.base_url, model=args.model)
             api.test_connection()

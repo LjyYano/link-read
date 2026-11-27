@@ -53,6 +53,13 @@ _ERRORS = {
     "subtitle_login_required": "Bilibili requires sign-in to view subtitles. Open the original video or import a subtitle file.",
     "subtitle_response_invalid": "Bilibili returned an incomplete subtitle list. Check the source again.",
     "youtube_verification_required": "YouTube requires sign-in verification before this video can be accessed. Configure YouTube cookies in Settings, open the original video, or import a subtitle file.",
+    "youtube_cookies_safari_permission": "macOS blocked access to Safari's cookies database. Grant Full Disk Access to LinkRead (or the terminal running dev.sh) in System Settings, or switch to Chrome or a cookies.txt file in Settings.",
+    "youtube_cookies_permission_denied": "macOS denied permission to read the configured YouTube cookies. Allow access to other apps' data or grant Full Disk Access to LinkRead (or the terminal running dev.sh, then restart it) and allow Keychain access in System Settings, or switch browsers or use cookies.txt in Settings.",
+    "youtube_cookies_not_found": "Could not find the selected browser's cookies database on this Mac. Confirm the browser is installed and signed in, or pick another browser or cookies.txt in Settings.",
+    "youtube_cookies_format_invalid": "The selected file is not a valid Netscape-format cookies.txt file. Export it again and reselect it in Settings.",
+    "youtube_cookies_empty": "Cookies were read, but no active youtube.com sign-in session was found. Sign in to YouTube in that browser (and restart it to flush cookies to disk) or export a fresh cookies.txt.",
+    "youtube_cookies_expired": "YouTube rejected the configured cookies (the browser session may be stale or rotated, or the current proxy/network triggered bot verification). Restart the browser and confirm you are signed in to YouTube, export a fresh cookies.txt from a private window, or try another proxy/network.",
+    "youtube_cookies_unavailable": "Could not read the configured YouTube cookies (the cookie database may be locked or restricted). Try again, switch browsers, or use cookies.txt in Settings.",
     "youtube_subtitles_unconfirmed": "YouTube's subtitle list was incomplete or included unreadable tracks. Check the source again.",
     "youtube_subtitle_invalid": "YouTube listed a subtitle track, but the downloaded captions were empty or invalid. Check the source again.",
     "invalid_pasted_subtitle": "Could not read the pasted subtitles. Check their format and timestamps.",
@@ -129,11 +136,19 @@ def localize_event(kind: str, fields: dict) -> dict:
         return {**fields, "message": message or "The operation could not be completed. Check the input and try again."}
     if kind == "connection":
         return {**fields, "message": "Connected"}
+    if kind == "youtube_cookies_test":
+        return {**fields, "message": "YouTube cookies were read locally. Whether YouTube accepts them is confirmed only during generation."}
     if kind == "source_check":
         code = fields.get("code")
         if code == "subtitle_login_required":
             return {**fields, "message": "Bilibili requires sign-in to view subtitles. Generation can transcribe publicly accessible audio."}
-        if code in {"subtitle_response_invalid", "youtube_verification_required", "youtube_subtitles_unconfirmed", "youtube_subtitle_invalid"}:
+        if code in {
+            "subtitle_response_invalid", "youtube_verification_required",
+            "youtube_cookies_safari_permission", "youtube_cookies_permission_denied",
+            "youtube_cookies_not_found", "youtube_cookies_format_invalid",
+            "youtube_cookies_empty", "youtube_cookies_expired", "youtube_cookies_unavailable",
+            "youtube_subtitles_unconfirmed", "youtube_subtitle_invalid",
+        }:
             return {**fields, "message": _ERRORS[code]}
         message = {
             "captions": "Public subtitles are available for this source.",

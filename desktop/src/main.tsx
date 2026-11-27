@@ -7,7 +7,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "re
 import { createRoot } from "react-dom/client"
 import { BookOpen, CircleCheck, ListTodo, Search, Settings as SettingsIcon, X } from "lucide-react"
 import {
-  cancelGeneration, checkDuplicate, checkTool, deleteArticle,
+  cancelGeneration, checkDuplicate, checkTool, deleteArticle, deleteTaskData,
   articleTranscriptPath, exportSubtitles, generateArticle, listArticles, pickSubtitle, providerNames, updateArticleState,
   loadTaskJournal, saveTaskJournal, normalizeGenerationFailure, openVideo, setNativeLanguage,
   readSubtitleClipboard, resolveSubtitlePath, savePastedSubtitle,
@@ -31,6 +31,11 @@ import { useSourceReadiness, rememberSourceFailure, forgetSourceReadiness } from
 import { SourceReadinessPanel } from "./SourceReadinessPanel"
 import { useSubtitleDownload, forgetSubtitleDownload, clearSubtitleDownloadErrors } from "./useSubtitleDownload"
 import { defaultYoutubeCookies, loadYoutubeCookies, type YoutubeCookieOptions } from "./youtubeCookies"
+import {
+  effectiveAsrForSource, failureToYoutubePrompt, hasYoutubeCookiesConfigured,
+  resolveYoutubeSubtitlePrompt, type YoutubeSubtitlePrompt,
+} from "./youtubeGuidance"
+import { YoutubeSubtitleDialog } from "./YoutubeSubtitleDialog"
 import { flushReadingPositions } from "./readingPositionBridge"
 import { progressFromEvent } from "./progress"
 import { SerialTaskQueue } from "./taskQueue"
@@ -190,9 +195,32 @@ function App() {
   const [dragging, setDragging] = useState(false)
   const [inputError, setInputError] = useState("")
   const [preferences, setPreferences] = useState(loadPreferences)
+  const preferencesRef = useRef(preferences)
+  preferencesRef.current = preferences
+  const [youtubePrompt, setYoutubePrompt] = useState<YoutubeSubtitlePrompt>()
   const linkPreview = useLinkPreview(source, localPath !== null)
-  const sourceReadiness = useSourceReadiness(source, localPath !== null, preferences.youtubeCookies)
-  const subtitleDownload = useSubtitleDownload(source, localPath !== null, preferences.youtubeCookies)
+  const sourceReadiness = useSourceReadiness(source, localPath !== null, preferences.youtubeCookies, result => {
+    const prompt = resolveYoutubeSubtitlePrompt({
+      source: result.source,
+      isYoutube: sourcePlatform(result.source) === "youtube",
+      cookiesConfigured: hasYoutubeCookiesConfigured(preferencesRef.current.youtubeCookies),
+      asrEnabled: preferencesRef.current.asr.enabled,
+      code: result.code,
+      status: result.status,
+      message: result.message,
+    })
+    if (prompt) setYoutubePrompt(prompt)
+  })
+  const subtitleDownload = useSubtitleDownload(source, localPath !== null, preferences.youtubeCookies, (src, failure) => {
+    const prompt = failureToYoutubePrompt(
+      src,
+      sourcePlatform(src) === "youtube",
+      hasYoutubeCookiesConfigured(preferencesRef.current.youtubeCookies),
+      preferencesRef.current.asr.enabled,
+      failure,
+    )
+    if (prompt) setYoutubePrompt(prompt)
+  })
   const [settingsRecovery, setSettingsRecovery] = useState(hasPendingSettingsWrite)
   const settingsGate = useRef(new GenerationSettingsGate({
     readPreferences: loadPreferences,
@@ -520,6 +548,7 @@ function App() {
     localStorage.setItem(storageKey, JSON.stringify(next))
     if (JSON.stringify(next.youtubeCookies) !== JSON.stringify(preferences.youtubeCookies)) {
       clearSubtitleDownloadErrors()
+      setYoutubePrompt(undefined)
       if (source.trim()) forgetSourceReadiness(source.trim())
     }
     setPreferences(next)
@@ -688,7 +717,17 @@ function App() {
       },
       onFailure: error => {
         const failure = normalizeGenerationFailure(error)
-        if (!spec.localFile) rememberSourceFailure(spec.input, failure)
+        if (!spec.localFile) {
+          rememberSourceFailure(spec.input, failure)
+          const prompt = failureToYoutubePrompt(
+            spec.input,
+            sourcePlatform(spec.input) === "youtube",
+            hasYoutubeCookiesConfigured(spec.youtubeCookies),
+            preferencesRef.current.asr.enabled,
+            failure,
+          )
+          if (prompt) setYoutubePrompt(prompt)
+        }
         if (failure.code !== "cancelled") markUnreviewed(id)
         updateTask(id, current => ({
           ...spec.identity,
@@ -738,6 +777,20 @@ function App() {
       if (!localFile && !downloaded && sourceReadiness.blocked) {
         setInputError(tr("此来源已确认暂不支持处理，请导入字幕、查看来源或重新检查。")); return
       }
+      const isYoutube = !localFile && sourcePlatform(input) === "youtube"
+      const hasCookies = hasYoutubeCookiesConfigured(preferences.youtubeCookies)
+      if (!localFile && !downloaded && isYoutube && !hasCookies) {
+        const pendingPrompt = resolveYoutubeSubtitlePrompt({
+          source: input,
+          isYoutube: true,
+          cookiesConfigured: false,
+          asrEnabled: preferences.asr.enabled,
+          code: subtitleDownload.failure?.code ?? sourceReadiness.result?.code,
+          status: subtitleDownload.failure ? undefined : sourceReadiness.result?.status,
+          message: subtitleDownload.failure?.message ?? sourceReadiness.result?.message,
+        })
+        if (pendingPrompt) { setYoutubePrompt(pendingPrompt); return }
+      }
       if (!localFile && !downloaded && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled) { void showSettings("asr"); return }
       if (toolWarning) { void showSettings("ai"); return }
       enqueueTask({
@@ -751,7 +804,7 @@ function App() {
         sourceKey: checked.key,
         replace: false,
         previewId: downloaded?.previewId,
-        asr: { ...preferences.asr },
+        asr: effectiveAsrForSource(preferences.asr, isYoutube, hasCookies),
         youtubeCookies: preferences.youtubeCookies ? { ...preferences.youtubeCookies } : undefined,
         identity: {
           ...(linkPreview.status === "ready" && linkPreview.source === input ? linkPreview.metadata : {}),
@@ -808,13 +861,26 @@ function App() {
     }
   }
 
-  function removeJob(id: string) {
+  async function removeJob(id: string) {
     if (requestId.current === id) return
+    const input = taskInputs.current.get(id)
+    const task = jobsRef.current.find(item => item.id === id)
+    const previewId = (task && task.job.status !== "done" ? task.job.previewId : undefined) ?? input?.previewId
+    if (input || previewId) {
+      await deleteTaskData({
+        source: input?.input,
+        localFile: input?.localFile,
+        sourceKey: input?.sourceKey,
+        previewId,
+      })
+    }
+    if (input && !input.localFile) forgetSubtitleDownload(input.input)
     taskQueue.current.cancelWaiting(id)
     taskInputs.current.delete(id)
     taskTimes.current.delete(id)
     changeJobs(current => current.filter(task => task.id !== id))
     setPreviewTaskId(current => current === id ? undefined : current)
+    setReviewedTasks(current => current.includes(id) ? saveReviewedTasks(current.filter(value => value !== id)) : current)
   }
 
   async function clearReviewed(ids: string[]) {
@@ -839,7 +905,10 @@ function App() {
   }
 
   async function removeArticle(id: string) {
-    await deleteArticle(id)
+    const existing = library?.articles.find(item => item.id === id)
+      ?? (existingArticle?.id === id ? existingArticle : undefined)
+    await deleteArticle(id, existing?.readingKey)
+    if (existing?.sourceUrl) forgetSubtitleDownload(existing.sourceUrl)
     setCompletionNotice(current => current.filter(item => item.id !== id))
     changeJobs(current => current.filter(task =>
       task.job.status !== "done" || task.job.article.id !== id))
@@ -929,7 +998,9 @@ function App() {
       if (replace && !window.confirm(duplicate.article
         ? tr("《{0}》已在书架中。是否重新生成并替换？\n旧文章会在新版本成功后被替换。", duplicate.article.title)
         : tr("该内容已经在生成或排队。是否继续添加重新生成任务？\n新任务会排在后面，并替换前一个版本。"))) return
-      const asr = { ...preferences.asr }
+      const isYoutube = !original.localFile && sourcePlatform(original.input) === "youtube"
+      const hasCookies = hasYoutubeCookiesConfigured(preferences.youtubeCookies)
+      const asr = effectiveAsrForSource(preferences.asr, isYoutube, hasCookies)
       const subtitleLogin = previous.status === "error" && previous.failure?.code === "subtitle_login_required"
         && sourcePlatform(original.input) === "bilibili"
       if (!subtitleLogin && !original.localFile && !previewId && resumeNeedsAsrConfirmation(original.asr, asr) && !window.confirm(
@@ -1113,6 +1184,22 @@ function App() {
 
   const hasDownloadedSubtitles = !localPath && Boolean(subtitleDownload.downloaded && subtitleDownload.source === source.trim())
   const isYoutubeLink = !localPath && sourcePlatform(source.trim()) === "youtube"
+  const youtubeCookiesConfigured = hasYoutubeCookiesConfigured(preferences.youtubeCookies)
+  const currentYoutubePrompt = !localPath && !hasDownloadedSubtitles && isYoutubeLink
+    ? resolveYoutubeSubtitlePrompt({
+        source: source.trim(),
+        isYoutube: true,
+        cookiesConfigured: youtubeCookiesConfigured,
+        asrEnabled: preferences.asr.enabled,
+        code: subtitleDownload.failure?.code ?? sourceReadiness.result?.code,
+        status: subtitleDownload.failure ? undefined : sourceReadiness.result?.status,
+        message: subtitleDownload.failure?.message ?? sourceReadiness.result?.message,
+      })
+    : undefined
+  const sourceNeedsYoutubeCookies = currentYoutubePrompt?.kind === "configure_cookies"
+    || currentYoutubePrompt?.kind === "fix_cookies"
+  const sourceNeedsAsr = !hasDownloadedSubtitles && !sourceNeedsYoutubeCookies
+    && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled
 
   return (
     <div className="app-shell">
@@ -1129,15 +1216,19 @@ function App() {
             existingArticle={existingArticle} existingTask={Boolean(existingTask)}
             onViewExistingTask={() => openTasks(existingTask?.id)}
             sourceBlocked={!hasDownloadedSubtitles && sourceReadiness.blocked}
-            sourceNeedsAsr={!hasDownloadedSubtitles && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled}
+            sourceNeedsYoutubeCookies={sourceNeedsYoutubeCookies}
+            sourceNeedsAsr={sourceNeedsAsr}
+            youtubeCookiesConfigured={youtubeCookiesConfigured}
+            asrEnabled={preferences.asr.enabled}
             sourceReadiness={<SourceReadinessPanel state={sourceReadiness}
               subtitleDownload={subtitleDownload} isYoutube={isYoutubeLink}
+              youtubeCookiesConfigured={youtubeCookiesConfigured}
               onPreviewDownloaded={downloaded => { void openDownloadedPreview(downloaded) }}
               onExportDownloaded={async (previewId, format: SubtitleExportFormat) => { await exportSubtitles(previewId, format, true) }}
               onYoutubeSettings={() => void showSettings("youtube")}
               onImport={pick} onOpenSource={() => { void openVideo(sourceReadiness.source).catch(error => setInputError(String(error))) }}
               onSettings={() => void showSettings("asr")} asrEnabled={preferences.asr.enabled} />}
-            onSettings={() => void showSettings("ai")} onLibrary={goToLibrary} dragging={dragging} />
+            onSettings={target => void showSettings(target ?? "ai")} onLibrary={goToLibrary} dragging={dragging} />
         )}
         {screen === "library" && (
           <Bookshelf {...shelfActions} search={shelfSearch} onSearch={setShelfSearch} filters={shelfFilters}
@@ -1162,17 +1253,25 @@ function App() {
       </main>
       {detailsArticle && <ArticleDetailsDialog key={detailsArticle.id} article={detailsArticle} onSaved={articleDetailsSaved} onClose={() => setDetailsArticle(undefined)} />}
       {exportArticle && <MarkdownExportDialog key={exportArticle.id} article={exportArticle} onClose={() => setExportArticle(undefined)} />}
-      {update.prompt && !detailsArticle && !exportArticle && !quickOpen && !taskCenterOpen &&
+      {youtubePrompt && !detailsArticle && !exportArticle && <YoutubeSubtitleDialog
+        prompt={youtubePrompt}
+        onConfigureCookies={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); void showSettings("youtube") }}
+        onConfigureAsr={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); void showSettings("asr") }}
+        onImportSubtitles={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); setScreen("create"); void pick() }}
+        onClose={() => setYoutubePrompt(undefined)} />}
+      {update.prompt && !youtubePrompt && !detailsArticle && !exportArticle && !quickOpen && !taskCenterOpen &&
         <AppUpdateDialog prompt={update.prompt} busy={!canInstallUpdate} onClose={update.dismiss}
           onCheck={() => update.check()} onInstall={() => void update.install()} />}
       {taskCenterOpen && <TaskCenter jobs={jobs} reviewedIds={reviewedTasks} onReviewed={markReviewed}
         completed={completedArticles(library?.articles ?? [], completedArticleIds)}
         initialTaskId={taskCenterFocusId}
         initialCompletedArticleId={taskCenterCompletedId}
+        youtubeCookiesConfigured={youtubeCookiesConfigured}
+        asrEnabled={preferences.asr.enabled}
         onClose={() => setTaskCenterOpen(false)} onCancel={cancel} onRetry={retry} onRemove={removeJob}
         onPreview={id => void readPreview(id)}
         onOpenArticle={selected => void read(selected)}
-        onSettings={() => { setTaskCenterOpen(false); void showSettings() }} onClearReviewed={clearReviewed}
+        onSettings={target => { setTaskCenterOpen(false); void showSettings(target) }} onClearReviewed={clearReviewed}
         journalError={journalError} onRetryJournal={retryJournal} />}
       {quickOpen && <QuickOpen library={library} error={libraryError} recent={recentArticles}
         onClose={() => setQuickOpen(false)} onRefresh={refreshLibrary}

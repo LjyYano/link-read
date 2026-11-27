@@ -4,11 +4,12 @@ import { BookOpen, CircleAlert, CircleCheck, Download, ExternalLink, FileUp, Inf
 import type { DownloadedSubtitles, SubtitleExportFormat } from "./api"
 import type { SourceReadiness } from "./useSourceReadiness"
 import type { SubtitleDownloadState } from "./useSubtitleDownload"
+import { resolveYoutubeSubtitlePrompt } from "./youtubeGuidance"
 import "./source-readiness.css"
 
 export function SourceReadinessPanel({
   state, onImport, onOpenSource, onSettings, onYoutubeSettings, asrEnabled = false,
-  isYoutube = false, subtitleDownload, onPreviewDownloaded, onExportDownloaded,
+  isYoutube = false, youtubeCookiesConfigured = false, subtitleDownload, onPreviewDownloaded, onExportDownloaded,
 }: {
   state: SourceReadiness
   onImport: () => void
@@ -17,6 +18,7 @@ export function SourceReadinessPanel({
   onYoutubeSettings?: () => void
   asrEnabled?: boolean
   isYoutube?: boolean
+  youtubeCookiesConfigured?: boolean
   subtitleDownload?: SubtitleDownloadState
   onPreviewDownloaded?: (downloaded: DownloadedSubtitles) => void
   onExportDownloaded?: (previewId: string, format: SubtitleExportFormat) => Promise<void>
@@ -29,23 +31,40 @@ export function SourceReadinessPanel({
   const downloading = Boolean(subtitleDownload?.downloading)
   const downloaded = subtitleDownload?.downloaded
   const downloadError = !downloaded ? subtitleDownload?.error : undefined
+  const downloadFailure = !downloaded ? subtitleDownload?.failure : undefined
   const busy = checking || downloading
   const status = downloaded ? "captions" : result?.status ?? "idle"
   const subtitleLogin = !downloaded && result?.code === "subtitle_login_required"
-  const needsYoutubeAuth = isYoutube && !downloaded && (
-    result?.code === "youtube_verification_required"
-    || Boolean(downloadError && (/反机器人|验证登录|cookie|sign-in verification/i.test(downloadError)))
+  const youtubePrompt = !downloaded ? resolveYoutubeSubtitlePrompt({
+    source: state.source,
+    isYoutube,
+    cookiesConfigured: youtubeCookiesConfigured,
+    asrEnabled,
+    code: downloadFailure?.code ?? result?.code,
+    status: downloadFailure ? undefined : result?.status,
+    message: downloadFailure?.message ?? result?.message,
+  }) : undefined
+  const needsYoutubeAuth = youtubePrompt?.kind === "configure_cookies" || youtubePrompt?.kind === "fix_cookies"
+  const canSuggestAsr = !needsYoutubeAuth && !asrEnabled && (
+    youtubePrompt?.kind === "offer_asr" || (!isYoutube && status === "needs_asr")
   )
   const Icon = busy ? LoaderCircle : downloadError ? CircleAlert : status === "blocked" ? LockKeyhole : status === "captions" ? CircleCheck : Info
   const title = downloading ? tr("正在下载字幕…")
     : checking ? tr("正在检查公开字幕…")
     : downloaded ? tr("已下载字幕（{0} 条片段）", downloaded.segmentCount)
+    : needsYoutubeAuth ? tr(youtubeCookiesConfigured ? "YouTube Cookie 验证未通过" : "请先配置 YouTube Cookie")
     : downloadError ? tr("下载字幕失败")
     : status === "captions" ? tr("公开字幕可读取")
     : subtitleLogin ? tr(asrEnabled ? "将使用语音转写" : "字幕需要登录查看")
     : status === "needs_asr" ? tr("未找到公开字幕")
     : status === "blocked" ? tr("暂不支持此音源")
     : status === "unknown" ? tr("尚未确认内容可用性") : tr("内容可用性尚未检查")
+  const description = !busy && !downloaded
+    ? (needsYoutubeAuth && !youtubeCookiesConfigured
+      ? tr("YouTube 将优先下载字幕。请先在设置中配置 YouTube Cookie；配置后若仍无法下载字幕，再启用语音转写。")
+      : downloadError ? localizedDetail(downloadError, title)
+      : result ? localizedDetail(result.message, title) : undefined)
+    : undefined
 
   async function handleExport(format: SubtitleExportFormat) {
     if (!downloaded || !onExportDownloaded || exporting) return
@@ -65,8 +84,7 @@ export function SourceReadinessPanel({
       <div className="source-readiness-title"><Icon size={15} aria-hidden="true" className={busy ? "spin" : undefined} />
         <span>{title}</span></div>
       {!busy && downloaded && <p>{tr("可先预览原文或导出 SRT / VTT，点击「生成文章」时将直接复用已下载字幕。")}</p>}
-      {!busy && downloadError && <p>{localizedDetail(downloadError, title)}</p>}
-      {!busy && !downloaded && !downloadError && result && <p>{localizedDetail(result.message, title)}</p>}
+      {!busy && !downloaded && description && <p>{description}</p>}
       {exportError && <p role="alert">{exportError}</p>}
     </div>
     <div className="source-readiness-actions">
@@ -99,7 +117,7 @@ export function SourceReadinessPanel({
           <button className="text-button" type="button" onClick={onImport}><FileUp size={14} aria-hidden="true" />{tr("导入字幕")}</button>
           <button className="text-button" type="button" onClick={onOpenSource}><ExternalLink size={14} aria-hidden="true" />{tr("查看来源")}</button>
         </>}
-        {status === "needs_asr" && !asrEnabled && onSettings && !busy &&
+        {canSuggestAsr && onSettings && !busy &&
           <button className="text-button" type="button" onClick={onSettings}>{tr("设置语音识别")}</button>}
         {(status === "unknown" || Boolean(downloadError)) && !busy && <button className="text-button" type="button" onClick={onOpenSource}>{tr("查看来源")}</button>}
         {subtitleDownload && status !== "blocked" && <button className="text-button" type="button" onClick={subtitleDownload.download} disabled={busy}

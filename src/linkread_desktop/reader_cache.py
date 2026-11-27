@@ -9,12 +9,13 @@ from pathlib import Path
 import stat
 
 from . import __version__
+from .covers import COVER_FILENAMES
 from .errors import LinkReadError
 from .storage import write_text
 
 
 # Bump when a packaged metadata/renderer algorithm changes without asset changes.
-CACHE_VERSION = 11
+CACHE_VERSION = 12
 READER_MANIFEST = ".reader-cache.json"
 LIBRARY_INDEX = ".library-index.json"
 _DERIVED = {".reader.html", READER_MANIFEST}
@@ -35,7 +36,7 @@ def archive_signature(folder: Path) -> str:
         for entry in entries:
             if entry.name in _DERIVED or entry.name.startswith(".linkread-"):
                 continue
-            if Path(entry.name).suffix not in {".json", ".md", ".html"}:
+            if Path(entry.name).suffix not in {".json", ".md", ".html"} and entry.name not in COVER_FILENAMES:
                 continue
             info = entry.stat(follow_symlinks=False)
             if not stat.S_ISREG(info.st_mode):

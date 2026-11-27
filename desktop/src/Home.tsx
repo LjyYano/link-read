@@ -12,8 +12,10 @@ import { activeLanes, elapsedLabel, stageRows, progressCaption, progressDetail, 
 import { coverText } from "./coverText"
 import "./home.css"
 import { useLinkPreview, type LinkPreview } from "./useLinkPreview"
-import { thumbnailSource } from "./coverSource"
+import { localCoverSource, thumbnailSource } from "./coverSource"
 import { previewKey } from "./previewState"
+import type { SettingsTarget } from "./Settings"
+import { isYoutubeCookieErrorCode } from "./youtubeGuidance"
 import type { ChangeArticleState } from "./ReadingActions"
 import { articleState, filterArticles, searchArticles, shelfCounts, defaultShelfFilters, type ReadFilter, type ShelfFilters } from "./libraryState"
 import type { ContinueReading } from "./continueReading"
@@ -25,6 +27,7 @@ type ArticleIdentity = {
   author?: string | null
   durationMs?: number | null
   thumbnailUrl?: string | null
+  localCover?: string | null
   sourceUrl?: string | null
 }
 
@@ -64,14 +67,14 @@ type HomeProps = ArticleListProps & {
   jobs: TaskJob[]
   onCancel: (id: string) => void
   onRetry: (id: string) => void
-  onRemove: (id: string) => void
+  onRemove: (id: string) => Promise<void> | void
   onPreview?: (id: string) => void
   journalLoading?: boolean
   journalError?: string
   onRetryJournal?: () => void
   toolWarning?: string
   inputError?: string
-  onSettings: () => void
+  onSettings: (target?: SettingsTarget) => void
   onLibrary: () => void
   onTasks: () => void
   taskSummary: { queued: number; attention: number; unread: number }
@@ -79,6 +82,9 @@ type HomeProps = ArticleListProps & {
   sourceReadiness?: ReactNode
   sourceBlocked?: boolean
   sourceNeedsAsr?: boolean
+  sourceNeedsYoutubeCookies?: boolean
+  youtubeCookiesConfigured?: boolean
+  asrEnabled?: boolean
   existingArticle?: Article
   existingTask?: boolean
   onViewExistingTask?: () => void
@@ -105,22 +111,25 @@ function PlatformIcon({ platform }: { platform?: Article["platform"] }) {
   return <Captions size={16} strokeWidth={1.7} className="shelf-local-icon" aria-hidden="true" />
 }
 
-function Cover({ platform, thumbnailUrl, title, sourceUrl, withBackdrop }: ArticleIdentity & { withBackdrop?: boolean }) {
+function Cover({ platform, thumbnailUrl, localCover, title, sourceUrl, withBackdrop }: ArticleIdentity & { withBackdrop?: boolean }) {
   const text = coverText(title)
   const coverPlatform = platform === "local" && sourceUrl && previewKey(sourceUrl)?.startsWith("apple_podcasts:")
     ? "apple_podcasts" : platform
   const cover = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
   const [loaded, setLoaded] = useState<string>()
-  const [broken, setBroken] = useState<string>()
+  const [broken, setBroken] = useState<string[]>([])
+  const local = localCoverSource(localCover)
   const provided = thumbnailSource(thumbnailUrl)
-  // Old archives may predate thumbnail persistence. Resolve metadata only for
-  // visible Bilibili/podcast cards, without altering transcript/note JSON or re-running AI.
+  // Old archives may predate local cover and thumbnail persistence. Resolve metadata
+  // only for visible Bilibili/podcast cards, without altering transcript/note JSON or re-running AI.
   const preview = useLinkPreview(
-    visible && (platform === "bilibili" || platform === "apple_podcasts") && !provided ? sourceUrl || "" : "", false,
+    visible && (platform === "bilibili" || platform === "apple_podcasts") && !local && !provided ? sourceUrl || "" : "", false,
   )
-  const resolved = provided || (preview.status === "ready" ? thumbnailSource(preview.metadata.thumbnailUrl) : undefined)
-  const showCover = visible && resolved && broken !== resolved
+  const remote = provided || (preview.status === "ready" ? thumbnailSource(preview.metadata.thumbnailUrl) : undefined)
+  const resolved = (local && !broken.includes(local)) ? local : (remote && !broken.includes(remote) ? remote : undefined)
+  const showCover = visible && Boolean(resolved)
+  const markBroken = (src: string) => setBroken(current => current.includes(src) ? current : [...current, src])
 
   useEffect(() => {
     const target = cover.current
@@ -136,8 +145,8 @@ function Cover({ platform, thumbnailUrl, title, sourceUrl, withBackdrop }: Artic
   }, [])
 
   useEffect(() => {
-    if (!showCover || loaded === resolved) return
-    const timeout = window.setTimeout(() => setBroken(resolved), 12000)
+    if (!showCover || !resolved || loaded === resolved) return
+    const timeout = window.setTimeout(() => markBroken(resolved), 12000)
     return () => window.clearTimeout(timeout)
   }, [showCover, loaded, resolved])
 
@@ -149,11 +158,11 @@ function Cover({ platform, thumbnailUrl, title, sourceUrl, withBackdrop }: Artic
         <span className="cover-title" data-compact={text.compact}>{text.label}</span>
         <span className="cover-rule" />
       </span>
-      {withBackdrop && coverPlatform === "apple_podcasts" && showCover && loaded === resolved &&
+      {withBackdrop && coverPlatform === "apple_podcasts" && showCover && resolved && loaded === resolved &&
         <img className="cover-backdrop" alt="" src={resolved} referrerPolicy="no-referrer" />}
-      {showCover && <img alt="" src={resolved} referrerPolicy="no-referrer"
+      {showCover && resolved && <img alt="" src={resolved} referrerPolicy="no-referrer"
         hidden={loaded !== resolved} onLoad={() => setLoaded(resolved)}
-        onError={() => setBroken(resolved)} />}
+        onError={() => markBroken(resolved)} />}
     </span>
   )
 }
@@ -383,19 +392,22 @@ function ArticleCard({ article, onRead, onDelete, onRegenerate, onStateChange, o
   )
 }
 
-export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPreview, onSettings, taskId }: {
+export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPreview, onSettings, taskId, youtubeCookiesConfigured = false, asrEnabled = false }: {
   job: Job
   queuePosition?: number
   onCancel: () => void
   onRetry: () => void
-  onRemove: () => void
+  onRemove: () => Promise<void> | void
   onPreview?: () => void
-  onSettings: () => void
+  onSettings: (target?: SettingsTarget) => void
   taskId?: string
+  youtubeCookiesConfigured?: boolean
+  asrEnabled?: boolean
 }) {
   const active = job.status === "running" || job.status === "cancelling"
   const [now, setNow] = useState(Date.now)
   const [actionError, setActionError] = useState("")
+  const [removing, setRemoving] = useState(false)
   const details = useRef<HTMLDetailsElement>(null)
   useEffect(() => {
     if (!active) return
@@ -407,6 +419,16 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
   const unsupportedAudio = job.status === "error"
     && (job.failure?.code === "protected_media" || job.failure?.code === "unsupported_audio_stream")
   const subtitleLoginRequired = job.status === "error" && job.failure?.code === "subtitle_login_required"
+  const isYoutube = job.platform === "youtube"
+  const youtubeCookieIssue = job.status === "error" && isYoutubeCookieErrorCode(job.failure?.code)
+  const youtubeNeedsCookies = job.status === "error" && isYoutube && !youtubeCookiesConfigured && (
+    youtubeCookieIssue
+    || job.failure?.code === "subtitles_unavailable"
+    || job.failure?.code === "youtube_subtitles_unconfirmed"
+    || job.failure?.code === "youtube_subtitle_invalid"
+  )
+  const offerAsr = job.status === "error" && job.failure?.code === "subtitles_unavailable"
+    && (!isYoutube || youtubeCookiesConfigured) && !asrEnabled
   const activity = job.activity
   const outstanding = activeLanes(activity)
   const elapsed = activity ? elapsedLabel(Math.max(0, now - activity.startedAt)) : "00:00"
@@ -427,15 +449,22 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
   const jobMessage = localizedDetail(job.message, caption)
   const percent = active ? Math.min(99, Math.max(0, job.percent)) : 0
   const requestStatus = requestCaption(activity, now)
-  const recoveryAction = unsupportedAudio ? "source" : job.status === "error" ? job.failure?.action ?? "retry" : "retry"
+  const recoveryAction = unsupportedAudio ? "source"
+    : youtubeCookieIssue || youtubeNeedsCookies ? "youtube"
+    : offerAsr ? "asr"
+    : job.status === "error" ? job.failure?.action ?? "retry" : "retry"
   const recoveryLabel = job.status === "interrupted" ? tr("继续")
+    : recoveryAction === "youtube" ? tr("配置 YouTube 认证")
+    : recoveryAction === "asr" ? tr("设置语音识别")
     : recoveryAction === "settings" ? tr("检查模型设置")
     : recoveryAction === "setup" ? tr("检查运行环境")
     : recoveryAction === "source" && job.sourceUrl ? tr("查看来源")
     : recoveryAction === "details" || recoveryAction === "source" ? tr("查看详情")
     : job.previewId ? tr("重试未完成部分") : tr("重试")
   function recover() {
-    if (recoveryAction === "settings" || recoveryAction === "setup") { onSettings(); return }
+    if (recoveryAction === "youtube") { onSettings("youtube"); return }
+    if (recoveryAction === "asr") { onSettings("asr"); return }
+    if (recoveryAction === "settings" || recoveryAction === "setup") { onSettings("ai"); return }
     if (recoveryAction === "source" && job.status !== "done" && job.sourceUrl) {
       void openVideo(job.sourceUrl).catch(error => setActionError(String(error))); return
     }
@@ -444,6 +473,19 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
       return
     }
     onRetry()
+  }
+  async function handleRemove() {
+    if (removing) return
+    if (!window.confirm(tr("确认删除任务「{0}」？\n未生成的本地字幕、预览快照和临时处理缓存也会一并从磁盘删除，且无法撤销。", title))) return
+    setRemoving(true)
+    setActionError("")
+    try {
+      await onRemove()
+    } catch (error) {
+      setActionError(String(error))
+    } finally {
+      setRemoving(false)
+    }
   }
   return (
     <li className={`task-card${active ? " task-card-active" : ""}${job.status === "error" ? " task-card-error" : ""}`} data-platform={job.platform} data-task-id={taskId}>
@@ -460,9 +502,9 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
               <X size={17} />
             </button>
           ) : <>
-            <button className="secondary" type="button" onClick={recover}>{recoveryLabel}</button>
-            {recoveryAction !== "retry" && !unsupportedAudio && <button className="text-button" type="button" onClick={onRetry}>{tr("重试")}</button>}
-            <button className="icon-button" type="button" title={tr("删除任务")} aria-label={tr("删除任务")} onClick={onRemove}>
+            <button className="secondary" type="button" disabled={removing} onClick={recover}>{recoveryLabel}</button>
+            {recoveryAction !== "retry" && !unsupportedAudio && <button className="text-button" type="button" disabled={removing} onClick={onRetry}>{tr("重试")}</button>}
+            <button className="icon-button" type="button" disabled={removing} title={tr("删除任务与本地缓存")} aria-label={tr("删除任务与本地缓存")} onClick={() => void handleRemove()}>
               <Trash2 size={16} />
             </button>
           </>}
@@ -540,7 +582,9 @@ export function Home({
   onPaste, nativePaste, pasting,
   toolWarning, inputError, onSettings, onLibrary, library, error, onRead, onRefresh, onDelete, onRegenerate, onStateChange,
   onPreview, journalLoading, journalError, onRetryJournal,
-  onTasks, taskSummary, resume, sourceReadiness, sourceBlocked, sourceNeedsAsr, existingArticle, existingTask, onViewExistingTask, onEdit, onExportMarkdown,
+  onTasks, taskSummary, resume, sourceReadiness, sourceBlocked, sourceNeedsAsr, sourceNeedsYoutubeCookies,
+  youtubeCookiesConfigured = false, asrEnabled = false,
+  existingArticle, existingTask, onViewExistingTask, onEdit, onExportMarkdown,
 }: HomeProps) {
   // Keep newly completed articles visible while the library refreshes.
   const finished = jobs.flatMap(task => task.job.status === "done" ? [task.job.article] : []).reverse()
@@ -556,7 +600,7 @@ export function Home({
   const podcastPreview = sourceKey?.startsWith("apple_podcasts:")
   const existing = Boolean(existingArticle || existingTask)
   const submitDisabled = pasting || (!existing && (journalLoading || sourceBlocked)) || (!localPath && !source.trim())
-  const configureAI = !existing && !sourceNeedsAsr && !submitDisabled && Boolean(toolWarning && (sourceKey || localPath))
+  const configureAI = !existing && !sourceNeedsAsr && !sourceNeedsYoutubeCookies && !submitDisabled && Boolean(toolWarning && (sourceKey || localPath))
 
   function showImportHint() {
     setHint(current => current === "pinned-help" ? current : "import")
@@ -659,7 +703,7 @@ export function Home({
             </div>
             <button className="primary home-primary" type="submit" disabled={submitDisabled}
               onClick={event => event.currentTarget.focus({ preventScroll: true })}>
-              {existingArticle ? tr("打开文章") : existingTask ? tr("查看任务") : sourceBlocked ? tr("暂不支持此来源") : sourceNeedsAsr ? tr("设置语音识别") : configureAI ? tr("配置 AI 工具") : busy ? tr("加入队列") : tr("生成文章")}
+              {existingArticle ? tr("打开文章") : existingTask ? tr("查看任务") : sourceBlocked ? tr("暂不支持此来源") : sourceNeedsYoutubeCookies ? tr("配置 YouTube 认证") : sourceNeedsAsr ? tr("设置语音识别") : configureAI ? tr("配置 AI 工具") : busy ? tr("加入队列") : tr("生成文章")}
             </button>
           </div>
         </div>
@@ -698,7 +742,7 @@ export function Home({
         {inputError && <p className="home-tool-warning" role="alert"><CircleAlert size={15} /><span>{inputError}</span></p>}
         {!existing && toolWarning && !inputError && <div className="home-tool-warning" role="status">
           <CircleAlert size={15} /><span>{toolWarning}</span>
-          {!configureAI && <button className="text-button" type="button" onClick={onSettings}>{tr("检查设置")} <ArrowUpRight size={13} /></button>}
+          {!configureAI && <button className="text-button" type="button" onClick={() => onSettings("ai")}>{tr("检查设置")} <ArrowUpRight size={13} /></button>}
         </div>}
       </form>
       {journalLoading && <p className="task-journal-notice" role="status"><LoaderCircle size={14} className="spin" />{tr("正在恢复任务记录…")}</p>}
@@ -710,7 +754,8 @@ export function Home({
         <ul className="task-list">
           {currentJobs.map(task => <JobRow key={task.id} job={task.job}
             onCancel={() => onCancel(task.id)} onRetry={() => onRetry(task.id)} onRemove={() => onRemove(task.id)}
-            onPreview={onPreview ? () => onPreview(task.id) : undefined} onSettings={onSettings} />)}
+            onPreview={onPreview ? () => onPreview(task.id) : undefined} onSettings={onSettings}
+            youtubeCookiesConfigured={youtubeCookiesConfigured} asrEnabled={asrEnabled} />)}
         </ul>
       </section>}
       {(taskSummary.queued > 0 || taskSummary.attention > 0) && <div className="home-task-summary" data-unread={taskSummary.unread > 0} role="status">

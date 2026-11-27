@@ -162,3 +162,49 @@ def test_youtube_automatic_captions_keep_rolling_deduplication(monkeypatch):
         (0, 2000, "Good morning"),
         (2000, 4000, "everyone"),
     ]
+
+
+class MedialessYoutubeDL(FakeYoutubeDL):
+    """A signed-in session can receive no media URL at all (SABR-only streaming), so only
+    storyboard images remain. Mirror yt-dlp: its default media format selection then aborts
+    unless ignore_no_formats_error is set."""
+    info = {
+        "id": VIDEO_ID, "title": "Video", "webpage_url": URL, "duration": 31,
+        "subtitles": {},
+        "automatic_captions": {"en": [{"ext": "vtt", "url": "https://captions.example/en", "name": "English"}]},
+        "formats": [{"format_id": "sb0", "ext": "mhtml", "protocol": "mhtml", "vcodec": "none", "acodec": "none",
+                     "url": "https://i.ytimg.com/sb/storyboard"}],
+    }
+
+    def __init__(self, options):
+        super().__init__(options)
+        self.options = options
+
+    def extract_info(self, url, download=False):
+        assert not download
+        if not self.options.get("ignore_no_formats_error"):
+            raise RuntimeError("ERROR: [youtube] Requested format is not available. "
+                               "Use --list-formats for a list of available formats")
+        return self.info
+
+    def urlopen(self, url):
+        assert url == "https://captions.example/en"
+        return io.BytesIO(b"WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello!\n")
+
+
+@pytest.mark.parametrize("cookies_from_browser", [None, "edge"])
+def test_youtube_subtitles_do_not_require_a_downloadable_media_format(monkeypatch, cookies_from_browser):
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=MedialessYoutubeDL))
+    doc = extract_youtube(URL, cookies_from_browser=cookies_from_browser)
+    assert doc.source.video_id == VIDEO_ID
+    assert doc.language == "en"
+    assert [(s.start_ms, s.end_ms, s.text) for s in doc.segments] == [(1000, 2000, "Hello!")]
+
+
+def test_youtube_without_captions_or_media_still_reports_missing_subtitles(monkeypatch):
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=MedialessYoutubeDL))
+    monkeypatch.setattr(MedialessYoutubeDL, "info", {
+        **MedialessYoutubeDL.info, "subtitles": {}, "automatic_captions": {},
+    })
+    with pytest.raises(SubtitleUnavailableError):
+        extract_youtube(URL)

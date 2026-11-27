@@ -125,6 +125,32 @@ pub fn canonical(source: &str) -> Result<Url, String> {
     Url::parse(&target).map_err(|_| message.to_owned())
 }
 
+pub fn source_key(source: &str) -> Option<String> {
+    let url = canonical(source).ok()?;
+    let host = url.host_str()?;
+    let query_value = |name: &str| {
+        url.query_pairs()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.into_owned())
+    };
+    if host == "www.youtube.com" {
+        let video = query_value("v")?;
+        return Some(format!("youtube-{video}"));
+    }
+    if host == "www.bilibili.com" {
+        let bvid = url.path().strip_prefix("/video/")?;
+        if bvid.is_empty() || bvid.contains('/') { return None; }
+        let part = query_value("p").unwrap_or_else(|| "1".into());
+        return Some(format!("bilibili-{bvid}-p{part}"));
+    }
+    if host == "podcasts.apple.com" {
+        let show_id = url.path().trim_matches('/').split('/').last()?.strip_prefix("id")?;
+        let episode_id = query_value("i")?;
+        return Some(format!("apple-podcasts-{show_id}-{episode_id}"));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

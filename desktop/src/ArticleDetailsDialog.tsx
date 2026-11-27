@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react"
 import { LoaderCircle, X } from "lucide-react"
 import { getArticleDetails, updateArticleDetails, type Article, type ArticleDetails } from "./api"
 import { useArticleDialog } from "./articleDialog"
-import { thumbnailSource } from "./coverSource"
+import { localCoverSource, thumbnailSource } from "./coverSource"
 import { useLinkPreview } from "./useLinkPreview"
 import "./article-dialog.css"
 
@@ -32,7 +32,9 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
   const originalTitle = (changedLink === undefined ? details?.originalTitle
     : sourceTitle || details?.subtitleTitle || details?.originalTitle) ?? ""
   const displayTitle = resetTitle ? originalTitle : title
-  const cover = thumbnailSource(changedLink === undefined ? details?.linkedThumbnailUrl : newSource?.thumbnailUrl)
+  const cover = changedLink === undefined
+    ? (localCoverSource(article.localCover) ?? thumbnailSource(details?.linkedThumbnailUrl))
+    : thumbnailSource(newSource?.thumbnailUrl)
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {

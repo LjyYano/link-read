@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useReducer } from "react"
-import { downloadSubtitles, type DownloadedSubtitles } from "./api"
+import { useCallback, useEffect, useReducer, useRef } from "react"
+import { downloadSubtitles, normalizeGenerationFailure, type DownloadedSubtitles, type GenerationFailure } from "./api"
 import { sourceCheckKey } from "./sourceReadinessState"
 import type { YoutubeCookieOptions } from "./youtubeCookies"
 
@@ -9,6 +9,7 @@ const maxEntries = 24
 type Entry = {
   data?: DownloadedSubtitles
   error?: string
+  failure?: GenerationFailure
   updatedAt: number
 }
 
@@ -72,7 +73,11 @@ class SubtitleDownloadStore {
     if (changed) this.notify()
   }
 
-  request(source: string, youtubeCookies?: YoutubeCookieOptions): Promise<void> {
+  request(
+    source: string,
+    youtubeCookies?: YoutubeCookieOptions,
+    onFailure?: (source: string, failure: GenerationFailure) => void,
+  ): Promise<void> {
     const key = sourceCheckKey(source)
     if (!key) return Promise.resolve()
     const existing = this.pending.get(key)
@@ -82,13 +87,23 @@ class SubtitleDownloadStore {
     const run = downloadSubtitles(source, youtubeCookies).then(result => {
       if (this.revisions.get(key) !== revision) return
       if (sourceCheckKey(result.source) !== key) {
-        this.save(key, { error: "下载的字幕与当前链接不匹配，请重试。", updatedAt: Date.now() })
+        const failure: GenerationFailure = {
+          message: "下载的字幕与当前链接不匹配，请重试。",
+          code: "source_mismatch",
+          stage: "extract",
+          retryable: true,
+          action: "retry",
+        }
+        this.save(key, { error: failure.message, failure, updatedAt: Date.now() })
+        onFailure?.(source, failure)
         return
       }
       this.save(key, { data: result, updatedAt: Date.now() })
     }, error => {
       if (this.revisions.get(key) !== revision) return
-      this.save(key, { error: String(error), updatedAt: Date.now() })
+      const failure = normalizeGenerationFailure(error)
+      this.save(key, { error: failure.message, failure, updatedAt: Date.now() })
+      onFailure?.(source, failure)
     }).finally(() => {
       if (this.pending.get(key) === run) this.pending.delete(key)
       this.notify()
@@ -107,6 +122,7 @@ export type SubtitleDownloadState = {
   downloading: boolean
   downloaded?: DownloadedSubtitles
   error?: string
+  failure?: GenerationFailure
   download: () => void
   forget: () => void
 }
@@ -118,15 +134,18 @@ export function useSubtitleDownload(
   input: string,
   localFile: boolean,
   youtubeCookies?: YoutubeCookieOptions,
+  onFailure?: (source: string, failure: GenerationFailure) => void,
 ): SubtitleDownloadState {
   const source = input.trim()
   const [, refresh] = useReducer(value => value + 1, 0)
+  const failureCallback = useRef(onFailure)
+  failureCallback.current = onFailure
   useEffect(() => store.subscribe(refresh), [])
   const eligible = !localFile && !!sourceCheckKey(source)
   const entry = eligible ? store.peek(source) : undefined
   const downloading = eligible && store.downloading(source)
   const download = useCallback(() => {
-    if (eligible) void store.request(source, youtubeCookies)
+    if (eligible) void store.request(source, youtubeCookies, (src, failure) => failureCallback.current?.(src, failure))
   }, [source, eligible, youtubeCookies])
   const forget = useCallback(() => {
     if (eligible) store.forget(source)
@@ -137,6 +156,7 @@ export function useSubtitleDownload(
     downloading,
     downloaded: entry?.data,
     error: entry?.error,
+    failure: entry?.failure,
     download,
     forget,
   }

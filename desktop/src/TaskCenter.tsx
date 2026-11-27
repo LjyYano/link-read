@@ -4,6 +4,7 @@ import { ChevronDown, CircleCheck, Clock3, ListTodo, Trash2, X } from "lucide-re
 import { JobRow, type TaskJob } from "./Home"
 import { groupTasks, reviewedTerminalTaskIds, unreviewedTaskIds } from "./taskCenterState"
 import type { Article } from "./api"
+import type { SettingsTarget } from "./Settings"
 import "./task-center.css"
 
 export type TaskCenterProps = {
@@ -16,17 +17,20 @@ export type TaskCenterProps = {
   onClose: () => void
   onCancel: (id: string) => void
   onRetry: (id: string) => void
-  onRemove: (id: string) => void
+  onRemove: (id: string) => Promise<void> | void
   onPreview?: (id: string) => void
   onOpenArticle: (article: Article) => void
-  onSettings: () => void
+  onSettings: (target?: SettingsTarget) => void
   onClearReviewed: (ids: string[]) => Promise<void> | void
   journalError?: string
   onRetryJournal?: () => void
+  youtubeCookiesConfigured?: boolean
+  asrEnabled?: boolean
 }
 
 export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArticleId, reviewedIds, onReviewed, onClose, onCancel, onRetry, onRemove,
-  onPreview, onOpenArticle, onSettings, onClearReviewed, journalError, onRetryJournal }: TaskCenterProps) {
+  onPreview, onOpenArticle, onSettings, onClearReviewed, journalError, onRetryJournal,
+  youtubeCookiesConfigured = false, asrEnabled = false }: TaskCenterProps) {
   const id = useId()
   const dialog = useRef<HTMLDialogElement>(null)
   const closeButton = useRef<HTMLButtonElement>(null)
@@ -141,7 +145,8 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
   function record(task: TaskJob) {
     return <JobRow key={task.id} taskId={task.id} job={task.job} onCancel={() => onCancel(task.id)}
       onRetry={() => onRetry(task.id)} onRemove={() => onRemove(task.id)}
-      onPreview={onPreview ? () => onPreview(task.id) : undefined} onSettings={onSettings} />
+      onPreview={onPreview ? () => onPreview(task.id) : undefined} onSettings={onSettings}
+      youtubeCookiesConfigured={youtubeCookiesConfigured} asrEnabled={asrEnabled} />
   }
 
   return <dialog ref={dialog} className="task-center" aria-labelledby={`${id}-title`}

@@ -1,5 +1,19 @@
 import type { ArticleMetadata } from "./api"
 
+/** Local article covers served offline over the custom Tauri protocol. */
+export function localCoverSource(value?: string | null): string | undefined {
+  if (!value || /[\\\u0000-\u001f]/.test(value)) return
+  const text = value.trim()
+  if (!text.startsWith("linkread-reader://localhost/cover/") || text.length > 2048) return
+  try {
+    const url = new URL(text)
+    if (url.protocol !== "linkread-reader:" || url.hostname !== "localhost"
+        || !url.pathname.startsWith("/cover/") || url.pathname.includes("..")
+        || url.username || url.password || url.port || url.hash) return
+    return url.href
+  } catch { /* Fall back to remote or typographic cover. */ }
+}
+
 /** Public thumbnails only, in sync with Python's thumbnail_url allowlist. */
 export function thumbnailSource(value?: string | null): string | undefined {
   if (!value || /[\\\u0000-\u001f]/.test(value)) return

@@ -17,7 +17,7 @@ use std::{
     ffi::OsString,
     fs,
     future::{poll_fn, Future},
-    io::{self, Write},
+    io::{self, Read, Write},
     net::{Ipv4Addr, Ipv6Addr},
     os::{fd::AsRawFd, unix::{fs::{OpenOptionsExt, PermissionsExt}, process::CommandExt}},
     path::{Component, Path, PathBuf},
@@ -51,6 +51,8 @@ struct Article {
     published_at: Option<String>,
     duration_ms: Option<u64>,
     thumbnail_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    local_cover: Option<String>,
     updated_at: u64,
     #[serde(default)]
     has_analysis: bool,
@@ -227,6 +229,7 @@ struct GenerationState {
 
 struct ActiveProcess {
     request_id: String,
+    source_key: Option<String>,
     pid: Option<i32>,
     cancel_deadline: Option<Instant>,
     cancel_notice: Option<oneshot::Sender<Instant>>,
@@ -272,7 +275,12 @@ impl Generation {
         self.0.lock().unwrap().updating
     }
 
+    #[cfg(test)]
     fn begin(&self, request_id: &str) -> AppResult<()> {
+        self.begin_with_source(request_id, None)
+    }
+
+    fn begin_with_source(&self, request_id: &str, source_key: Option<String>) -> AppResult<()> {
         validate_request_id(request_id)?;
         let mut state = self.0.lock().unwrap();
         if let Some(index) = state
@@ -298,6 +306,7 @@ impl Generation {
         }
         state.active = Some(ActiveProcess {
             request_id: request_id.to_owned(),
+            source_key,
             pid: None,
             cancel_deadline: None,
             cancel_notice: None,
@@ -756,16 +765,18 @@ async fn download_subtitles(
     locations: State<'_, Locations>,
     source: String,
     youtube_cookies: Option<YoutubeCookieOptions>,
-) -> AppResult<DownloadedSubtitles> {
-    video_url(&source)?;
-    let cookies = youtube_cookie_args(&source, youtube_cookies.as_ref())?;
+) -> GenerationResult<DownloadedSubtitles> {
+    video_url(&source).map_err(|e| GenerationFailure::context(e, "unsupported_source", "source"))?;
+    let cookies = youtube_cookie_args(&source, youtube_cookies.as_ref())
+        .map_err(|e| GenerationFailure::context(e, "youtube_cookies_unavailable", "settings"))?;
     let mut owned: Vec<String> = vec!["download-subtitles".into()];
     owned.extend(cookies);
     owned.push("--".into());
     owned.push(source);
     let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-    query_with_timeout(&locations, &args, Duration::from_secs(60),
-        "下载字幕超时，请检查网络或稍后重试").await
+    let mut command = sidecar(&locations).map_err(GenerationFailure::core)?;
+    command.args(&args);
+    query_command_detailed(command, Duration::from_secs(60), "下载字幕超时，请检查网络或稍后重试").await
 }
 
 #[tauri::command]
@@ -796,6 +807,22 @@ async fn pick_cookies_file(
         return Err("请选择有效的本地 cookies.txt 文件".into());
     }
     Ok(Some(path))
+}
+
+#[tauri::command]
+async fn test_youtube_cookies(
+    locations: State<'_, Locations>,
+    options: YoutubeCookieOptions,
+) -> AppResult<ApiConnectionCheck> {
+    if options.mode == "none" {
+        return Err("请先选择浏览器或 cookies.txt 文件".into());
+    }
+    let cookies = youtube_cookie_args("https://www.youtube.com/watch?v=1-Fo8McCD9w", Some(&options))?;
+    let mut owned: Vec<String> = vec!["test-youtube-cookies".into()];
+    owned.extend(cookies);
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+    query_with_timeout(&locations, &args, Duration::from_secs(45),
+        "读取 YouTube Cookie 超时；如系统弹出钥匙串授权窗口，请确认授权后重试").await
 }
 
 #[tauri::command]
@@ -1035,7 +1062,8 @@ async fn generate(
     ui_language: Option<String>,
     youtube_cookies: Option<YoutubeCookieOptions>,
 ) -> GenerationResult<Article> {
-    state.begin(&request_id).map_err(|error| if error == "已取消生成" { GenerationFailure::cancelled() } else { GenerationFailure::core(error) })?;
+    let active_key = if local_file.unwrap_or(false) { None } else { video_links::source_key(&source) };
+    state.begin_with_source(&request_id, active_key).map_err(|error| if error == "已取消生成" { GenerationFailure::cancelled() } else { GenerationFailure::core(error) })?;
     let command = generation_command(&locations, &source, provider, &executable,
         base_url.as_deref(), model.as_deref(), replace.unwrap_or(false),
         local_file.unwrap_or(false), asr.as_ref(), resume_preview.as_deref(), page_language.as_deref(),
@@ -1241,31 +1269,274 @@ fn cancel_generation(state: State<'_, Generation>, request_id: String) -> AppRes
     state.cancel(&request_id)
 }
 
+fn lock_archive(dir: &Path) -> AppResult<fs::File> {
+    let lock = fs::OpenOptions::new().read(true).write(true).create(true).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW).open(dir.join(".article-state.lock"))
+        .map_err(|error| details("无法锁定资料库", error))?;
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(details("无法锁定资料库", io::Error::last_os_error()));
+    }
+    Ok(lock)
+}
+
+fn valid_source_key(key: &str) -> bool {
+    !key.is_empty() && key.len() <= 256 && !key.starts_with('.')
+        && key.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_'))
+}
+
+fn folder_source_key(name: &str) -> Option<String> {
+    let inner = name.strip_suffix(']')?.rsplit_once(" [")?.1;
+    valid_source_key(inner).then(|| inner.to_owned())
+}
+
+fn read_bounded_json(path: &Path, limit: u64) -> Option<serde_json::Value> {
+    let file = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() > limit { return None; }
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() as u64 > limit { return None; }
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn transcript_source_key(path: &Path) -> Option<String> {
+    let value = read_bounded_json(path, 32 * 1024 * 1024)?;
+    let url = value.get("source")?.get("url")?.as_str()?;
+    video_links::source_key(url)
+}
+
+fn cached_reading_key(folder: &Path) -> Option<String> {
+    let value = read_bounded_json(&folder.join(".reader-cache.json"), 64 * 1024)?;
+    value.get("readingKey")?.as_str().filter(|s| !s.is_empty()).map(str::to_owned)
+}
+
+fn remove_dir_if_real(path: &Path) -> AppResult<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_dir() => {
+            fs::remove_dir_all(path).map_err(|error| details("删除本地文件失败", error))?;
+            Ok(true)
+        }
+        Ok(_) => Err("本地目录路径不可用".into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(details("无法检查本地目录", error)),
+    }
+}
+
+fn cleanup_source_caches_locked(
+    library: &Path,
+    source_key: Option<&str>,
+    preview_id_value: Option<&str>,
+) -> AppResult<()> {
+    let mut resolved_key = source_key.filter(|key| valid_source_key(key)).map(str::to_owned);
+    let previews = library.join(".transcript-previews");
+    if resolved_key.is_none() {
+        if let Some(pid) = preview_id_value {
+            if preview_id(pid).is_ok() && !previews.is_symlink() {
+                if let Some(manifest) = read_bounded_json(&previews.join(pid).join("request.json"), 1024 * 1024) {
+                    if let Some(key) = manifest.get("sourceKey").and_then(|v| v.as_str()).filter(|k| valid_source_key(k)) {
+                        resolved_key = Some(key.to_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(key) = resolved_key.as_deref() {
+        let stages = library.join(".generation-staging");
+        if fs::symlink_metadata(&stages).is_ok_and(|meta| meta.file_type().is_dir()) {
+            let _stage_lock = lock_archive(&stages)?;
+            if let Ok(entries) = fs::read_dir(&stages) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_dir()) {
+                        let matched = read_bounded_json(&path.join("identity.json"), 64 * 1024)
+                            .and_then(|v| v.get("sourceKey").and_then(|k| k.as_str()).map(|k| k == key))
+                            .unwrap_or(false);
+                        if matched {
+                            fs::remove_dir_all(&path).map_err(|error| details("删除暂存缓存失败", error))?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if fs::symlink_metadata(&previews).is_ok_and(|meta| meta.file_type().is_dir()) {
+        if let Some(pid) = preview_id_value {
+            preview_id(pid)?;
+            remove_dir_if_real(&previews.join(pid))?;
+        }
+        if let Some(key) = resolved_key.as_deref() {
+            if let Ok(entries) = fs::read_dir(&previews) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_dir()) {
+                        let matched = read_bounded_json(&path.join("request.json"), 1024 * 1024)
+                            .and_then(|v| v.get("sourceKey").and_then(|k| k.as_str()).map(|k| k == key))
+                            .unwrap_or(false);
+                        if matched {
+                            fs::remove_dir_all(&path).map_err(|error| details("删除原文预览缓存失败", error))?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(key) = resolved_key.as_deref() {
+        let asr_root = library.join(".asr");
+        if fs::symlink_metadata(&asr_root).is_ok_and(|meta| meta.file_type().is_dir()) {
+            if let Ok(entries) = fs::read_dir(&asr_root) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_dir()) {
+                        let matched = transcript_source_key(&path.join("transcript.json"))
+                            .or_else(|| transcript_source_key(&path.join("audio.json")))
+                            .is_some_and(|found| found == key);
+                        if matched {
+                            fs::remove_dir_all(&path).map_err(|error| details("删除语音转写缓存失败", error))?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn remove_pasted_subtitle_if_managed(data: &Path, source: &str) {
+    let imports = data.join("subtitle-imports");
+    if !fs::symlink_metadata(&imports).is_ok_and(|meta| meta.file_type().is_dir()) {
+        return;
+    }
+    let candidate = Path::new(source);
+    let Some(parent) = candidate.parent() else { return };
+    if parent.parent() != Some(imports.as_path()) { return; }
+    let Some(hash_dir) = parent.file_name().and_then(|n| n.to_str()) else { return };
+    if preview_id(hash_dir).is_err() { return; }
+    let _ = remove_dir_if_real(parent);
+}
+
 #[tauri::command]
 fn delete_article(
     state: State<'_, Generation>,
     locations: State<'_, Locations>,
     id: String,
+    reading_key: Option<String>,
 ) -> AppResult<()> {
     // Do not delete a workspace while a sidecar might still be using it.
     if state.0.lock().unwrap().active.is_some() {
         return Err("正在生成文章，请在当前任务结束后再删除".into());
     }
-    remove_article_files(&locations.library, &id)
+    let fallback_key = article_file(&locations.library, &id)
+        .ok()
+        .and_then(|path| path.parent().and_then(cached_reading_key));
+    remove_article_files(&locations.library, &id)?;
+    if let Some(key) = reading_key.filter(|k| !k.is_empty()).or(fallback_key) {
+        let _ = durable_state::delete_position(&locations.data, &key);
+    }
+    Ok(())
 }
 
 fn remove_article_files(library: &Path, id: &str) -> AppResult<()> {
     // Python state updates, reader caching and archive replacement use this same
     // lock. A deletion must not let a sidecar recreate a just-deleted directory.
-    let lock = fs::OpenOptions::new().read(true).write(true).create(true).mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW).open(library.join(".article-state.lock"))
-        .map_err(|error| details("无法锁定资料库", error))?;
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(details("无法锁定资料库", io::Error::last_os_error()));
-    }
+    let _lock = lock_archive(library)?;
     let path = article_file(library, id)?;
     let folder = path.parent().ok_or("文章目录无效")?;
-    fs::remove_dir_all(folder).map_err(|error| details("删除文章失败", error))
+    let source_key = folder_source_key(id).or_else(|| transcript_source_key(&folder.join("transcript.json")));
+    fs::remove_dir_all(folder).map_err(|error| details("删除文章失败", error))?;
+    let backups = library.join(".linkread-backups");
+    if fs::symlink_metadata(&backups).is_ok_and(|meta| meta.file_type().is_dir()) {
+        let _ = remove_dir_if_real(&backups.join(id));
+    }
+    cleanup_source_caches_locked(library, source_key.as_deref(), None)?;
+    Ok(())
+}
+
+fn remove_task_files(
+    library: &Path,
+    data: Option<&Path>,
+    source: Option<&str>,
+    local_file: bool,
+    source_key: Option<&str>,
+    preview_id_value: Option<&str>,
+) -> AppResult<()> {
+    if let Some(pid) = preview_id_value {
+        preview_id(pid)?;
+    }
+    let mut effective_key = source_key.filter(|k| valid_source_key(k)).map(str::to_owned);
+    if effective_key.is_none() && !local_file {
+        effective_key = source.and_then(video_links::source_key);
+    }
+    if fs::symlink_metadata(library).is_ok_and(|meta| meta.file_type().is_dir()) {
+        let _lock = lock_archive(library)?;
+        if effective_key.is_none() {
+            if let Some(pid) = preview_id_value {
+                let manifest_path = library.join(".transcript-previews").join(pid).join("request.json");
+                if let Some(manifest) = read_bounded_json(&manifest_path, 1024 * 1024) {
+                    if let Some(key) = manifest.get("sourceKey").and_then(|v| v.as_str()).filter(|k| valid_source_key(k)) {
+                        effective_key = Some(key.to_owned());
+                    }
+                }
+            }
+        }
+        // Only remove an unfinished workspace directory (never one with a published article.html).
+        if let Some(key) = effective_key.as_deref() {
+            let suffix = format!(" [{key}]");
+            if let Ok(entries) = fs::read_dir(library) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let Some(name) = name.to_str() else { continue };
+                    if name.starts_with('.') || !name.ends_with(&suffix) { continue; }
+                    let folder = entry.path();
+                    if fs::symlink_metadata(&folder).is_ok_and(|meta| meta.file_type().is_dir()) {
+                        let published = folder.join("article.html");
+                        if fs::symlink_metadata(&published).is_err() {
+                            fs::remove_dir_all(&folder).map_err(|error| details("删除未完成任务目录失败", error))?;
+                        }
+                    }
+                }
+            }
+        }
+        cleanup_source_caches_locked(library, effective_key.as_deref(), preview_id_value)?;
+    }
+    if local_file {
+        if let (Some(data_dir), Some(path_str)) = (data, source) {
+            remove_pasted_subtitle_if_managed(data_dir, path_str);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_task_data(
+    state: State<'_, Generation>,
+    locations: State<'_, Locations>,
+    source: Option<String>,
+    local_file: Option<bool>,
+    source_key: Option<String>,
+    preview_id_value: Option<String>,
+) -> AppResult<()> {
+    let is_local = local_file.unwrap_or(false);
+    let candidate_key = source_key.as_deref().filter(|k| valid_source_key(k)).map(str::to_owned)
+        .or_else(|| if !is_local { source.as_deref().and_then(video_links::source_key) } else { None });
+    {
+        let guard = state.0.lock().unwrap();
+        if let Some(active) = guard.active.as_ref() {
+            if active.source_key.is_none() || candidate_key.is_none() || active.source_key == candidate_key {
+                return Err("正在处理该来源的任务，请等待当前任务结束后再删除".into());
+            }
+        }
+    }
+    remove_task_files(
+        &locations.library,
+        Some(&locations.data),
+        source.as_deref(),
+        is_local,
+        source_key.as_deref(),
+        preview_id_value.as_deref(),
+    )
 }
 
 async fn query<T: serde::de::DeserializeOwned>(
@@ -1333,6 +1604,44 @@ async fn query_command<T: serde::de::DeserializeOwned>(
     }
     let response = serde_json::from_slice(&output.stdout)
         .map_err(|error| details("无法读取资料库", error))?;
+    process_group.disarm();
+    Ok(response)
+}
+
+async fn query_command_detailed<T: serde::de::DeserializeOwned>(
+    mut command: Command,
+    deadline: Duration,
+    timeout_message: &str,
+) -> GenerationResult<T> {
+    command.as_std_mut().process_group(0);
+    let child = command.kill_on_drop(true).spawn()
+        .map_err(|error| GenerationFailure::core(details("无法启动 LinkRead 核心", error)))?;
+    let mut process_group = QueryProcessGroup(child.id().map(|pid| pid as i32));
+    let output = tokio::time::timeout(deadline, child.wait_with_output())
+        .await
+        .map_err(|_| GenerationFailure {
+            message: timeout_message.to_owned(),
+            code: "source_timeout".into(),
+            stage: Some("extract".into()),
+            retryable: true,
+            action: "retry".into(),
+        })?
+        .map_err(|error| GenerationFailure::core(details("无法启动 LinkRead 核心", error)))?;
+
+    if !output.status.success() {
+        if let Ok(SidecarEvent::Error { message, code, stage, retryable, action }) = serde_json::from_slice(&output.stdout) {
+            return Err(GenerationFailure {
+                message,
+                code: code.unwrap_or_else(|| "extraction_failed".into()),
+                stage,
+                retryable: retryable.unwrap_or(false),
+                action: action.unwrap_or_else(|| "source".into()),
+            });
+        }
+        return Err(GenerationFailure::core("LinkRead 核心提前退出，请重试".into()));
+    }
+    let response = serde_json::from_slice(&output.stdout)
+        .map_err(|error| GenerationFailure::core(details("无法读取字幕结果", error)))?;
     process_group.disarm();
     Ok(response)
 }
@@ -1475,12 +1784,60 @@ fn rendered_article_file(library: &Path, id: &str) -> AppResult<PathBuf> {
     Ok(if rendered.is_file() { rendered } else { article })
 }
 
+fn article_cover_file(library: &Path, id: &str) -> Option<(Vec<u8>, &'static str)> {
+    const MAX_COVER_BYTES: u64 = 5 * 1024 * 1024;
+    const CANDIDATES: &[(&str, &str)] = &[
+        ("cover.jpg", "image/jpeg"),
+        ("cover.png", "image/png"),
+        ("cover.webp", "image/webp"),
+        ("cover.gif", "image/gif"),
+    ];
+    let article = article_file(library, id).ok()?;
+    let folder = article.parent()?;
+    for &(name, mime) in CANDIDATES {
+        let path = folder.join(name);
+        let Ok(file) = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path) else {
+            continue;
+        };
+        let Ok(meta) = file.metadata() else { continue };
+        if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_COVER_BYTES { continue; }
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        if file.take(MAX_COVER_BYTES + 1).read_to_end(&mut bytes).is_ok()
+            && !bytes.is_empty() && (bytes.len() as u64) <= MAX_COVER_BYTES
+        {
+            return Some((bytes, mime));
+        }
+    }
+    None
+}
+
+fn cover_response(library: &Path, id: &str) -> http::Response<Vec<u8>> {
+    match article_cover_file(library, id) {
+        Some((bytes, mime)) => http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, mime)
+            .header(http::header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .header(http::header::CACHE_CONTROL, "private, max-age=31536000, immutable")
+            .body(bytes)
+            .expect("valid cover response"),
+        None => http::Response::builder()
+            .status(http::StatusCode::NOT_FOUND)
+            .header(http::header::CACHE_CONTROL, "no-store")
+            .body(Vec::new())
+            .expect("valid missing cover response"),
+    }
+}
+
 fn preview_response(locations: &Locations, uri: &http::Uri) -> http::Response<Vec<u8>> {
     const POLICY: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
-    let html = percent_decode_str(uri.path().trim_start_matches('/'))
+    let decoded = percent_decode_str(uri.path().trim_start_matches('/'))
         .decode_utf8()
         .ok()
-        .filter(|_| uri.host() == Some("localhost"))
+        .filter(|_| uri.host() == Some("localhost"));
+    if let Some(id) = decoded.as_deref().and_then(|path| path.strip_prefix("cover/")) {
+        return cover_response(&locations.library, id);
+    }
+    let html = decoded
         .and_then(|id| match id.strip_prefix("preview/") {
             Some(preview) => transcript_preview_file(&locations.library, preview).ok(),
             None => rendered_article_file(&locations.library, &id).ok(),
@@ -1815,6 +2172,7 @@ fn main() {
             download_subtitles,
             export_subtitles,
             pick_cookies_file,
+            test_youtube_cookies,
             load_asr_token,
             save_asr_token,
             delete_asr_token,
@@ -1827,6 +2185,7 @@ fn main() {
             delete_api_token,
             check_duplicate,
             delete_article,
+            delete_task_data,
             generate,
             cancel_generation,
             list_articles,
@@ -2432,5 +2791,112 @@ mod tests {
             mode: "browser".into(), browser: "unknown".into(), file_path: String::new(),
         };
         assert!(super::youtube_cookie_args("https://www.youtube.com/watch?v=1-Fo8McCD9w", Some(&bad_browser)).is_err());
+    }
+
+    #[test]
+    fn local_cover_protocol_serves_regular_cover_and_rejects_symlinks_and_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let article_dir = library.join("示例 [youtube-1-Fo8McCD9w]");
+        fs::create_dir_all(&article_dir).unwrap();
+        fs::write(article_dir.join("article.html"), "<html></html>").unwrap();
+        let png = b"\x89PNG\r\n\x1a\n12345678";
+        fs::write(article_dir.join("cover.png"), png).unwrap();
+
+        let locations = Locations {
+            data: dir.path().join("data"),
+            library: library.clone(),
+            english: std::sync::atomic::AtomicBool::new(false),
+        };
+        let uri: tauri::http::Uri = "linkread-reader://localhost/cover/%E7%A4%BA%E4%BE%8B%20%5Byoutube-1-Fo8McCD9w%5D?v=1".parse().unwrap();
+        let response = super::preview_response(&locations, &uri);
+        assert_eq!(response.status(), tauri::http::StatusCode::OK);
+        assert_eq!(response.headers().get(tauri::http::header::CONTENT_TYPE).unwrap(), "image/png");
+        assert_eq!(response.headers().get(tauri::http::header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
+        assert_eq!(response.body().as_slice(), png);
+
+        let traversal: tauri::http::Uri = "linkread-reader://localhost/cover/..%2Fsecret".parse().unwrap();
+        assert_eq!(super::preview_response(&locations, &traversal).status(), tauri::http::StatusCode::NOT_FOUND);
+
+        // Symlinked cover must never be served.
+        fs::remove_file(article_dir.join("cover.png")).unwrap();
+        let external = dir.path().join("secret.jpg");
+        fs::write(&external, b"\xff\xd8\xff\xe0secret").unwrap();
+        std::os::unix::fs::symlink(&external, article_dir.join("cover.jpg")).unwrap();
+        assert_eq!(super::preview_response(&locations, &uri).status(), tauri::http::StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn deleting_article_and_failed_task_clean_all_related_disk_caches_safely() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let data = dir.path().join("data");
+        let key = "youtube-1-Fo8McCD9w";
+        let other_key = "youtube-2-OtherVid9w";
+        let preview_id = "a".repeat(64);
+        let other_preview = "b".repeat(64);
+
+        // Set up an unfinished workspace + staging + preview + ASR cache + managed pasted subtitle.
+        let unfinished = library.join(format!("Video [{key}]"));
+        fs::create_dir_all(unfinished.join(".ai-checkpoints")).unwrap();
+        fs::write(unfinished.join("transcript.json"), "{}").unwrap();
+        fs::write(unfinished.join(".ai-checkpoints/batch.json"), "{}").unwrap();
+
+        let stage = library.join(".generation-staging/stage-one");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("identity.json"), serde_json::json!({"version": 1, "sourceKey": key}).to_string()).unwrap();
+
+        let other_stage = library.join(".generation-staging/stage-other");
+        fs::create_dir_all(&other_stage).unwrap();
+        fs::write(other_stage.join("identity.json"), serde_json::json!({"version": 1, "sourceKey": other_key}).to_string()).unwrap();
+
+        let preview = library.join(".transcript-previews").join(&preview_id);
+        fs::create_dir_all(&preview).unwrap();
+        fs::write(preview.join("request.json"), serde_json::json!({"version": 1, "sourceKey": key, "requests": []}).to_string()).unwrap();
+
+        let keep_preview = library.join(".transcript-previews").join(&other_preview);
+        fs::create_dir_all(&keep_preview).unwrap();
+        fs::write(keep_preview.join("request.json"), serde_json::json!({"version": 1, "sourceKey": other_key, "requests": []}).to_string()).unwrap();
+
+        let asr_dir = library.join(".asr/fp-one");
+        fs::create_dir_all(&asr_dir).unwrap();
+        fs::write(asr_dir.join("transcript.json"), serde_json::json!({"source": {"url": "https://www.youtube.com/watch?v=1-Fo8McCD9w"}}).to_string()).unwrap();
+
+        let managed_import = data.join("subtitle-imports").join(&preview_id);
+        fs::create_dir_all(&managed_import).unwrap();
+        let pasted_file = managed_import.join("pasted.srt");
+        fs::write(&pasted_file, "1\n00:00:00,000 --> 00:00:01,000\nhi\n").unwrap();
+
+        super::remove_task_files(&library, Some(&data), Some(pasted_file.to_str().unwrap()), true, Some(key), Some(&preview_id)).unwrap();
+        assert!(!unfinished.exists());
+        assert!(!stage.exists());
+        assert!(!preview.exists());
+        assert!(!asr_dir.exists());
+        assert!(!managed_import.exists());
+        assert!(other_stage.exists());
+        assert!(keep_preview.exists());
+
+        // Failed regeneration task must NEVER delete a completed article with article.html.
+        let published_id = format!("Published [{other_key}]");
+        let published = library.join(&published_id);
+        fs::create_dir_all(&published).unwrap();
+        fs::write(published.join("article.html"), "<html>ok</html>").unwrap();
+        fs::write(published.join("cover.jpg"), b"\xff\xd8\xff\xe0").unwrap();
+        super::remove_task_files(&library, Some(&data), None, false, Some(other_key), None).unwrap();
+        assert!(published.join("article.html").exists());
+        assert!(!other_stage.exists());
+        assert!(!keep_preview.exists());
+
+        // Deleting the published article removes the folder, backup, and reading position.
+        let backup = library.join(".linkread-backups").join(&published_id);
+        fs::create_dir_all(&backup).unwrap();
+        super::durable_state::save_position(&data, "youtube:2-OtherVid9w", &serde_json::json!({
+            "version": 1, "updatedAt": 1000, "activeTab": "summary", "tabs": {}, "mindmap": null,
+        })).unwrap();
+        remove_article_files(&library, &published_id).unwrap();
+        super::durable_state::delete_position(&data, "youtube:2-OtherVid9w").unwrap();
+        assert!(!published.exists());
+        assert!(!backup.exists());
+        assert_eq!(super::durable_state::load_position(&data, "youtube:2-OtherVid9w").unwrap(), serde_json::Value::Null);
     }
 }

@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from os.path import relpath
 from pathlib import Path
+from threading import Thread
 from urllib.parse import quote
 
 from .ai.checkpoints import RunProvider
@@ -15,6 +16,7 @@ from .ai.polish import polish_reading
 from .ai.provider import StructuredProvider
 from .ai.publication import complete_extras
 from .asr.config import AsrConfig
+from .covers import cover_candidates, download_cover, find_local_cover
 from .errors import LinkReadError, error_context
 from .models import TranscriptDocument
 from .pipeline import extract as extract_document
@@ -107,6 +109,15 @@ def generate_article(
         folder, raw, reused = _run_input(source, root, output, progress, auth_options)
     status = "已复用原始字幕" if reused else "已保存原始字幕"
     report(progress, "saved_transcript", f"{status}：{folder / 'transcript.json'}", work_dir=str(folder))
+    cover_thread: Thread | None = None
+    if find_local_cover(folder) is None:
+        candidates = cover_candidates(raw.source)
+        if candidates:
+            cover_thread = Thread(
+                target=download_cover, args=(candidates, folder),
+                name="linkread-cover", daemon=True,
+            )
+            cover_thread.start()
 
     note_path, saved_note = _run_note(folder, raw)
     cache_dir = folder / ".ai-checkpoints"
@@ -219,6 +230,8 @@ def generate_article(
     write_text(article, render_html(note, extras=completed, home_href=home_href,
                                    category=metadata["category"], description=metadata["description"],
                                    title=metadata["title"], edition=edition))
+    if cover_thread is not None:
+        cover_thread.join(timeout=12)
     metrics = {"wall_seconds": round(time.monotonic() - started, 3),
                "html_seconds": round(time.monotonic() - render_started, 3),
                "model_calls": agent.calls, "cache_hits": agent.cache_hits,

@@ -194,6 +194,25 @@ pub fn save_position(data: &Path, key: &str, position: &Value) -> Result<()> {
     write(&path, &json!({"key":key,"position":position}))
 }
 
+pub fn delete_position(data: &Path, key: &str) -> Result<()> {
+    let id = reading_key(key)?;
+    let folder = data.join("reading-positions");
+    if folder.is_symlink() || !folder.exists() {
+        return Ok(());
+    }
+    let _lock = lock(&folder)?;
+    let path = folder.join(format!("{id}.json"));
+    match fs::symlink_metadata(&path) {
+        Ok(meta) if meta.file_type().is_file() => {
+            fs::remove_file(&path).map_err(|_| "无法删除阅读位置记录".to_owned())?;
+        }
+        Ok(_) => return Err("阅读位置文件类型无效".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("无法检查阅读位置记录".into()),
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

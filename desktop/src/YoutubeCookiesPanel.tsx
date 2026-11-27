@@ -1,7 +1,8 @@
 import { tr } from "./language.ts"
-import { useState } from "react"
-import { ChevronDown, FolderOpen, X } from "lucide-react"
-import { pickCookiesFile } from "./api"
+import { useEffect, useRef, useState } from "react"
+import { ChevronDown, FolderOpen, LoaderCircle, X } from "lucide-react"
+import { pickCookiesFile, testYoutubeCookies } from "./api"
+import { ConnectionRevision } from "./connectionState"
 import { SettingsHelp } from "./SettingsHelp"
 import { youtubeBrowsers, type YoutubeBrowser, type YoutubeCookieMode, type YoutubeCookieOptions } from "./youtubeCookies"
 
@@ -12,6 +13,30 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
 }) {
   const [picking, setPicking] = useState(false)
   const [pickError, setPickError] = useState("")
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string }>()
+  const revision = useRef(new ConnectionRevision())
+  const identityRef = useRef("")
+  const testIdentity = useRef("")
+  const mounted = useRef(true)
+  const identity = JSON.stringify([value.mode, value.browser, value.filePath.trim()])
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      revision.current.invalidate()
+    }
+  }, [])
+
+  if (identityRef.current !== identity) {
+    identityRef.current = identity
+    revision.current.invalidate()
+  }
+  const currentResult = testIdentity.current === identity ? testResult : undefined
+  const canTest = !disabled && !testing && (
+    value.mode === "browser" || (value.mode === "file" && Boolean(value.filePath.trim()))
+  )
 
   async function chooseFile() {
     if (disabled || picking) return
@@ -24,6 +49,27 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
       setPickError(String(error))
     } finally {
       setPicking(false)
+    }
+  }
+
+  async function runTest() {
+    if (!canTest) return
+    setTesting(true)
+    setTestResult(undefined)
+    const token = revision.current.snapshot()
+    testIdentity.current = identity
+    try {
+      const result = await testYoutubeCookies({
+        ...value,
+        filePath: value.filePath.trim(),
+      })
+      if (mounted.current && revision.current.accepts(token)) setTestResult(result)
+    } catch (error) {
+      if (mounted.current && revision.current.accepts(token)) {
+        setTestResult({ ok: false, message: error instanceof Error ? error.message : String(error) })
+      }
+    } finally {
+      if (mounted.current) setTesting(false)
     }
   }
 
@@ -68,7 +114,9 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
               <ChevronDown size={15} aria-hidden="true" />
             </span>
             <p className="settings-field-hint">
-              {tr("请确保该浏览器已登录 YouTube；首次读取时 macOS 可能会弹窗请求钥匙串或磁盘访问权限。")}
+              {value.browser === "safari"
+                ? tr("macOS 默认禁止读取 Safari Cookie，需在「系统设置 → 隐私与安全性 → 完全磁盘访问权限」授权应用（或运行 dev.sh 的终端）；推荐优先使用 Chrome 或 cookies.txt。")
+                : tr("请确保该浏览器已登录 YouTube；首次读取时 macOS 可能会弹窗请求钥匙串或磁盘访问权限。")}
             </p>
           </div>
         </div>
@@ -100,6 +148,18 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
         </div>
       </>}
       {pickError && <p className="settings-test-error" role="alert">{pickError}</p>}
+      {value.mode !== "none" && <>
+        <div className="settings-card-footer settings-connect-row">
+          <button className={currentResult?.ok ? "secondary connection-ok" : "secondary"} type="button"
+            disabled={!canTest} onClick={() => void runTest()}
+            title={tr("仅在本地检查是否能读取到 YouTube Cookie，不上传或打印任何 Cookie 内容")}>
+            {testing ? <LoaderCircle size={15} className="spin" aria-hidden="true" />
+              : currentResult?.ok ? <span className="settings-green-dot" aria-hidden="true" /> : null}
+            {testing ? tr("读取中…") : currentResult?.ok ? tr("已读取 YouTube Cookie") : tr("测试读取 Cookie")}
+          </button>
+        </div>
+        {currentResult && !currentResult.ok && <p className="settings-test-error" role="alert">{currentResult.message}</p>}
+      </>}
     </div>
   </section>
 }

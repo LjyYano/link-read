@@ -49,6 +49,7 @@ export type Article = {
   publishedAt: string | null
   durationMs: number | null
   thumbnailUrl: string | null
+  localCover?: string | null
   isRead?: boolean
   isStarred?: boolean
   previewId?: string
@@ -130,6 +131,8 @@ export const exportArticle = (id: string, format: ExportFormat, options?: Markdo
 export const exportSubtitles = (id: string, format: SubtitleExportFormat, preview = false) =>
   invoke<boolean>("export_subtitles", { id, format, preview, uiLanguage: locale() })
 export const pickCookiesFile = () => invoke<string | null>("pick_cookies_file", { uiLanguage: locale() })
+export const testYoutubeCookies = (options: YoutubeCookieOptions) =>
+  invoke<{ ok: boolean; message: string }>("test_youtube_cookies", { options })
 export const getArticleDetails = (id: string) => invoke<ArticleDetails>("get_article_details", { id })
 export const updateArticleDetails = (id: string, title: string | null, category: string | null, sourceUrl?: string) =>
   invoke<Article>("update_article_details", { id, title, category, ...(sourceUrl === undefined ? {} : { sourceUrl }) })
@@ -145,7 +148,19 @@ export const revealArticle = (id: string) => invoke("reveal_article", { id })
 export const checkDuplicate = (source: string, localFile: boolean, resumePreview?: string) =>
   invoke<Duplicate>("check_duplicate", { source, localFile, resumePreview })
 
-export const deleteArticle = (id: string) => invoke<void>("delete_article", { id })
+export const deleteArticle = (id: string, readingKey?: string | null) =>
+  invoke<void>("delete_article", { id, ...(readingKey ? { readingKey } : {}) })
+export const deleteTaskData = (options: {
+  source?: string | null
+  localFile?: boolean
+  sourceKey?: string | null
+  previewId?: string | null
+}) => invoke<void>("delete_task_data", {
+  ...(options.source ? { source: options.source } : {}),
+  ...(options.localFile !== undefined ? { localFile: options.localFile } : {}),
+  ...(options.sourceKey ? { sourceKey: options.sourceKey } : {}),
+  ...(options.previewId ? { previewIdValue: options.previewId } : {}),
+})
 export const updateArticleState = (id: string, patch: ArticleStatePatch) =>
   invoke<ArticleState>("update_article_state", { id, ...patch })
 export type PreparedArticle = { revision: string; readingKey: string }

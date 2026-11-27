@@ -20,3 +20,20 @@ def write_text(target: Path, content: str, *, replace: bool = True) -> None:
             target.hardlink_to(temporary)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def write_bytes(target: Path, content: bytes, *, replace: bool = True) -> None:
+    """Publish a complete binary file and leave the previous file on failure."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    stream = NamedTemporaryFile(mode="wb", dir=target.parent,
+                                prefix=".linkread-", delete=False)
+    temporary = Path(stream.name)
+    try:
+        with stream:
+            stream.write(content)
+        if replace:
+            temporary.replace(target)
+        else:
+            target.hardlink_to(temporary)
+    finally:
+        temporary.unlink(missing_ok=True)
