@@ -5,7 +5,7 @@
 ## 首次发布前
 
 - 默认使用 [LinkRead 的 GitHub Releases](https://github.com/LjyYano/link-read/releases) 托管更新，正式包的固定检查地址是 [latest.json](https://github.com/LjyYano/link-read/releases/latest/download/latest.json)。首个正式 Release 发布后，这个地址才有清单可读。
-- 在 Mac 钥匙串中安装 **Developer ID Application** 证书。根据 [Tauri 的 Apple 公证说明](https://v2.tauri.app/distribute/sign/macos/#notarization) 设置 App Store Connect API 环境变量 `APPLE_API_KEY`、`APPLE_API_ISSUER`、`APPLE_API_KEY_PATH`，或 Apple ID 环境变量 `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_PASSWORD`。也可通过 `LINKREAD_NOTARY_PROFILE` 指定 DMG 公证使用的钥匙串配置，Tauri 的 App 公证仍使用上述 Apple 环境变量。
+- 在 Mac 钥匙串中安装 **Developer ID Application** 证书。通过 `LINKREAD_NOTARY_PROFILE` 指定 `notarytool` 钥匙串配置即可公证 App 和 DMG。也可使用 App Store Connect API 环境变量 `APPLE_API_KEY`、`APPLE_API_ISSUER`、`APPLE_API_KEY_PATH`，或 Apple ID 环境变量 `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_PASSWORD`。 [Apple 公证文档](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
 - 生成并备份一对 [Tauri 更新签名密钥](https://v2.tauri.app/plugin/updater/#signing-updates)。后续版本继续使用同一私钥签名。将私钥与密码留在本地的安全位置。
 
 ```bash
@@ -16,18 +16,30 @@ npm run tauri -- signer generate -w "$HOME/.tauri/linkread.key"
 
 ## 每次发布
 
-在 `desktop/src-tauri/tauri.conf.json` 设置要发布的版本号。首次编译前按仓库 README 准备 Python 环境和 PyInstaller。确认环境变量 `TAURI_SIGNING_PRIVATE_KEY` 指向私钥，`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已通过本地终端安全设置。
+在 `desktop/src-tauri/tauri.conf.json` 设置要发布的版本号，首次编译前按仓库 README 准备 Python 环境和 PyInstaller。使用钥匙串公证时，设置证书名称与公证配置。
 
 ```bash
 cd desktop
 export APPLE_SIGNING_IDENTITY='Developer ID Application: 你的证书名称'
+export LINKREAD_NOTARY_PROFILE='LinkRead'
+```
+
+若首版仅供用户通过 DMG 安装，可运行以下命令。首包内置更新公钥和更新清单地址。将 DMG 和 `latest.json` 一起发布后，同版本可正常检查；后续发布较高版本时应使用完整的签名发行流程。
+
+```bash
+npm run release:mac -- --public-key "$HOME/.tauri/linkread.key.pub" --first-dmg
+```
+
+已有发行版的用户通过签名更新包升级。确认 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已通过本地终端安全设置，再执行完整构建。
+
+```bash
 export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/linkread.key"
 npm run release:mac -- --public-key "$HOME/.tauri/linkread.key.pub"
 ```
 
 发布标签为 `v<版本号>`，例如配置版本为 `0.1.0` 时使用 `v0.1.0`。若改用其他文件托管，可用 `--feed` 指定长期使用的清单地址，用 `--assets-base` 指定本版本文件的下载目录。脚本为当前架构构建。Apple Silicon 与 Intel 如需同时发布，分别在对应架构环境构建，为同名更新包使用不同下载目录，然后把两份清单的对应 `platforms` 条目合并到同一个 `latest.json`。
 
-脚本打印四份发行文件：
+完整构建会列出四份发行文件。首发 DMG 模式只产出第一项及更新清单。
 
 - `.dmg` 供用户首次下载安装。安装时将 LinkRead 拖入「应用程序」。
 - `.app.tar.gz` 供已安装的应用下载更新。

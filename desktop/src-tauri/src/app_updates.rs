@@ -39,7 +39,7 @@ pub async fn check_app_update(
     }
     let updater = app
         .updater_builder()
-        .timeout(Duration::from_secs(600))
+        .timeout(Duration::from_secs(15))
         .configure_client(|client| {
             client
                 .https_only(true)
@@ -71,16 +71,17 @@ pub async fn install_app_update(
     version: String,
 ) -> AppResult<()> {
     let mut pending = updates.0.try_lock().map_err(|_| "update_busy")?;
-    let update = pending
+    let mut update = pending
         .as_ref()
         .filter(|update| update.version == version)
-        .ok_or("update_check_failed")?;
+        .ok_or("update_check_failed")?
+        .clone();
+    update.timeout = Some(Duration::from_secs(600));
     let _installing = generation.begin_update()?;
     let bytes = update
         .download(|_, _| {}, || {})
         .await
         .map_err(|_| "update_download_failed")?;
-    let update = update.clone();
     tauri::async_runtime::spawn_blocking(move || update.install(bytes))
         .await
         .map_err(|_| "update_install_failed")?
