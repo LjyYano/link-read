@@ -1,82 +1,37 @@
-# LinkRead Desktop
+<p align="center"><img src="desktop/src-tauri/icons/icon.png" width="80" alt=""></p>
+<h1 align="center">LinkRead</h1>
+<p align="center">Turn videos and podcast episodes into articles you can search, quote, and read offline on your Mac.</p>
+<p align="center"><strong>English</strong> · <a href="README_CN.md">简体中文</a></p>
+<p align="center"><a href="https://github.com/LjyYano/link-read/releases/latest/download/LinkRead-macos-arm64.dmg"><strong>Download for Mac (Apple Silicon)</strong></a> · <a href="https://github.com/LjyYano/link-read/releases/latest">Release notes</a></p>
 
-LinkRead 的桌面客户端：把 YouTube、B 站视频、Apple Podcasts 单集和本地字幕整理成完整阅读文章，支持书架、搜索、思维导图、金句、阅读进度及 HTML / Markdown 导出。
+## Why LinkRead?
 
-**这是独立维护的桌面应用，计划商业发行。** 免费 CLI 由 [link-read-cli](https://github.com/LjyYano/link-read-cli) 仓库以 GPL 许可提供。桌面应用采用[专有源码许可](LICENSE)，自带后端，无需安装 CLI。
+- **Find the part worth reading.** Skim the summary of a long interview, then click a chapter to jump to the speaker’s words. The mind map lets you explore how the topics fit together.
+- **Quote a speaker in context.** Press **⌘F** to find a phrase in the transcript or the publisher’s show notes. In **Highlights**, choose **Copy with source** to keep a quote with its timestamp and, for online sources, a link back to the episode or video.
+- **Pick up where you stopped.** Your library remembers your place. Choose **Continue reading** on Home to return to the same passage, or press **⌘K** to find another article by title or author.
+- **Keep a copy.** Export a single HTML file to read offline in a browser, or save a Markdown version for your notes. You can include the timestamped transcript when you want it.
 
-# 1. 项目结构
+## Make your first article
 
-| 目录 | 职责 |
-| --- | --- |
-| `desktop/src/` | React / TypeScript 界面 |
-| `desktop/src-tauri/` | Tauri / Rust 原生窗口、文件操作和进程管理 |
-| `src/linkread_desktop/` | 桌面内部 Python 后端：提取、AI、ASR、书架与阅读导出 |
-| `desktop/scripts/` | Python sidecar、图标和 App 打包工具 |
-| `tests/`、`desktop/tests/` | 后端与前端离线回归验证 |
+1. **Install the app.** On a Mac with an M-series chip, open the downloaded DMG, drag LinkRead into Applications, and launch it.
+2. **Connect your AI provider.** Open **Settings → AI generation**. For **Custom API**, enter your provider’s OpenAI-compatible API base URL, model ID, and API key. You can also use a signed-in Codex CLI or Claude Code configured with an Anthropic API key. Choose **Save settings**.
+3. **Add something to read.** On Home, paste a YouTube or Bilibili video link, or the share link to an individual Apple Podcasts episode. You can also drop in a subtitle file (SRT, VTT, or subtitle JSON from LinkRead or Bilibili). Choose **Generate article**.
+4. **Start reading.** Once the subtitles are ready, **Read original** opens the transcript while the AI works. The finished article appears in your library. For future articles, **Settings → Language → Generated page language** lets you keep the subtitle language or choose English or Simplified Chinese.
 
-后端通过 `python -m linkread_desktop.desktop` 与原生进程通信，不提供公共 `linkread` 命令，不引用相邻仓库。
+**Try it with a 35-second example.** Open the sample on GitHub and choose **Download raw file**. Drag it into Home and choose **Generate article**. In the original transcript, press **⌘F** and search for `bell` to find both mentions of the bicycle bell. [Soundwalk.vtt](docs/examples/Soundwalk.vtt)
 
-# 2. 本地开发
+![The LinkRead reader showing both matches for “bell” in the Soundwalk transcript.](docs/images/reader-search.png)
 
-需要 macOS、Xcode 命令行工具、Rust 1.90+、Node.js 22.12+ 和 Python 3.11+。
+## Common questions
 
-```bash
-git clone https://github.com/LjyYano/link-read.git
-cd link-read
+**What if a link has no subtitles?** Choose **Check source** to see whether public subtitles are available. You can import your own file or, for eligible public audio, enable **Settings → Transcribe when subtitles are unavailable**. This optional service is off by default. It uses Alibaba Cloud Model Studio for personal testing, keeps temporary audio uploads for about 48 hours, and may incur charges.
 
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[youtube,test]'
+**Can I read offline?** Yes. Your library stays on your Mac, and you can read and export saved articles offline. If you use a cloud AI provider to generate an article, it receives the subtitle text and may charge for processing it.
 
-npm ci --prefix desktop
-sh desktop/dev.sh
-```
+**How do I update?** LinkRead checks for a new version at launch. You can also choose **LinkRead → Check for Updates…** from the Mac menu bar.
 
-开发模式默认读取本仓库的 `.venv/bin/python`。需要其他解释器时，通过 `LINKREAD_PYTHON` 指定绝对路径。详见[桌面功能与开发说明](desktop/README.md)。
+---
 
-# 3. 构建 App
+[Feedback](https://github.com/LjyYano/link-read/issues) · [Developer guide (Chinese)](desktop/README.md#开发) · [Command-line edition](https://github.com/LjyYano/link-read-cli)
 
-在仓库根目录准备本机架构的 Python 环境，然后构建：
-
-```bash
-.venv/bin/python -m pip install 'pyinstaller>=6,<7'
-cd desktop
-npm run app
-```
-
-产物位于 `desktop/src-tauri/target/release/bundle/macos/LinkRead.app`。App 带有自己的 Python 后端、运行时、yt-dlp 和离线阅读资源。
-
-打包时自动收集项目与实际依赖的许可证、版本和文件哈希，随 sidecar 和 App 的 `Contents/Resources/licenses/` 分发。缺少许可正文会报出具体组件并停止打包；处理方式见[许可收集说明](desktop/licenses/README.md)。
-
-当前配置使用临时签名用于本机测试。公开分发须完成 Developer ID 签名、Apple 公证及实机安装验证；支付、激活和订阅系统尚未接入。
-
-首次发布 DMG 时就应写入正式更新地址和验签公钥。使用 [macOS 发布流程](docs/macos-release.md) 生成签名、公证的 DMG 与自动更新所需文件。
-
-# 4. 本地验证
-
-桌面应用的启动和界面验证统一在仓库根目录运行 `sh desktop/dev.sh`。离线测试和前端构建使用下列命令。
-
-```bash
-.venv/bin/python -m pytest -q
-cd desktop
-npm ci
-npm run build
-node --test tests/*.test.mjs
-```
-
-本仓库不使用 GitHub Actions。提交与合并消息使用 `[skip ci]`。各项已执行验证和平台限制见 [docs/migration.md](docs/migration.md)。
-
-# 5. 迁移与数据兼容
-
-迁移源为原仓库固定快照 `a2297a5a7fe98d50435ce6bed1449ffca92e2aca`。它已经包含桌面设置、任务恢复、阅读状态和导出等功能；本次保留这些行为，并把后端改为独立的 `linkread_desktop` 包。
-
-应用标识 `com.yano.linkread`、阅读协议、资料库位置和持久化键保持兼容。默认资料库仍在 `~/Library/Application Support/com.yano.linkread/library`；环境变量 `LINKREAD_DESKTOP_LIBRARY` 可以指定已有资料库。迁移不会搬动或删除用户资料。
-
-# 6. 许可与协作
-
-- 项目自有代码：[LICENSE](LICENSE)。
-- 历史来源与授权边界：[docs/licensing.md](docs/licensing.md)。
-- 第三方声明：[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-- 品牌政策：[TRADEMARK.md](TRADEMARK.md)。
-- 私有开发与贡献政策：[CONTRIBUTING.md](CONTRIBUTING.md)。
-
-本仓库没有 CLA，不默认接收外部源码贡献；后续引入他人代码必须具有适用于本产品的授权。
+LinkRead Desktop is proprietary. [License](LICENSE) · [Project history and licensing](docs/licensing.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)

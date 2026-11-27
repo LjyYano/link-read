@@ -12,7 +12,7 @@
 
 # 3. 本地开发与验证
 
-按 [README.md](README.md) 创建本仓库自己的虚拟环境，不依赖相邻的 CLI checkout 或已安装的 `linkread` 包。
+按[桌面开发指南](desktop/README.md#开发)创建本仓库自己的虚拟环境，不依赖相邻的 CLI checkout 或已安装的 `linkread` 包。
 
 ```bash
 .venv/bin/python -m pytest -q

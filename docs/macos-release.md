@@ -16,7 +16,7 @@ npm run tauri -- signer generate -w "$HOME/.tauri/linkread.key"
 
 ## 每次发布
 
-在 `desktop/src-tauri/tauri.conf.json` 设置要发布的版本号，首次编译前按仓库 README 准备 Python 环境和 PyInstaller。DMG 的 Finder 布局由 `dmgbuild` 写入镜像，构建时将它装在同一 Python 环境。使用钥匙串公证时，设置证书名称与公证配置。
+在 `desktop/src-tauri/tauri.conf.json` 设置要发布的版本号，首次编译前按[桌面开发指南](../desktop/README.md#开发)准备 Python 环境，并按其中的 App 构建步骤安装 PyInstaller。DMG 的 Finder 布局由 `dmgbuild` 写入镜像，构建时将它装在同一 Python 环境。使用钥匙串公证时，设置证书名称与公证配置。
 
 ```bash
 .venv/bin/python -m pip install 'dmgbuild>=1.6,<2'
@@ -38,7 +38,7 @@ export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/linkread.key"
 npm run release:mac -- --public-key "$HOME/.tauri/linkread.key.pub"
 ```
 
-发布标签为 `v<版本号>`，例如配置版本为 `0.1.0` 时使用 `v0.1.0`。附件名使用 `LinkRead-macos-<架构>`，其中 Apple Silicon 为 `arm64`，Intel 为 `amd64`。发布页在简介下直接链接安装包，随后提供英文 Changelog 和中文更新日志。
+发布标签为 `v<版本号>`，例如配置版本为 `0.1.0` 时使用 `v0.1.0`。附件名使用 `LinkRead-macos-<架构>`，其中 Apple Silicon 为 `arm64`，Intel 为 `amd64`。发布页先写英文 Changelog，再写中文更新日志。安装包放在 Assets，仓库首页的下载链接指向最新版本的 DMG。
 
 若改用其他文件托管，可用 `--feed` 指定长期使用的清单地址，用 `--assets-base` 指定本版本文件的下载目录。脚本为当前架构构建。Apple Silicon 与 Intel 如需同时发布，分别在对应架构环境构建，把两份清单的 `platforms` 条目合并到同一个 `latest.json`，再将两个架构的附件上传至同一版本。
 
