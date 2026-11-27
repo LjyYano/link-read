@@ -34,6 +34,7 @@ from .renderers.catalog import load_catalog, load_user_metadata
 from .renderers.markdown import render_markdown
 from .renderers.html import render_html
 from .renderers.reading_state import reading_state_key
+from .renderers.shownotes import description_html
 from .renderers.site import article_metadata, load_transcript, load_document
 from .storage import write_text
 from .source_notes import MAX_SOURCE_NOTES_BYTES, with_source_notes
@@ -350,35 +351,36 @@ def _prepared_reader(article: Path) -> dict:
     return remember_reader(article, signature, html, reading_state_key(document))
 
 
-def _prepare_reader(article: Path) -> str:
-    return _prepared_reader(article)["revision"]
-
-
-def _refresh_shownotes(article: Path) -> str:
+def _refresh_shownotes(article: Path) -> dict:
     _, _, raw = _article_source(article)
     url = source_info_link(raw.source)
-    if not url or raw.source.platform == "local":
-        raise LinkReadError("本地字幕没有可加载的原始简介")
-    source = shownotes_metadata(url)
+    key = video_source_key(url) if url else None
+    if not url or not key:
+        raise LinkReadError("这篇文章没有可获取简介的原始来源", code="shownotes_source_missing")
+    with error_context("shownotes"):
+        source = shownotes_metadata(url)
     refreshed_url = source_info_link(source)
     if (source.platform != raw.source.platform or not refreshed_url
-            or video_source_key(url) != video_source_key(refreshed_url)):
-        raise LinkReadError("来源简介与当前文章不匹配，未保存")
+            or key != video_source_key(refreshed_url)):
+        raise LinkReadError("来源简介与当前文章不匹配，未保存", code="shownotes_source_mismatch")
     if not source.description or not source.description.strip():
-        raise LinkReadError("该来源暂未提供可读取的 Shownotes，已保留现有简介")
+        return {"status": "empty"}
     overlay = article.with_name(".source-metadata.json")
     content = json.dumps({
-        "version": 1, "sourceKey": _source_key(raw),
+        "version": 1, "sourceKey": key,
         "description": source.description, "descriptionFormat": source.description_format,
     }, ensure_ascii=False) + "\n"
     if len(content.encode("utf-8")) > MAX_SOURCE_NOTES_BYTES:
-        raise LinkReadError("来源 Shownotes 过大，已保留现有简介")
+        raise LinkReadError("来源 Shownotes 过大，已保留现有简介", code="shownotes_too_large")
+    if source.description_format == "html" and not description_html(source):
+        return {"status": "empty"}
     with archive_mutation(article.parent.parent):
         _article_path(article.parent.parent, article.parent.name)
-        if overlay.is_symlink():
-            raise LinkReadError("来源简介文件不可用")
+        archive_signature(article.parent)
+        if _source_key(load_transcript(article.with_name("transcript.json"))) != key:
+            raise LinkReadError("来源简介与当前文章不匹配，未保存", code="shownotes_source_mismatch")
         write_text(overlay, content)
-        return _prepare_reader(article)
+        return {"status": "updated", **_prepared_reader(article)}
 
 
 
@@ -751,10 +753,7 @@ def main() -> int:
                   sourceKey=_source_key(raw), article=_preview_record(library, args.preview_id, raw))
         elif args.command == "refresh-shownotes":
             article = _article_path(library, args.article_id)
-            _refresh_shownotes(article)
-            with archive_mutation(library):
-                prepared = _prepared_reader(article)
-            _emit("reader", **prepared)
+            _emit("shownotes", **_refresh_shownotes(article))
         else:
             _emit("markdown", text=_article_markdown(library, args.article_id, content=args.content,
                 include_timestamped=args.include_timestamped == "true"))

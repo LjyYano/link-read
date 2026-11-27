@@ -44,6 +44,9 @@ _REQUESTS = {
 _ERRORS = {
     "unsupported_source": "Use a supported video, podcast episode, or subtitle file.",
     "source_missing": "Subtitle file not found. Select it again.",
+    "shownotes_source_missing": "This article has no source from which to fetch Shownotes.",
+    "shownotes_source_mismatch": "The description did not match this article's source. Existing Shownotes were kept.",
+    "shownotes_too_large": "The source description is too large to save. Existing Shownotes were kept.",
     "linked_source_unavailable": "Could not load the title or cover for this link. Your article details were kept.",
     "linked_source_changed": "This article changed. Reopen Edit details and save again.",
     "subtitles_unavailable": "No usable subtitles are available for this source. Import subtitles or enable speech recognition in Settings.",
@@ -108,7 +111,13 @@ def localize_event(kind: str, fields: dict) -> dict:
             message += f" ({fields['completed']}/{fields['total']})"
         return {**fields, "message": message or "Processing the article"}
     if kind == "error":
-        message = _ERRORS.get(fields.get("code"))
+        code = fields.get("code")
+        message = _ERRORS.get(code)
+        if fields.get("stage") == "shownotes":
+            if code in {"extraction_failed", "operation_failed"}:
+                message = "Could not read the description from the original source. Try again later."
+            elif code == "source_timeout":
+                message = "The source timed out while loading Shownotes. Try again."
         # Unknown upstream diagnostics may contain private URLs or credentials.
         return {**fields, "message": message or "The operation could not be completed. Check the input and try again."}
     if kind == "connection":

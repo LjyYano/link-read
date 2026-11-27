@@ -96,6 +96,13 @@ struct PreparedReader {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum ShownotesRefresh {
+    Empty,
+    Updated(PreparedReader),
+}
+
+#[derive(Deserialize, Serialize)]
 struct PreparedPreview {
     #[serde(flatten)]
     prepared: PreparedReader,
@@ -1304,10 +1311,15 @@ fn transcript_preview_file(library: &Path, id: &str) -> AppResult<PathBuf> {
 }
 
 #[tauri::command]
-async fn refresh_shownotes(locations: State<'_, Locations>, id: String) -> AppResult<PreparedReader> {
+async fn refresh_shownotes(locations: State<'_, Locations>, id: String) -> AppResult<ShownotesRefresh> {
     article_file(&locations.library, &id)?;
+    let timeout = if locations.language() == "en" {
+        "Loading Shownotes timed out. Try again."
+    } else {
+        "加载 Shownotes 超时，请稍后重试"
+    };
     query_with_timeout(&locations, &["refresh-shownotes", "--", &id], Duration::from_secs(60),
-        "加载 Shownotes 超时，请稍后重试").await
+        timeout).await
 }
 
 fn article_file(library: &Path, id: &str) -> AppResult<PathBuf> {
@@ -1644,6 +1656,18 @@ mod tests {
     use std::{path::Path, process::Stdio, time::{Duration, Instant}};
     use std::sync::atomic::AtomicBool;
     use tokio::process::Command;
+
+    #[test]
+    fn shownotes_refresh_distinguishes_empty_and_updated_responses() {
+        let empty: super::ShownotesRefresh = serde_json::from_value(serde_json::json!({
+            "type": "shownotes", "status": "empty",
+        })).unwrap();
+        assert_eq!(serde_json::to_value(empty).unwrap(), serde_json::json!({"status": "empty"}));
+
+        let updated = serde_json::json!({"status": "updated", "revision": "new", "readingKey": "original"});
+        let response: super::ShownotesRefresh = serde_json::from_value(updated.clone()).unwrap();
+        assert_eq!(serde_json::to_value(response).unwrap(), updated);
+    }
 
     #[test]
     fn installation_and_generation_cannot_overlap() {

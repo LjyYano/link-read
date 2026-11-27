@@ -143,7 +143,8 @@ export const updateArticleState = (id: string, patch: ArticleStatePatch) =>
   invoke<ArticleState>("update_article_state", { id, ...patch })
 export type PreparedArticle = { revision: string; readingKey: string }
 export const prepareArticle = (id: string) => invoke<PreparedArticle>("prepare_article", { id })
-export const refreshShownotes = (id: string) => invoke<PreparedArticle>("refresh_shownotes", { id })
+type ShownotesResult = { status: "empty" } | ({ status: "updated" } & PreparedArticle)
+export const refreshShownotes = (id: string) => invoke<ShownotesResult>("refresh_shownotes", { id })
 export const preparePreview = (id: string) => invoke<PreparedArticle & { article: Article }>("prepare_preview", { id })
 export const loadTaskJournal = () => invoke<unknown>("load_task_journal")
 export const saveTaskJournal = (journal: TaskJournal) => invoke<void>("save_task_journal", { journal })

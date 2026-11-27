@@ -6,7 +6,7 @@ import pytest
 
 from linkread_desktop import desktop
 from linkread_desktop.article_state import patch_reading_state, reading_state
-from linkread_desktop.errors import LinkReadError
+from linkread_desktop.errors import ExtractionError, LinkReadError
 from linkread_desktop.models import SourceInfo
 from test_desktop import invoke
 from test_desktop_duplicate import make_archive
@@ -116,7 +116,7 @@ def test_explicit_shownotes_refresh_saves_exact_source_description_only(tmp_path
     calls = []
     monkeypatch.setattr(desktop, "shownotes_metadata", lambda url: calls.append(url) or source)
     status, events = invoke(monkeypatch, capsys, tmp_path, "refresh-shownotes", archive.name)
-    assert status == 0 and events[0]["revision"]
+    assert status == 0 and events[0]["status"] == "updated" and events[0]["revision"]
     assert calls == ["https://www.youtube.com/watch?v=1-Fo8McCD9w"]
     page = (archive / ".reader.html").read_text()
     assert "Source notes" in page and 'https://example.com/' in page
@@ -126,14 +126,59 @@ def test_explicit_shownotes_refresh_saves_exact_source_description_only(tmp_path
     assert status == 0 and "Source notes" in events[0]["text"]
 
 
-@pytest.mark.parametrize("wrong_id", [False, True])
-def test_refresh_does_not_erase_saved_notes_on_empty_or_wrong_source(tmp_path, monkeypatch, wrong_id):
+@pytest.mark.parametrize("description, description_format", [
+    (None, None), (" \n", "text"), ('<p>&nbsp;</p><script>ignored</script>', "html"),
+])
+def test_empty_shownotes_refresh_is_a_normal_result(tmp_path, monkeypatch, capsys, description, description_format):
+    archive = make_archive(tmp_path)
+    before = {path.name: path.read_bytes() for path in archive.iterdir()}
+    source = SourceInfo(platform="youtube", title="Source", video_id="1-Fo8McCD9w",
+                        description=description, description_format=description_format)
+    monkeypatch.setenv("LINKREAD_UI_LANGUAGE", "en")
+    monkeypatch.setattr(desktop, "shownotes_metadata", lambda _: source)
+    assert invoke(monkeypatch, capsys, tmp_path, "refresh-shownotes", archive.name) == (
+        0, [{"type": "shownotes", "status": "empty"}],
+    )
+    assert {path.name: path.read_bytes() for path in archive.iterdir()} == before
+
+
+def test_empty_shownotes_refresh_preserves_saved_notes_and_reader(tmp_path, monkeypatch, capsys):
+    archive = make_archive(tmp_path)
+    overlay = archive / ".source-metadata.json"
+    overlay.write_text('{"version":1,"sourceKey":"youtube-1-Fo8McCD9w","description":"keep","descriptionFormat":"text"}')
+    status, events = invoke(monkeypatch, capsys, tmp_path, "reader", archive.name)
+    assert status == 0
+    prepared_revision = events[0]["revision"]
+    before = {path.name: path.read_bytes() for path in archive.iterdir()}
+    source = SourceInfo(platform="youtube", title="Source", video_id="1-Fo8McCD9w")
+    monkeypatch.setattr(desktop, "shownotes_metadata", lambda _: source)
+    assert invoke(monkeypatch, capsys, tmp_path, "refresh-shownotes", archive.name) == (
+        0, [{"type": "shownotes", "status": "empty"}],
+    )
+    assert {path.name: path.read_bytes() for path in archive.iterdir()} == before
+    assert invoke(monkeypatch, capsys, tmp_path, "reader", archive.name)[1][0]["revision"] == prepared_revision
+
+
+def test_shownotes_refresh_reports_source_errors_in_english(tmp_path, monkeypatch, capsys):
+    archive = make_archive(tmp_path)
+    monkeypatch.setenv("LINKREAD_UI_LANGUAGE", "en")
+
+    def unavailable(_):
+        raise ExtractionError("暂时无法读取简介")
+
+    monkeypatch.setattr(desktop, "shownotes_metadata", unavailable)
+    status, events = invoke(monkeypatch, capsys, tmp_path, "refresh-shownotes", archive.name)
+    assert status == 1 and events[0]["type"] == "error"
+    assert events[0]["message"] == "Could not read the description from the original source. Try again later."
+    assert not (archive / ".source-metadata.json").exists()
+
+
+def test_refresh_does_not_erase_saved_notes_on_wrong_source(tmp_path, monkeypatch):
     archive = make_archive(tmp_path)
     overlay = archive / ".source-metadata.json"
     original = '{"version":1,"sourceKey":"youtube-1-Fo8McCD9w","description":"keep","descriptionFormat":"text"}'
     overlay.write_text(original)
-    source = SourceInfo(platform="youtube", title="Source", video_id="N4jBc7_ThnE" if wrong_id else "1-Fo8McCD9w",
-                        description="different" if wrong_id else None)
+    source = SourceInfo(platform="youtube", title="Source", video_id="N4jBc7_ThnE", description="different")
     monkeypatch.setattr(desktop, "shownotes_metadata", lambda _: source)
     with pytest.raises(LinkReadError):
         desktop._refresh_shownotes(archive / "article.html")
@@ -146,7 +191,7 @@ def test_reader_cache_symlink_is_not_followed(tmp_path):
     target.write_text("unchanged")
     (archive / ".reader.html").symlink_to(target)
     with pytest.raises(LinkReadError, match="阅读缓存"):
-        desktop._prepare_reader(archive / "article.html")
+        desktop._prepared_reader(archive / "article.html")
     assert target.read_text() == "unchanged"
 
 

@@ -13,7 +13,7 @@ import "./reader.css"
 type Menu = "export" | "more"
 type PreparedReader = { status: "loading" } | { status: "ready"; revision: string; readingKey: string; shownotes: boolean }
   | { status: "error"; message: string }
-type ShownotesRefresh = { status: "idle" } | { status: "loading" } | { status: "error"; message: string }
+type ShownotesRefresh = { status: "idle" | "loading" | "empty" } | { status: "error"; message: string }
 
 export type PreviewTask = { id: string; status: Job["status"]; message?: string; activity?: TaskActivity; article?: Article; onOpenComplete: () => void }
 
@@ -65,11 +65,10 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
   }
 
   const prepare = useCallback(async (refreshing = false) => {
-    if (preparing.current) return
+    if (preparing.current || (refreshing && (!articleReady.current || article.previewId))) return
     preparing.current = true
     const version = ++prepareVersion.current
-    const keepArticle = refreshing && articleReady.current
-    if (keepArticle) setShownotesRefresh({ status: "loading" })
+    if (refreshing) setShownotesRefresh({ status: "loading" })
     else {
       articleReady.current = false
       setPrepared({ status: "loading" })
@@ -77,16 +76,20 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
     }
     try {
       if (refreshing) await positionBridge.current?.flush()
+      if (version !== prepareVersion.current) return
       const result = await (article.previewId ? preparePreview(article.previewId)
         : refreshing ? refreshShownotes(article.id) : prepareArticle(article.id))
-      if (version === prepareVersion.current) {
-        articleReady.current = true
-        setPrepared({ status: "ready", revision: result.revision, readingKey: result.readingKey, shownotes: refreshing })
-        setShownotesRefresh({ status: "idle" })
+      if (version !== prepareVersion.current) return
+      if ("status" in result && result.status === "empty") {
+        setShownotesRefresh({ status: "empty" })
+        return
       }
+      articleReady.current = true
+      setPrepared({ status: "ready", revision: result.revision, readingKey: result.readingKey, shownotes: refreshing })
+      setShownotesRefresh({ status: "idle" })
     } catch (failure) {
       if (version === prepareVersion.current) {
-        if (keepArticle) setShownotesRefresh({ status: "error", message: String(failure) })
+        if (refreshing) setShownotesRefresh({ status: "error", message: String(failure) })
         else setPrepared({ status: "error", message: String(failure) })
       }
     } finally {
@@ -324,12 +327,14 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
       {error && <p className="desktop-reader-error" role="alert">{error}</p>}
       {shownotesRefresh.status !== "idle" && <div className="reader-shownotes-refresh"
         role={shownotesRefresh.status === "error" ? "alert" : "status"} data-state={shownotesRefresh.status}>
-        {shownotesRefresh.status === "loading"
-          ? <><LoaderCircle size={14} className="spin" aria-hidden="true" /><span>{tr("Fetching Shownotes…")}</span></>
-          : <><CircleAlert size={14} aria-hidden="true" /><span>{tr("Could not fetch Shownotes.")} {shownotesRefresh.message}</span>
-            <button className="text-button" type="button" onClick={() => void prepare(true)}><RotateCw size={13} />{tr("Retry")}</button>
-            <button className="icon-button" type="button" aria-label={tr("Dismiss Shownotes error")} onClick={() => setShownotesRefresh({ status: "idle" })}><X size={14} /></button>
-          </>}
+        {shownotesRefresh.status === "loading" && <><LoaderCircle size={14} className="spin" aria-hidden="true" /><span>{tr("Fetching Shownotes…")}</span></>}
+        {shownotesRefresh.status === "empty" && <span>{tr("No Shownotes are available from the original source.")}</span>}
+        {shownotesRefresh.status === "error" && <>
+          <CircleAlert size={14} aria-hidden="true" /><span>{tr("Could not fetch Shownotes.")} {shownotesRefresh.message}</span>
+          <button className="text-button" type="button" onClick={() => void prepare(true)}><RotateCw size={13} />{tr("Retry")}</button>
+        </>}
+        {shownotesRefresh.status !== "loading" && <button className="icon-button" type="button"
+          aria-label={tr("Dismiss Shownotes notice")} onClick={() => setShownotesRefresh({ status: "idle" })}><X size={14} /></button>}
       </div>}
       {prepared.status === "ready" ? <iframe ref={frame} className="desktop-reader-frame" sandbox="allow-scripts allow-same-origin allow-modals" title={article.title}
         src={`linkread-reader://localhost/${article.previewId ? `preview/${encodeURIComponent(article.previewId)}` : encodeURIComponent(article.id)}?v=${encodeURIComponent(prepared.revision)}&platform=${article.platform}${prepared.shownotes ? "#shownotes" : ""}`} />
