@@ -16,7 +16,7 @@ export function AppUpdateDialog({ prompt, busy, onClose, onCheck, onInstall }: {
   switch (prompt.status) {
     case "checking": message = tr("正在检查更新…"); break
     case "checkFailed": message = tr("无法检查更新，请检查网络连接后重试。"); break
-    case "unconfigured": message = tr("此构建未配置更新服务。"); break
+    case "unconfigured": message = tr("此安装包未启用自动更新。请安装带更新配置的正式发行版。"); break
     case "current": message = tr("LinkRead {0} 已是最新版本。", prompt.currentVersion); break
     case "available": message = tr("当前版本 {0}。安装更新后，LinkRead 将自动重新打开。", prompt.currentVersion); break
     case "installing": message = tr("正在下载、验证并安装更新…"); break

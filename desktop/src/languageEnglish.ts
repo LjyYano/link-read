@@ -443,7 +443,7 @@ export const english: Readonly<Record<string, string>> = {
   "检查更新": "Check for Updates",
   "正在检查更新…": "Checking for updates…",
   "无法检查更新，请检查网络连接后重试。": "Could not check for updates. Check your connection and try again.",
-  "此构建未配置更新服务。": "Updates are unavailable in this build.",
+  "此安装包未启用自动更新。请安装带更新配置的正式发行版。": "Automatic updates are disabled in this build. Install an official release with updates enabled.",
   "LinkRead {0} 已是最新版本。": "LinkRead {0} is up to date.",
   "LinkRead {0} 可用": "LinkRead {0} is available",
   "当前版本 {0}。安装更新后，LinkRead 将自动重新打开。": "You have version {0}. LinkRead will reopen after installing the update.",

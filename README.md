@@ -2,7 +2,7 @@
 
 LinkRead 的桌面客户端：把 YouTube、B 站视频、Apple Podcasts 单集和本地字幕整理成完整阅读文章，支持书架、搜索、思维导图、金句、阅读进度及 HTML / Markdown 导出。
 
-**这是独立维护的私有桌面应用，计划商业发行。** 免费 CLI 在 [link-read](https://github.com/LjyYano/link-read) 仓库采用 GPL；本仓库采用[专有源码许可](LICENSE)，自带后端，无需安装 CLI。
+**这是独立维护的桌面应用，计划商业发行。** 免费 CLI 由 [link-read-cli](https://github.com/LjyYano/link-read-cli) 仓库以 GPL 许可提供。桌面应用采用[专有源码许可](LICENSE)，自带后端，无需安装 CLI。
 
 # 1. 项目结构
 
@@ -21,8 +21,8 @@ LinkRead 的桌面客户端：把 YouTube、B 站视频、Apple Podcasts 单集�
 需要 macOS、Xcode 命令行工具、Rust 1.90+、Node.js 22.12+ 和 Python 3.11+。
 
 ```bash
-git clone https://github.com/LjyYano/link-read-desktop.git
-cd link-read-desktop
+git clone https://github.com/LjyYano/link-read.git
+cd link-read
 
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[youtube,test]'

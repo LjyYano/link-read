@@ -13,6 +13,8 @@ from urllib.parse import quote, urlsplit
 
 
 DESKTOP = Path(__file__).resolve().parents[1]
+RELEASES_URL = "https://github.com/LjyYano/link-read/releases"
+DEFAULT_FEED = f"{RELEASES_URL}/latest/download/latest.json"
 TARGETS = {"arm64": ("aarch64", "aarch64"), "x86_64": ("x86_64", "x64")}
 
 
@@ -62,8 +64,8 @@ def manifest(version, arch, assets_base, archive, public_data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--feed", required=True, type=https_url, help="用户长期访问的更新清单地址")
-    parser.add_argument("--assets-base", required=True, type=https_url, help="本版本下载文件所在的 HTTPS 目录")
+    parser.add_argument("--feed", default=DEFAULT_FEED, type=https_url, help=f"更新清单地址，默认 {DEFAULT_FEED}")
+    parser.add_argument("--assets-base", type=https_url, help="文件下载目录，默认使用本仓库的 v<版本号> Release")
     parser.add_argument("--public-key", required=True, type=Path, help="Tauri 更新公钥 .pub 文件")
     options = parser.parse_args()
 
@@ -79,6 +81,8 @@ def main():
     target = f"{arch}-apple-darwin"
     native = DESKTOP / "src-tauri"
     base = json.loads((native / "tauri.conf.json").read_text())
+    product, version = base["productName"], base["version"]
+    assets_base = options.assets_base or f"{RELEASES_URL}/download/v{quote(version, safe='')}"
     config = json.loads((native / "tauri.macos-bundle.json").read_text())
     public_key = options.public_key.expanduser().read_text(encoding="ascii").strip()
     public_data = minisign_data(public_key)
@@ -92,7 +96,6 @@ def main():
     cargo = subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
                                     cwd=native, text=True)
     bundle = Path(json.loads(cargo)["target_directory"]) / target / "release" / "bundle"
-    product, version = base["productName"], base["version"]
     app = bundle / "macos" / f"{product}.app"
     archive = app.with_suffix(".app.tar.gz")
     dmg = bundle / "dmg" / f"{product}_{version}_{dmg_arch}.dmg"
@@ -103,7 +106,7 @@ def main():
                         "--target", target, "--bundles", "app,dmg"], cwd=DESKTOP, check=True,
                        env={**os.environ, "LINKREAD_SIDECAR_SIGNING_IDENTITY": identity})
 
-    metadata = manifest(version, arch, options.assets_base, archive, public_data)
+    metadata = manifest(version, arch, assets_base, archive, public_data)
     subprocess.run(["codesign", "--verify", "--deep", "--strict", app], check=True)
     subprocess.run(["xcrun", "stapler", "validate", app], check=True)
     subprocess.run(["codesign", "--verify", dmg], check=True)
