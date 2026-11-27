@@ -31,6 +31,7 @@ import { SourceReadinessPanel } from "./SourceReadinessPanel"
 import { flushReadingPositions } from "./readingPositionBridge"
 import { progressFromEvent } from "./progress"
 import { SerialTaskQueue } from "./taskQueue"
+import { GenerationSettingsGate } from "./generationSettings"
 import { TaskJournalWriter, parseTaskJournal, restoreTaskJournal, resumeNeedsAsrConfirmation, taskSnapshot,
   type GenerationInput, type TaskJournal } from "./taskJournal"
 import { recordProgress } from "./taskProgress"
@@ -49,6 +50,11 @@ type Screen = "create" | "library" | "settings" | "reader"
 type ReadingOrigin = { screen: Exclude<Screen, "reader">; scroll: number; tasks: boolean; completedArticleId?: string; taskId?: string }
 type ActiveGeneration = GenerationInput & { replacementArticleId?: string }
 const storageKey = "linkread-preferences"
+const settingsWriteKey = "linkread-settings-write-pending"
+
+function hasPendingSettingsWrite(): boolean {
+  try { return localStorage.getItem(settingsWriteKey) !== null } catch { return true }
+}
 
 function loadPreferences(): Preferences {
   try {
@@ -181,6 +187,16 @@ function App() {
   const sourceReadiness = useSourceReadiness(source, localPath !== null)
   const [inputError, setInputError] = useState("")
   const [preferences, setPreferences] = useState(loadPreferences)
+  const [settingsRecovery, setSettingsRecovery] = useState(hasPendingSettingsWrite)
+  const settingsGate = useRef(new GenerationSettingsGate({
+    readPreferences: loadPreferences,
+    hasPendingWrite: hasPendingSettingsWrite,
+    setPendingWrite: pending => {
+      if (pending) localStorage.setItem(settingsWriteKey, "1")
+      else localStorage.removeItem(settingsWriteKey)
+      setSettingsRecovery(pending)
+    },
+  }))
   const [toolStatus, setToolStatus] = useState<ToolStatus>()
   const [apiTokenVersion, setApiTokenVersion] = useState(0)
   const [toolError, setToolError] = useState("")
@@ -626,6 +642,7 @@ function App() {
     taskTimes.current = times
     changeJobs(next)
     if (replaceId) setPreviewTaskId(current => current === replaceId ? id : current)
+    let releaseSettings: (() => void) | undefined
     taskQueue.current.enqueue({
       id,
       beforeStart: async () => {
@@ -633,6 +650,7 @@ function App() {
           throw { message: tr("任务尚未开始：无法保存恢复记录。") + String(failure),
             code: "task_journal", stage: null, retryable: true, action: "retry" }
         }
+        releaseSettings = await settingsGate.current.admit(spec)
       },
       onStart: () => {
         requestId.current = id
@@ -647,7 +665,7 @@ function App() {
           spec.identity = mergeArticleMetadata(spec.identity, event.metadata)
           if (event.previewId) spec.previewId = event.previewId
           updateTask(id, job => updateJob(job, event) ?? job)
-        }, id, spec.localFile, spec.replace, spec.baseUrl, spec.model, spec.asr, spec.previewId, spec.pageLanguage),
+        }, () => releaseSettings?.(), id, spec.localFile, spec.replace, spec.baseUrl, spec.model, spec.asr, spec.previewId, spec.pageLanguage),
       onSuccess: generated => {
         if (!spec.localFile) forgetSourceReadiness(spec.input)
         updateTask(id, () => ({ status: "done", article: generated }))
@@ -669,6 +687,7 @@ function App() {
         }))
       },
       onFinish: () => {
+        releaseSettings?.()
         if (requestId.current === id) requestId.current = null
       },
     })
@@ -1067,6 +1086,7 @@ function App() {
           <Settings preferences={preferences} onSave={configure} leaveGuard={settingsLeaveGuard} target={settingsTarget}
             language={language} onLanguageChange={changeLanguage} languageError={languageError}
             onTokenChanged={() => setApiTokenVersion(current => current + 1)}
+            settingsGate={settingsGate.current} settingsRecovery={settingsRecovery}
             onBack={() => navigateTo(previousScreen)} />
         )}
         {screen === "reader" && article && <Reader key={`${article.id}:${readerSession}`} article={article} onBack={returnFromReader} backLabel={backLabel}

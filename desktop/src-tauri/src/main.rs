@@ -16,12 +16,16 @@ use std::{
     env,
     ffi::OsString,
     fs,
+    future::{poll_fn, Future},
     io::{self, Write},
+    net::{Ipv4Addr, Ipv6Addr},
     os::{fd::AsRawFd, unix::{fs::{OpenOptionsExt, PermissionsExt}, process::CommandExt}},
     path::{Component, Path, PathBuf},
-    process::Stdio,
+    pin::pin,
+    process::{ExitStatus, Stdio},
     sync::{Mutex, atomic::{AtomicBool, Ordering}},
-    time::Duration,
+    task::Poll,
+    time::{Duration, Instant},
 };
 
 use percent_encoding::percent_decode_str;
@@ -33,6 +37,7 @@ use tokio::{
     process::{Child, Command},
     sync::oneshot,
 };
+use url::Host;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,6 +213,7 @@ struct Generation(Mutex<GenerationState>);
 struct GenerationState {
     active: Option<ActiveProcess>,
     updating: bool,
+    exiting: bool,
     cancelled_requests: VecDeque<String>,
     finished_requests: VecDeque<String>,
 }
@@ -215,7 +221,24 @@ struct GenerationState {
 struct ActiveProcess {
     request_id: String,
     pid: Option<i32>,
-    cancelled: bool,
+    cancel_deadline: Option<Instant>,
+    cancel_notice: Option<oneshot::Sender<Instant>>,
+}
+
+const GENERATION_CANCEL_GRACE: Duration = Duration::from_secs(5);
+
+struct GenerationChild<'a> {
+    generation: &'a Generation,
+    request_id: &'a str,
+    child: Child,
+}
+
+impl Drop for GenerationChild<'_> {
+    fn drop(&mut self) {
+        // An abandoned generation future may drop its child before the app's
+        // exit handler. Clear ownership while the child still pins its PID.
+        self.generation.kill_owned_group(self.request_id, false);
+    }
 }
 
 struct UpdateInstall<'a> {
@@ -231,7 +254,7 @@ impl Drop for UpdateInstall<'_> {
 impl Generation {
     fn begin_update(&self) -> AppResult<UpdateInstall<'_>> {
         let mut state = self.0.lock().unwrap();
-        if state.active.is_some() || state.updating {
+        if state.active.is_some() || state.updating || state.exiting {
             return Err("update_busy".into());
         }
         state.updating = true;
@@ -260,32 +283,56 @@ impl Generation {
         if state.active.is_some() {
             return Err("已有文章正在生成".into());
         }
+        if state.exiting {
+            return Err("已取消生成".into());
+        }
         if state.updating {
             return Err("LinkRead 正在安装更新，请重启后再试".into());
         }
         state.active = Some(ActiveProcess {
             request_id: request_id.to_owned(),
             pid: None,
-            cancelled: false,
+            cancel_deadline: None,
+            cancel_notice: None,
         });
         Ok(())
     }
 
-    fn spawn(&self, request_id: &str, command: &mut Command) -> AppResult<Child> {
+    fn spawn<'a>(&'a self, request_id: &'a str, command: &mut Command) -> AppResult<(GenerationChild<'a>, oneshot::Receiver<Instant>)> {
         let mut state = self.0.lock().unwrap();
         let active = state
             .active
             .as_mut()
             .filter(|active| active.request_id == request_id)
             .ok_or_else(|| "找不到正在启动的生成任务".to_owned())?;
-        if active.cancelled {
+        if active.cancel_deadline.is_some() {
             return Err("已取消生成".into());
         }
+        command.as_std_mut().process_group(0);
         let child = command
+            .kill_on_drop(true)
             .spawn()
             .map_err(|error| details("无法启动 LinkRead 核心", error))?;
+        let (notice, cancelled) = oneshot::channel();
         active.pid = child.id().map(|pid| pid as i32);
-        Ok(child)
+        active.cancel_notice = Some(notice);
+        Ok((GenerationChild { generation: self, request_id, child }, cancelled))
+    }
+
+    fn try_reap(&self, request_id: &str, child: &mut Child) -> io::Result<Option<ExitStatus>> {
+        let mut state = self.0.lock().unwrap();
+        let active = state.active.as_mut().filter(|active| active.request_id == request_id)
+            .ok_or_else(|| io::Error::other("generation is no longer active"))?;
+        // Keep the group leader unreaped through escalation. Its PID pins the
+        // group ID even if a descendant closes stdout or the leader exits first.
+        if active.cancel_deadline.is_some() {
+            return Ok(None);
+        }
+        let status = child.try_wait();
+        if !matches!(status, Ok(None)) {
+            active.pid = None;
+        }
+        status
     }
 
     fn finish(&self, request_id: &str) -> bool {
@@ -295,7 +342,7 @@ impl Generation {
             .as_ref()
             .is_some_and(|active| active.request_id == request_id)
         {
-            state.active.take().is_some_and(|active| active.cancelled)
+            state.active.take().is_some_and(|active| active.cancel_deadline.is_some())
         } else {
             false
         };
@@ -304,6 +351,10 @@ impl Generation {
     }
 
     fn cancel(&self, request_id: &str) -> AppResult<()> {
+        self.cancel_with_grace(request_id, GENERATION_CANCEL_GRACE)
+    }
+
+    fn cancel_with_grace(&self, request_id: &str, grace: Duration) -> AppResult<()> {
         validate_request_id(request_id)?;
         let mut state = self.0.lock().unwrap();
         if let Some(active) = state
@@ -311,7 +362,7 @@ impl Generation {
             .as_mut()
             .filter(|active| active.request_id == request_id)
         {
-            return stop_process(active);
+            return stop_process(active, grace);
         }
         if !state.finished_requests.iter().any(|id| id == request_id) {
             // IPC scheduling may deliver cancellation before generate starts.
@@ -320,9 +371,32 @@ impl Generation {
         Ok(())
     }
 
-    fn cancel_active(&self) {
-        if let Some(active) = self.0.lock().unwrap().active.as_mut() {
-            let _ = stop_process(active);
+    fn kill_owned_group(&self, request_id: &str, cancelled_only: bool) {
+        let mut state = self.0.lock().unwrap();
+        if let Some(active) = state.active.as_mut().filter(|active| active.request_id == request_id
+            && (!cancelled_only || active.cancel_deadline.is_some()))
+        {
+            if let Some(pid) = active.pid.take() {
+                let _ = signal_process_group(pid, libc::SIGKILL);
+            }
+        }
+    }
+
+    fn cancel_active_on_exit(&self, grace: Duration) {
+        let pending = {
+            let mut state = self.0.lock().unwrap();
+            state.exiting = true;
+            state.active.as_mut().and_then(|active| {
+                if stop_process(active, grace).is_err() {
+                    mark_cancelled(active, grace);
+                }
+                active.pid.zip(active.cancel_deadline)
+                    .map(|(_, deadline)| (active.request_id.clone(), deadline))
+            })
+        };
+        if let Some((request_id, deadline)) = pending {
+            std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+            self.kill_owned_group(&request_id, true);
         }
     }
 }
@@ -343,17 +417,28 @@ fn remember_request(requests: &mut VecDeque<String>, request_id: &str) {
     }
 }
 
-fn stop_process(active: &mut ActiveProcess) -> AppResult<()> {
-    if let Some(pid) = active.pid {
-        // The sidecar and the CLI processes it starts share this process group.
-        if unsafe { libc::kill(-pid, libc::SIGTERM) } != 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() != Some(libc::ESRCH) {
-                return Err(details("无法取消生成，请重试", error));
-            }
-        }
+fn signal_process_group(pid: i32, signal: i32) -> io::Result<()> {
+    // The sidecar and the CLI processes it starts share this process group.
+    if unsafe { libc::kill(-pid, signal) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) { return Err(error); }
     }
-    active.cancelled = true;
+    Ok(())
+}
+
+fn mark_cancelled(active: &mut ActiveProcess, grace: Duration) {
+    let deadline = Instant::now() + grace;
+    active.cancel_deadline = Some(deadline);
+    if let Some(notice) = active.cancel_notice.take() { let _ = notice.send(deadline); }
+}
+
+fn stop_process(active: &mut ActiveProcess, grace: Duration) -> AppResult<()> {
+    if active.cancel_deadline.is_none() {
+        if let Some(pid) = active.pid {
+            signal_process_group(pid, libc::SIGTERM).map_err(|error| details("无法取消生成，请重试", error))?;
+        }
+        mark_cancelled(active, grace);
+    }
     Ok(())
 }
 
@@ -657,9 +742,11 @@ async fn check_duplicate(
 fn validated_api_base_url(base: &str) -> AppResult<()> {
     let value = base.trim();
     let url = Url::parse(value).map_err(|_| "请输入有效的 API Base URL".to_owned())?;
-    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
+    let host = url.host();
+    let loopback = matches!(host, Some(Host::Domain("localhost") | Host::Ipv4(Ipv4Addr::LOCALHOST)
+        | Host::Ipv6(Ipv6Addr::LOCALHOST)));
     if (url.scheme() != "https" && !(url.scheme() == "http" && loopback))
-        || url.host_str().is_none() || !url.username().is_empty()
+        || host.is_none() || !url.username().is_empty()
         || url.password().is_some() || url.query().is_some() || url.fragment().is_some()
         || url.path().trim_end_matches('/').ends_with("/chat/completions")
     {
@@ -810,6 +897,7 @@ async fn generate(
     provider: Provider,
     executable: String,
     progress: Channel<Progress>,
+    credentials_read: Channel<()>,
     local_file: Option<bool>,
     base_url: Option<String>,
     model: Option<String>,
@@ -825,6 +913,9 @@ async fn generate(
         local_file.unwrap_or(false), asr.as_ref(), resume_preview.as_deref(), page_language.as_deref());
     let result = match command {
         Ok(mut command) => {
+            // The command owns the credential snapshot. Settings can now commit
+            // a new configuration while this generation runs.
+            let _ = credentials_read.send(());
             if let Some(language @ ("en" | "zh-CN")) = ui_language.as_deref() { command.env("LINKREAD_UI_LANGUAGE", language); }
             run_generation(&state, &request_id, &mut command, progress).await
         }
@@ -942,15 +1033,45 @@ async fn run_generation(
     command: &mut Command,
     progress: Channel<Progress>,
 ) -> GenerationResult<Article> {
-    let mut child = state.spawn(request_id, command).map_err(GenerationFailure::core)?;
-
-    let result = generation_result(&mut child, progress).await;
-    let status = child.wait().await;
+    let (mut process, cancelled) = state.spawn(request_id, command).map_err(GenerationFailure::core)?;
+    let mut cancelled = Some(cancelled);
+    let completed = {
+        let mut work = pin!(async {
+            let result = generation_result(&mut process.child, progress).await;
+            let status = loop {
+                match state.try_reap(request_id, &mut process.child) {
+                    Ok(None) => tokio::time::sleep(Duration::from_millis(20)).await,
+                    Ok(Some(status)) => break Ok(status),
+                    Err(error) => break Err(error),
+                }
+            };
+            (result, status)
+        });
+        let first = poll_fn(|cx| {
+            if let Some(notice) = cancelled.as_mut() {
+                match pin!(notice).poll(cx) {
+                    Poll::Ready(Ok(deadline)) => return Poll::Ready(Err(deadline)),
+                    Poll::Ready(Err(_)) => cancelled = None,
+                    Poll::Pending => {},
+                }
+            }
+            work.as_mut().poll(cx).map(Ok)
+        }).await;
+        match first {
+            Ok(completed) => Some(completed),
+            Err(deadline) => tokio::time::timeout_at(deadline.into(), work.as_mut()).await.ok(),
+        }
+    };
+    let Some((result, status)) = completed else {
+        state.kill_owned_group(request_id, true);
+        // Drop the stdout reader even if a descendant left the process group
+        // with the pipe open. Bound the direct child's reap separately.
+        let _ = tokio::time::timeout(Duration::from_secs(1), process.child.wait()).await;
+        return Err(GenerationFailure::cancelled());
+    };
     let article = result?;
-    if !status
-        .map_err(|error| GenerationFailure::core(details("无法读取 LinkRead 的退出状态", error)))?
-        .success()
-    {
+    if !status.map_err(|error| GenerationFailure::core(details("无法读取 LinkRead 的退出状态", error)))?
+        .success() {
         return Err(GenerationFailure::core("LinkRead 核心异常退出，请重试".into()));
     }
     Ok(article)
@@ -1511,7 +1632,7 @@ fn main() {
             {
                 api.prevent_exit();
             }
-            tauri::RunEvent::Exit => app.state::<Generation>().cancel_active(),
+            tauri::RunEvent::Exit => app.state::<Generation>().cancel_active_on_exit(GENERATION_CANCEL_GRACE),
             _ => {}
         });
 }
@@ -1808,13 +1929,69 @@ mod tests {
         generation.begin("starting").unwrap();
         generation.cancel("starting").unwrap();
         let mut command = Command::new("/this-command-must-not-run");
-        assert_eq!(
-            generation.spawn("starting", &mut command).unwrap_err(),
-            "已取消生成"
-        );
+        assert_eq!(generation.spawn("starting", &mut command).err().unwrap(), "已取消生成");
         assert!(generation.finish("starting"));
         generation.begin("retry").unwrap();
         assert!(!generation.finish("retry"));
+    }
+
+    #[test]
+    fn generation_cancellation_kills_a_term_resistant_descendant_after_the_leader_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let pid_file = directory.path().join("pids");
+        let script = r#"
+            /bin/sh -c 'trap "" TERM; printf "%s %s\n" "$2" "$$" > "$1"; exec sleep 60' child "$1" "$$" >/dev/null &
+            wait
+        "#;
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let generation = std::sync::Arc::new(Generation::default());
+            generation.begin("stubborn").unwrap();
+            let worker = generation.clone();
+            let mut command = query_test_command(script, &pid_file);
+            let running = tokio::spawn(async move {
+                let channel = super::Channel::new(|_| Ok(()));
+                let result = super::run_generation(&worker, "stubborn", &mut command, channel).await;
+                assert!(worker.finish("stubborn"));
+                result
+            });
+            let pids = query_process_ids(&pid_file, 2).await;
+            let grace = Duration::from_millis(150);
+            let started = Instant::now();
+            generation.cancel_with_grace("stubborn", grace).unwrap();
+            assert!(generation.begin("next").is_err());
+            let failure = tokio::time::timeout(grace + Duration::from_millis(750), running)
+                .await.expect("generation did not finish within the cancellation limit")
+                .unwrap().err().expect("a cancelled generation must not succeed");
+            assert_eq!(failure.code, "cancelled");
+            assert!(started.elapsed() >= grace);
+            assert_query_processes_stopped(&pids).await;
+            generation.begin("next").unwrap();
+            assert!(!generation.finish("next"));
+        });
+    }
+
+    #[test]
+    fn app_exit_kills_a_term_resistant_sidecar_without_the_async_supervisor() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let pid_file = directory.path().join("pid");
+        let script = r#"trap '' TERM; printf '%s\n' "$$" > "$1"; exec sleep 60"#;
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+            let generation = Generation::default();
+            generation.begin("exit").unwrap();
+            let mut command = query_test_command(script, &pid_file);
+            let (mut process, _) = generation.spawn("exit", &mut command).unwrap();
+            query_process_ids(&pid_file, 1).await;
+            let grace = Duration::from_millis(100);
+            let started = Instant::now();
+            generation.cancel_active_on_exit(grace);
+            let exit_status = tokio::time::timeout(Duration::from_millis(750), process.child.wait()).await.unwrap().unwrap();
+            assert_eq!(exit_status.signal(), Some(libc::SIGKILL));
+            assert!(started.elapsed() >= grace && started.elapsed() < grace + Duration::from_millis(750));
+            assert!(generation.finish("exit"));
+            assert!(generation.begin("later").is_err());
+        });
     }
 
     #[test]
@@ -1912,7 +2089,9 @@ mod tests {
     fn api_urls_reject_http_remote_and_embedded_tokens() {
         assert!(validated_api_base_url("https://api.deepseek.com/v1").is_ok());
         assert!(validated_api_base_url("http://127.0.0.1:8000/v1").is_ok());
-        assert!(validated_api_base_url("http://api.example.com/v1").is_err());
+        assert!(validated_api_base_url("http://[::1]:8000/v1").is_ok());
+        assert!(validated_api_base_url("http://[::2]/v1").is_err());
+        assert!(validated_api_base_url("http://example.com/v1").is_err());
         assert!(validated_api_base_url("https://user:pass@api.example.com/v1").is_err());
         assert!(validated_api_base_url("https://api.example.com/v1?key=secret").is_err());
     }

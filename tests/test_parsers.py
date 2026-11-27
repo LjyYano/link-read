@@ -1,7 +1,9 @@
 import pytest
 
 from linkread_desktop.errors import ExtractionError, SubtitleUnavailableError
-from linkread_desktop.parsers import parse_bilibili_json, parse_srt_vtt
+from linkread_desktop.extractors.apple_podcasts import _timed_transcript
+from linkread_desktop.extractors.local import extract_local
+from linkread_desktop.parsers import has_rolling_caption_markers, parse_bilibili_json, parse_srt_vtt
 
 
 def test_srt_timestamps_multiline_and_bom():
@@ -28,9 +30,17 @@ Ignore me
 00:00:01.000 --> 00:00:02.000
 Good morning &amp; welcome
 """
-    result = parse_srt_vtt(source)
-    assert [s.text for s in result] == ["Good", "morning & welcome"]
-    assert [s.start_ms for s in result] == [0, 1000]
+    # Default parsing preserves all cues and timestamps without deduplication.
+    preserved = parse_srt_vtt(source)
+    assert [(s.start_ms, s.end_ms, s.text) for s in preserved] == [
+        (0, 1000, "Good"),
+        (500, 1500, "Good"),
+        (1000, 2000, "Good morning & welcome"),
+    ]
+    # Explicit rolling=True applies YouTube rolling auto-caption deduplication.
+    deduped = parse_srt_vtt(source, rolling=True)
+    assert [s.text for s in deduped] == ["Good", "morning & welcome"]
+    assert [s.start_ms for s in deduped] == [0, 1000]
 
 
 @pytest.mark.parametrize("second_start", ["00:00:02,000", "00:00:03,000"])
@@ -49,6 +59,83 @@ def test_non_overlapping_spoken_repetitions_remain_complete(first, second, secon
     assert result[1].end_ms == 4000
 
 
+@pytest.mark.parametrize(("first", "second"), [
+    ("完全没问题", "完全没问题"),
+    ("那么会出现什么情况", "会出现什么情况"),
+    ("完全没问题", "完全没问题啊"),
+])
+def test_overlapping_dialogue_in_local_srt_is_preserved_verbatim(tmp_path, first, second):
+    source = (
+        f"1\n00:00:01,000 --> 00:00:03,000\n{first}\n\n"
+        f"2\n00:00:01,500 --> 00:00:04,000\n{second}\n"
+    )
+    path = tmp_path / "dialogue.srt"
+    path.write_text(source, encoding="utf-8")
+    doc = extract_local(path)
+    assert [(cue.start_ms, cue.end_ms, cue.text) for cue in doc.segments] == [
+        (1000, 3000, first),
+        (1500, 4000, second),
+    ]
+
+
+@pytest.mark.parametrize(("first", "second"), [
+    ("Good morning", "Good morning"),
+    ("Good morning", "morning"),
+    ("Good morning", "Good morning everyone"),
+])
+def test_plain_local_vtt_without_auto_markers_preserves_overlapping_dialogue(tmp_path, first, second):
+    source = (
+        "WEBVTT\n\n"
+        "NOTE <00:00:00.500> <c>comment tags must not trigger rolling mode</c>\n\n"
+        f"00:00:01.000 --> 00:00:03.000\n<v Speaker 1>{first}</v>\n\n"
+        f"00:00:01.500 --> 00:00:04.000\n<v Speaker 2>{second}</v>\n"
+    )
+    assert has_rolling_caption_markers(source) is False
+    path = tmp_path / "interview.vtt"
+    path.write_text(source, encoding="utf-8")
+    doc = extract_local(path)
+    assert [(cue.start_ms, cue.end_ms, cue.text) for cue in doc.segments] == [
+        (1000, 3000, first),
+        (1500, 4000, second),
+    ]
+
+
+@pytest.mark.parametrize("marker_cue", [
+    "Good<00:00:00.500> morning",
+    "<c>Good</c> <c.colorE5E5E5>morning</c>",
+])
+def test_local_vtt_with_youtube_auto_caption_markers_still_deduplicates(tmp_path, marker_cue):
+    source = (
+        "WEBVTT\n\n"
+        f"00:00:00.000 --> 00:00:02.000 align:start\n{marker_cue}\n\n"
+        "00:00:01.000 --> 00:00:03.000\nmorning\n\n"
+        "00:00:02.000 --> 00:00:04.000\nGood morning everyone\n"
+    )
+    assert has_rolling_caption_markers(source) is True
+    path = tmp_path / "youtube-auto.vtt"
+    path.write_text(source, encoding="utf-8")
+    doc = extract_local(path)
+    assert [(cue.start_ms, cue.end_ms, cue.text) for cue in doc.segments] == [
+        (0, 2000, "Good morning"),
+        (2000, 4000, "everyone"),
+    ]
+
+
+def test_apple_podcasts_timed_transcript_behavior_is_unchanged():
+    content = (
+        b"WEBVTT\n\n"
+        b"00:00:01.000 --> 00:00:03.000\nGood morning\n\n"
+        b"00:00:01.500 --> 00:00:04.000\nGood morning\n\n"
+        b"00:00:02.000 --> 00:00:04.500\nGood morning everyone\n"
+    )
+    segments = _timed_transcript(content)
+    assert [(s.start_ms, s.end_ms, s.text) for s in segments] == [
+        (1000, 3000, "Good morning"),
+        (1500, 4000, "Good morning"),
+        (2000, 4500, "Good morning everyone"),
+    ]
+
+
 def test_rolling_snapshots_stop_deduplicating_after_display_interval():
     source = """WEBVTT
 
@@ -64,7 +151,7 @@ Good morning everyone
 00:00:04.000 --> 00:00:05.000
 everyone
 """
-    result = parse_srt_vtt(source)
+    result = parse_srt_vtt(source, rolling=True)
     assert [(cue.start_ms, cue.end_ms, cue.text) for cue in result] == [
         (0, 2000, "Good morning"), (2000, 4000, "everyone"), (4000, 5000, "everyone"),
     ]

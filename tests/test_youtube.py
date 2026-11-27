@@ -116,3 +116,49 @@ def test_youtube_listed_but_empty_or_broken_subtitle_does_not_trigger_asr(monkey
     with pytest.raises(ExtractionError) as failure:
         extract(URL, asr=AsrConfig())
     assert failure.value.code == "youtube_subtitle_invalid"
+
+
+def test_youtube_manual_captions_preserve_overlapping_identical_suffix_and_prefix_cues(monkeypatch):
+    vtt = (
+        b"WEBVTT\n\n"
+        b"00:00:01.000 --> 00:00:03.000\nGood morning\n\n"
+        b"00:00:01.500 --> 00:00:03.500\nGood morning\n\n"
+        b"00:00:02.000 --> 00:00:04.000\nmorning\n\n"
+        b"00:00:02.500 --> 00:00:05.000\nmorning everyone\n"
+    )
+    FakeYoutubeDL.info = {
+        "id": VIDEO_ID, "title": "Dialogue",
+        "subtitles": {"en": [{"ext": "vtt", "url": "https://captions.example/manual"}]},
+        "automatic_captions": {},
+    }
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    monkeypatch.setattr(FakeYoutubeDL, "urlopen", lambda _self, _url: io.BytesIO(vtt))
+    doc = extract_youtube(URL)
+    assert [(s.start_ms, s.end_ms, s.text) for s in doc.segments] == [
+        (1000, 3000, "Good morning"),
+        (1500, 3500, "Good morning"),
+        (2000, 4000, "morning"),
+        (2500, 5000, "morning everyone"),
+    ]
+
+
+def test_youtube_automatic_captions_keep_rolling_deduplication(monkeypatch):
+    vtt = (
+        b"WEBVTT\n\n"
+        b"00:00:00.000 --> 00:00:02.000\nGood morning\n\n"
+        b"00:00:00.500 --> 00:00:02.500\nGood morning\n\n"
+        b"00:00:01.000 --> 00:00:03.000\nmorning\n\n"
+        b"00:00:02.000 --> 00:00:04.000\nGood morning everyone\n"
+    )
+    FakeYoutubeDL.info = {
+        "id": VIDEO_ID, "title": "Auto",
+        "subtitles": {},
+        "automatic_captions": {"en": [{"ext": "vtt", "url": "https://captions.example/auto"}]},
+    }
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    monkeypatch.setattr(FakeYoutubeDL, "urlopen", lambda _self, _url: io.BytesIO(vtt))
+    doc = extract_youtube(URL)
+    assert [(s.start_ms, s.end_ms, s.text) for s in doc.segments] == [
+        (0, 2000, "Good morning"),
+        (2000, 4000, "everyone"),
+    ]

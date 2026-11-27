@@ -40,6 +40,14 @@ function fieldError(field) {
   return error => error instanceof SettingsValidationError && error.field === field
 }
 
+test("API configuration allows HTTP for IPv6 loopback only", () => {
+  const baseUrl = "http://[::1]:8000/v1"
+  assert.deepEqual(validateApiConfiguration({ baseUrl, model: "model" }, "test-token"), { baseUrl, model: "model" })
+  for (const invalid of ["http://[::2]/v1", "http://example.com/v1"]) {
+    assert.throws(() => validateApiConfiguration({ baseUrl: invalid, model: "model" }, "test-token"), fieldError("api-url"))
+  }
+})
+
 test("normalization copies the draft, trims paste spacing and preserves invalid control characters", () => {
   const value = draft()
   value.preferences.api.baseUrl += "/ "

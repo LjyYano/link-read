@@ -16,6 +16,34 @@
     "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=2"
   },
   {
+    "input": "https://www.bilibili.com/video/BV1H4sJ6XEF5/?vd_source=x&AMP;p=2",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=2"
+  },
+  {
+    "input": "https://www.bilibili.com/video/BV1H4sJ6XEF5/?vd_source=x&#38;p=2",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=2"
+  },
+  {
+    "input": "https://www.bilibili.com/video/BV1H4sJ6XEF5/?vd_source=x&#x26;p=2",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=2"
+  },
+  {
+    "input": "https://www.bilibili.com/list/watchlater?bvid=BV1H4sJ6XEF5&#X26;p=2",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=2"
+  },
+  {
+    "input": "https://www.bilibili.com/video/BV1H4sJ6XEF5/?vd_source=x&#038;p=2",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=1"
+  },
+  {
+    "input": "https://www.bilibili.com/video/BV1H4sJ6XEF5/?vd_source=x&AMPp=2",
+    "output": "https://www.bilibili.com/video/BV1H4sJ6XEF5?p=1"
+  },
+  {
+    "input": "https://www.youtube.com/watch?v&equals;1-Fo8McCD9w",
+    "output": null
+  },
+  {
     "input": "https\\://www\\.youtube.com/watch\\\\?v\\\\=1-Fo8McCD9w",
     "output": "https://www.youtube.com/watch?v=1-Fo8McCD9w"
   },

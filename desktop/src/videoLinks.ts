@@ -3,7 +3,7 @@ import { tr } from "./language.ts"
 export function normalizeVideoLink(source: string): string {
   let text = source.trim()
   if (/https?\\*:/i.test(text)) {
-    text = text.replace(/\\+([:/?.=&_#%\-])/g, "$1").replace(/&amp;/g, "&")
+    text = text.replace(/\\+([:/?.=&_#%\-])/g, "$1").replace(/&(?:amp|#38|#x26);/gi, "&")
     const matches = [...new Set((text.match(/https?:\/\/[^\s<>"\[\]【】「」]+/gi) ?? [])
       .map(value => value.replace(/[).,;!，。；！）']+$/, "")))]
     if (matches.length > 1) throw new Error(tr("检测到多个链接，请一次提交一个视频或播客单集"))

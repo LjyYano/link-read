@@ -13,6 +13,7 @@ import { AsrSettingsPanel } from "./AsrSettingsPanel"
 import { ConnectionRevision } from "./connectionState"
 import { SettingsHelp } from "./SettingsHelp"
 import { SettingsSecretField } from "./SettingsSecretField"
+import type { GenerationSettingsGate } from "./generationSettings"
 import {
   saveSettingsDraft, settingsDraftEqual, SettingsSaveError, SettingsValidationError,
   validateApiConfiguration, type Preferences, type SettingsDraft,
@@ -21,11 +22,14 @@ import "./settings.css"
 
 export type SettingsTarget = "ai" | "asr"
 
-export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGuard, target, language, onLanguageChange, languageError }: {
+export function Settings({ preferences, onSave, onBack, onTokenChanged, settingsGate, settingsRecovery,
+  leaveGuard, target, language, onLanguageChange, languageError }: {
   preferences: Preferences
   onSave: (preferences: Preferences) => void
   onBack: () => void
   onTokenChanged: () => void
+  settingsGate: GenerationSettingsGate
+  settingsRecovery: boolean
   leaveGuard: RefObject<(() => boolean) | null>
   target?: SettingsTarget
   language: LanguageSettings
@@ -245,8 +249,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
     setError("")
     const original = baseline[kind]
     try {
-      if (kind === "apiToken") await deleteApiToken()
-      else await deleteAsrToken()
+      await settingsGate.withLock(kind === "apiToken" ? deleteApiToken : deleteAsrToken)
       if (!mounted.current) return
       setBaseline(current => ({ ...current, [kind]: "" }))
       setDraft(current => ({ ...current, [kind]: current[kind] === original ? "" : current[kind] }))
@@ -264,15 +267,15 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (disabled || savingNow.current || testing || asrTesting || !dirty) return
+    if (disabled || savingNow.current || testing || asrTesting || (!dirty && !settingsRecovery)) return
     savingNow.current = true
     setSaving(true)
     setError("")
     setSavedNotice(false)
     try {
-      const saved = await saveSettingsDraft(draft, baseline, {
+      const saved = await settingsGate.save(() => saveSettingsDraft(draft, baseline, {
         saveApiToken, deleteApiToken, saveAsrToken, deleteAsrToken, savePreferences: onSave,
-      })
+      }))
       if (!mounted.current) return
       setDraft(saved)
       setBaseline(saved)
@@ -379,6 +382,9 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
         onClearToken={testing || asrTesting ? undefined : () => void clearCredential("asrToken")}
         disabled={disabled} onTestingChange={setAsrTesting} />
       {error && <p id="settings-error" className="settings-error" role="alert" tabIndex={-1}>{error}</p>}
+      {settingsRecovery && !saving && <p className="settings-error" role="alert">
+        {tr("上次未能完成设置保存。请核对服务地址和密钥，然后重新保存设置。")}
+      </p>}
       <footer className="settings-actions">
         <span className="settings-save-status" role="status" data-state={savedNotice && !dirty ? "saved" : undefined}>
           {loading ? tr("正在读取配置…") : saving ? tr("正在保存…") : asrTesting ? tr("正在测试转写…") : testing ? tr("正在测试连接…")
@@ -386,7 +392,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, leaveGua
         </span>
         <div className="settings-action-buttons">
           <button className="plain" type="button" disabled={saving} onClick={onBack}>{tr("取消")}</button>
-          <button className="primary" type="submit" disabled={disabled || testing || asrTesting || !dirty}
+          <button className="primary" type="submit" disabled={disabled || testing || asrTesting || (!dirty && !settingsRecovery)}
             aria-label={tr("保存设置")} title={tr("保存设置")}>
             {saving && <LoaderCircle size={15} className="spin" aria-hidden="true" />}{saving ? tr("保存中…") : tr("保存设置")}
           </button>

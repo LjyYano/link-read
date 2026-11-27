@@ -5,7 +5,6 @@ from contextlib import ExitStack
 from dataclasses import asdict
 from hashlib import sha256
 import json
-import requests
 import shutil
 from pathlib import Path
 from threading import Lock
@@ -15,7 +14,7 @@ from .ai.provider import make_provider
 from .ai.checkpoints import provider_identity
 from .asr.config import AsrConfig
 from .asr.bailian import BailianAsr
-from .metadata import video_metadata, thumbnail_url, shownotes_metadata
+from .metadata import canonical_video_url, video_metadata, thumbnail_url, shownotes_metadata
 from .article_state import archive_mutation, patch_reading_state, reading_state, save_reading_state
 from .article_details import DETAILS_FILENAME, detail_value, linked_source_value, read_article_details, save_article_details
 from .ai.models import NoteDocument
@@ -383,7 +382,7 @@ def _refresh_shownotes(article: Path) -> str:
 
 
 
-def _duplicate(source: str, library: Path, *, local_file: bool) -> dict:
+def _duplicate(source: str, library: Path, *, local_file: bool, session=None) -> dict:
     """Look up an existing completed article using the canonical source key."""
     if local_file:
         path = Path(source)
@@ -394,12 +393,7 @@ def _duplicate(source: str, library: Path, *, local_file: bool) -> dict:
     else:
         url = _video_url(source)
         if urlsplit(url).hostname in BILIBILI_SHORT_HOSTS:
-            try:
-                with requests.get(url, timeout=12, allow_redirects=True, stream=True) as response:
-                    response.raise_for_status()
-                    url = response.url
-            except requests.RequestException as exc:
-                raise LinkReadError("无法检查 B 站短链接是否重复，请检查网络") from exc
+            url = canonical_video_url(url, session=session)
         key = video_source_key(url)
         if key is None:
             raise LinkReadError("无法识别视频 ID，不能安全检查重复内容")

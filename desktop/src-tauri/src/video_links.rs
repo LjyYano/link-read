@@ -1,6 +1,21 @@
 //! Canonical video/episode links shared by preview, duplicate checks and generation.
 use tauri::Url;
 
+fn decode_ampersands(text: &str) -> String {
+    let mut chunks = text.split('&');
+    let mut decoded = String::with_capacity(text.len());
+    decoded.push_str(chunks.next().unwrap_or_default());
+    for chunk in chunks {
+        decoded.push('&');
+        let remainder = chunk.split_once(';').and_then(|(entity, remainder)| {
+            ["amp", "#38", "#x26"].iter().any(|name| entity.eq_ignore_ascii_case(name))
+                .then_some(remainder)
+        });
+        decoded.push_str(remainder.unwrap_or(chunk));
+    }
+    decoded
+}
+
 fn pasted_url(source: &str) -> Result<String, String> {
     let mut text = String::new();
     let mut chars = source.trim().chars().peekable();
@@ -11,7 +26,7 @@ fn pasted_url(source: &str) -> Result<String, String> {
         }
         text.push(c);
     }
-    text = text.replace("&amp;", "&");
+    let text = decode_ampersands(&text);
     let lower = text.to_ascii_lowercase();
     let mut values = Vec::<String>::new();
     let mut cursor = 0;

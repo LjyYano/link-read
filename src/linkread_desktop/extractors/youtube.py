@@ -234,7 +234,7 @@ def extract_youtube(
         raise ExtractionError("YouTube 字幕提取失败，请检查来源或稍后重试。") from exc
     report(progress, "parse", "正在解析字幕时间戳和文本")
     try:
-        segments = parse_srt_vtt(content)
+        segments = parse_srt_vtt(content, rolling=is_auto)
     except (ExtractionError, SubtitleUnavailableError) as exc:
         raise ExtractionError("YouTube 已列出字幕轨，但返回的字幕正文为空或格式无效。请重新检查来源。",
                               code="youtube_subtitle_invalid", retryable=True, action="retry") from exc

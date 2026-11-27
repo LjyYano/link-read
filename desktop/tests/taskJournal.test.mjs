@@ -32,6 +32,14 @@ test("journal roundtrip preserves source identity, confirmed progress and action
   assert.equal(roundtrip.input.replaceRequested, false)
 })
 
+test("the task journal accepts an IPv6 loopback API address", () => {
+  const value = journal()
+  value.tasks[0].settings.baseUrl = "http://[::1]:8000/v1"
+  assert.equal(parseTaskJournal(value).tasks[0].settings.baseUrl, value.tasks[0].settings.baseUrl)
+  value.tasks[0].settings.baseUrl = "http://[::2]/v1"
+  assert.throws(() => parseTaskJournal(value), /服务地址无效/)
+})
+
 test("restart retains FIFO order and turns active or waiting work into interrupted records", () => {
   const source = { version:1, tasks:["running", "cancelling", "queued", "error", "cancelled"].map((status, index) => journal(status, `task_${index}`).tasks[0]) }
   const before = structuredClone(source)

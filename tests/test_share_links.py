@@ -23,3 +23,4 @@ def test_shared_link_fixtures(case):
 
 def test_local_file_names_not_unescaped():
     assert pasted_url(r'/tmp/my\ file.srt') == r'/tmp/my\ file.srt'
+    assert pasted_url('/tmp/Words &amp; Names.srt') == '/tmp/Words &amp; Names.srt'

@@ -3,7 +3,6 @@
 The same fixtures are run against the Python, web and native implementations.
 Never extract a BV identifier from an untrusted host or follow nested URLs.
 """
-import html
 import re
 from urllib.parse import parse_qs, urlsplit, unquote
 
@@ -16,6 +15,7 @@ APPLE_PODCAST_HOSTS = {"podcasts.apple.com"}
 BVID = re.compile(r"BV[0-9A-Za-z]{10}\Z")
 _URL = re.compile(r'https?://[^\s<>"\[\]【】「」]+', re.IGNORECASE)
 _ESCAPES = re.compile(r'\\+([:/?.=&_#%\-])')
+_AMPERSAND_ENTITY = re.compile(r'&(?:amp|#38|#x26);', re.IGNORECASE | re.ASCII)
 
 
 def pasted_url(source: str) -> str:
@@ -23,7 +23,7 @@ def pasted_url(source: str) -> str:
     text = source.strip()
     if not re.search(r"https?\\*:", text, re.IGNORECASE):
         return text
-    text = html.unescape(_ESCAPES.sub(r"\1", text))
+    text = _AMPERSAND_ENTITY.sub("&", _ESCAPES.sub(r"\1", text))
     matches = list(dict.fromkeys(m.group().rstrip(").,;!，。；！）'") for m in _URL.finditer(text)))
     if len(matches) > 1:
         raise UnsupportedSourceError("检测到多个链接，请一次提交一个视频或播客单集")

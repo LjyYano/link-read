@@ -101,6 +101,7 @@ export function generateArticle(
   provider: Provider,
   executable: string,
   onProgress: (event: Progress) => void,
+  onCredentialsRead: () => void,
   requestId: string,
   localFile: boolean,
   replace = false,
@@ -111,8 +112,9 @@ export function generateArticle(
   pageLanguage: PageLanguage = "original",
 ) {
   const progress = new Channel<Progress>(onProgress)
+  const credentialsRead = new Channel<null>(onCredentialsRead)
   return invoke<Article>("generate", { source, provider, executable, progress, requestId, localFile, replace, baseUrl, model, asr,
-    resumePreview, pageLanguage, uiLanguage: locale() })
+    resumePreview, pageLanguage, uiLanguage: locale(), credentialsRead })
 }
 
 export const cancelGeneration = (requestId: string) => invoke("cancel_generation", { requestId })

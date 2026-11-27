@@ -5,7 +5,7 @@ from linkread_desktop.ai.provider import ProviderError, make_provider
 
 
 @pytest.mark.parametrize("url", [
-    "ftp://api.example.com/v1", "http://api.example.com/v1",
+    "ftp://api.example.com/v1", "http://api.example.com/v1", "http://[::2]/v1",
     "https://user:password@example.com/v1", "https://api.example.com/v1?token=secret",
     "https://api.example.com/v1#fragment", "https://api.example.com/v1/chat/completions",
 ])
@@ -18,6 +18,7 @@ def test_supports_nonstandard_api_root_and_local_development():
     assert validate_base_url("https://dashscope.aliyuncs.com/compatible-mode/v1/") == (
         "https://dashscope.aliyuncs.com/compatible-mode/v1")
     assert validate_base_url("http://127.0.0.1:8000/v1") == "http://127.0.0.1:8000/v1"
+    assert validate_base_url("http://[::1]:8000/v1") == "http://[::1]:8000/v1"
 
 
 def test_api_requires_model_and_token(monkeypatch):

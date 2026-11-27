@@ -9,6 +9,7 @@ from .models import TranscriptSegment
 
 _TIMESTAMP = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})(?:[.,](\d{1,3}))?$")
 _VTT_TIMESTAMPS = re.compile(r"<\d{2}:\d{2}(?::\d{2})?\.\d{3}>")
+_VTT_CLASS_TAG = re.compile(r"<c(?:\.[^>.\s]+)*>")
 _TAGS = re.compile(r"<[^>]+>")
 
 
@@ -29,18 +30,9 @@ def _text(value: str) -> str:
     return " ".join(value.split())
 
 
-def parse_srt_vtt(content: str) -> list[TranscriptSegment]:
-    """Read SRT and WebVTT cues, preserving their original timing.
-
-    Overlapping auto-caption snapshots are suppressed or reduced to newly
-    introduced text. Repetitions in non-overlapping cues remain intact.
-    """
-    content = content.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
-    cues: list[TranscriptSegment] = []
-    previous = ""
-    previous_start = -1
-    previous_end = -1
-    for block in re.split(r"\n\s*\n", content):
+def _iter_cues(content: str):
+    normalized = content.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    for block in re.split(r"\n\s*\n", normalized):
         lines = [line.strip() for line in block.splitlines()]
         if not lines or lines[0].startswith(("NOTE", "STYLE", "REGION")):
             continue
@@ -49,26 +41,59 @@ def parse_srt_vtt(content: str) -> list[TranscriptSegment]:
             continue
         left, right = lines[idx].split("-->", 1)
         end_token = right.strip().split()[0] if right.strip() else ""
+        yield left, end_token, " ".join(lines[idx + 1 :])
+
+
+def has_rolling_caption_markers(content: str) -> bool:
+    """Return True only when cue payloads carry deterministic YouTube auto-caption tags.
+
+    Detection rules (deterministic only, no heuristic text comparison):
+    - Inspects only cue payload lines after ``-->`` (ignoring ``WEBVTT`` headers
+      and ``NOTE`` / ``STYLE`` / ``REGION`` blocks).
+    - Matches an inline WebVTT cue timestamp tag (``<HH:MM:SS.mmm>`` or
+      ``<MM:SS.mmm>``) or a WebVTT ``<c>`` / ``<c.class>`` class tag.
+    """
+    return any(
+        _VTT_TIMESTAMPS.search(raw_text) or _VTT_CLASS_TAG.search(raw_text)
+        for _, _, raw_text in _iter_cues(content)
+    )
+
+
+def parse_srt_vtt(content: str, *, rolling: bool = False) -> list[TranscriptSegment]:
+    """Read SRT and WebVTT cues, preserving all cues and their original timing.
+
+    By default (``rolling=False``), every non-empty cue and its original
+    timestamps are preserved intact, including overlapping dialogue. Set
+    ``rolling=True`` only for rolling auto-caption streams (such as YouTube
+    automatic captions), where overlapping snapshots are suppressed or trimmed
+    to newly introduced text while non-overlapping repetitions remain intact.
+    """
+    cues: list[TranscriptSegment] = []
+    previous = ""
+    previous_start = -1
+    previous_end = -1
+    for left, end_token, raw_text in _iter_cues(content):
         start_ms = _milliseconds(left)
         end_ms = _milliseconds(end_token)
-        text = _text(" ".join(lines[idx + 1 :]))
+        text = _text(raw_text)
         if not text:
             continue
-        original_text = text
-        overlaps_previous = previous_start <= start_ms < previous_end
-        if overlaps_previous and (text == previous or previous.endswith(text)):
-            # A repeated snapshot can extend the display interval even when
-            # it contributes no new words. Keep it for the next overlap check.
-            previous_end = max(previous_end, end_ms)
-            continue
-        # YouTube auto-caption cues often repeat all the previous words.
-        if overlaps_previous and previous and text.startswith(previous) and len(text) > len(previous):
-            text = text[len(previous) :].strip()
-            if not text:
+        if rolling:
+            original_text = text
+            overlaps_previous = previous_start <= start_ms < previous_end
+            if overlaps_previous and (text == previous or previous.endswith(text)):
+                # A repeated snapshot can extend the display interval even when
+                # it contributes no new words. Keep it for the next overlap check.
+                previous_end = max(previous_end, end_ms)
                 continue
+            # YouTube auto-caption cues often repeat all the previous words.
+            if overlaps_previous and previous and text.startswith(previous) and len(text) > len(previous):
+                text = text[len(previous) :].strip()
+                if not text:
+                    continue
+            previous = original_text
+            previous_start, previous_end = start_ms, end_ms
         cues.append(TranscriptSegment(start_ms=start_ms, end_ms=end_ms, text=text))
-        previous = original_text
-        previous_start, previous_end = start_ms, end_ms
     if not cues:
         raise SubtitleUnavailableError("字幕文件没有可识别的时间戳和内容")
     return sorted(cues, key=lambda item: item.start_ms)

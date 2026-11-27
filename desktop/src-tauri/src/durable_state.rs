@@ -212,6 +212,14 @@ mod tests {
         assert_eq!(load_journal(dir.path()).unwrap(), value);
     }
     #[test]
+    fn journal_round_trips_an_ipv6_loopback_api() {
+        let mut value: Value = serde_json::from_str(include_str!("../../tests/fixtures/task-journal.json")).unwrap();
+        value["tasks"][0]["settings"]["baseUrl"] = json!("http://[::1]:8000/v1");
+        let dir = tempfile::tempdir().unwrap();
+        save_journal(dir.path(), &value).unwrap();
+        assert_eq!(load_journal(dir.path()).unwrap(), value);
+    }
+    #[test]
     fn journal_accepts_old_and_selected_ffmpeg_paths_but_rejects_unsafe_paths() {
         let mut value: Value = serde_json::from_str(include_str!("../../tests/fixtures/task-journal.json")).unwrap();
         assert!(validate_journal(&value).is_ok());

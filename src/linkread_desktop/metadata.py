@@ -50,24 +50,31 @@ def canonical_video_url(source: str, session=None) -> str:
     """Bounded redirects for Bilibili short links; never follow arbitrary hosts."""
     url = _normalize_video_url(source)
     client = session or requests
-    for _ in range(5):
+    for hop in range(5):
         p = urlsplit(url)
         if p.scheme != "https" or p.username or p.password or p.port:
+            if hop > 0:
+                raise UnsupportedSourceError("B 站短链接跳转到非受信任的 HTTPS 地址，已拒绝访问")
             raise UnsupportedSourceError("请输入支持的视频或播客单集 HTTPS 链接")
-        if p.hostname in APPLE_PODCAST_HOSTS:
+        if hop == 0 and p.hostname in APPLE_PODCAST_HOSTS:
             return canonical_link(url)
-        if p.hostname in _YOUTUBE_DOMAINS:
+        if hop == 0 and p.hostname in _YOUTUBE_DOMAINS:
             return _canonical_youtube_url(url)
         if p.hostname in BILIBILI_VIDEO_HOSTS:
             bvid, part = bilibili_video_part(url)
             return f"https://www.bilibili.com/video/{bvid}?p={part}"
         if p.hostname not in BILIBILI_SHORT_HOSTS:
+            if hop > 0:
+                raise UnsupportedSourceError("B 站短链接跳转到非 B 站域名，已拒绝访问")
             raise UnsupportedSourceError("仅支持 B 站、YouTube 视频和 Apple Podcasts 单集链接")
         try:
             response = client.get(url, headers=_HEADERS, timeout=10, allow_redirects=False)
             if response.status_code not in {301, 302, 303, 307, 308}:
                 raise ExtractionError("B 站短链接没有返回可用的视频跳转")
-            url = urljoin(url, response.headers.get("Location", ""))
+            location = response.headers.get("Location", "")
+            if not isinstance(location, str) or not location.strip() or any(ord(c) < 32 for c in location):
+                raise ExtractionError("B 站短链接没有返回可用的视频跳转")
+            url = urljoin(url, location.strip())
         except requests.RequestException as exc:
             raise ExtractionError("暂时无法解析 B 站短链接") from exc
     raise ExtractionError("B 站短链接跳转次数过多")

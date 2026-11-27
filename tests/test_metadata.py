@@ -45,6 +45,18 @@ def test_short_link_never_follows_untrusted_redirect():
     assert len(client.calls) == 1 and client.calls[0][1]["allow_redirects"] is False
 
 
+def test_short_link_refuses_cross_platform_redirect_and_missing_location():
+    yt = Client([Response(status=302, location="https://www.youtube.com/watch?v=1-Fo8McCD9w")])
+    with pytest.raises(UnsupportedSourceError, match="非 B 站域名"):
+        canonical_video_url("https://b23.tv/xyz", yt)
+    assert len(yt.calls) == 1
+
+    empty = Client([Response(status=302, location="")])
+    with pytest.raises(ExtractionError, match="跳转"):
+        canonical_video_url("https://b23.tv/xyz", empty)
+    assert len(empty.calls) == 1
+
+
 @pytest.mark.parametrize("url", ["https://evil.example/a.jpg", "http://evil.example/a.jpg", "https://i.ytimg.com.evil.example/a.jpg"])
 def test_thumbnail_is_allowlisted(url):
     assert thumbnail_url(url) is None
