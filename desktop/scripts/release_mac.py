@@ -15,7 +15,7 @@ from urllib.parse import quote, urlsplit
 DESKTOP = Path(__file__).resolve().parents[1]
 RELEASES_URL = "https://github.com/LjyYano/link-read/releases"
 DEFAULT_FEED = f"{RELEASES_URL}/latest/download/latest.json"
-TARGETS = {"arm64": ("aarch64", "aarch64"), "x86_64": ("x86_64", "x64")}
+TARGETS = {"arm64": ("aarch64", "arm64"), "x86_64": ("x86_64", "amd64")}
 NOTARY_API = ("APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_PATH")
 NOTARY_ACCOUNT = ("APPLE_ID", "APPLE_TEAM_ID", "APPLE_PASSWORD")
 
@@ -115,7 +115,7 @@ def main():
     if not options.first_dmg and not private_key:
         raise ValueError("请设置 TAURI_SIGNING_PRIVATE_KEY。")
     credentials = notary_options()
-    arch, dmg_arch = TARGETS[platform.machine()]
+    arch, artifact_arch = TARGETS[platform.machine()]
     target = f"{arch}-apple-darwin"
     native = DESKTOP / "src-tauri"
     base = json.loads((native / "tauri.conf.json").read_text())
@@ -134,9 +134,10 @@ def main():
                                     cwd=native, text=True)
     bundle = Path(json.loads(cargo)["target_directory"]) / target / "release" / "bundle"
     app = bundle / "macos" / f"{product}.app"
-    archive = app.with_suffix(".app.tar.gz")
+    artifact_name = f"{product}-macos-{artifact_arch}"
+    archive = app.with_name(f"{artifact_name}.app.tar.gz")
     signature = archive.with_suffix(".gz.sig")
-    dmg = bundle / "dmg" / f"{product}_{version}_{dmg_arch}.dmg"
+    dmg = bundle / "dmg" / f"{artifact_name}.dmg"
     bundle.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="linkread-release-", dir=bundle) as temporary:
         directory = Path(temporary)

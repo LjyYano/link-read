@@ -19,7 +19,7 @@ def test_keychain_profile_can_notarize_without_plaintext_credentials(monkeypatch
 
 
 def test_update_feed_rejects_a_signature_bound_to_a_different_version(tmp_path):
-    archive = tmp_path / "LinkRead.app.tar.gz"
+    archive = tmp_path / "LinkRead-macos-arm64.app.tar.gz"
     key_id = b"key-1234"
     public_data = b"Ed" + key_id + bytes(32)
     signed_data = b"ED" + key_id + bytes(64)
@@ -30,7 +30,7 @@ def test_update_feed_rejects_a_signature_bound_to_a_different_version(tmp_path):
 
     metadata = release["manifest"]("0.1.0", "aarch64", assets, archive, public_data)
     assert metadata["platforms"]["darwin-aarch64"] == {
-        "url": f"{assets}/LinkRead.app.tar.gz", "signature": signature,
+        "url": f"{assets}/LinkRead-macos-arm64.app.tar.gz", "signature": signature,
     }
     with pytest.raises(ValueError, match="版本与发布版本不匹配"):
         release["manifest"]("0.2.0", "aarch64", assets, archive, public_data)

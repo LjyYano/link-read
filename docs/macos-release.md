@@ -38,13 +38,17 @@ export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/linkread.key"
 npm run release:mac -- --public-key "$HOME/.tauri/linkread.key.pub"
 ```
 
-发布标签为 `v<版本号>`，例如配置版本为 `0.1.0` 时使用 `v0.1.0`。若改用其他文件托管，可用 `--feed` 指定长期使用的清单地址，用 `--assets-base` 指定本版本文件的下载目录。脚本为当前架构构建。Apple Silicon 与 Intel 如需同时发布，分别在对应架构环境构建，为同名更新包使用不同下载目录，然后把两份清单的对应 `platforms` 条目合并到同一个 `latest.json`。
+发布标签为 `v<版本号>`，例如配置版本为 `0.1.0` 时使用 `v0.1.0`。附件名使用 `LinkRead-macos-<架构>`，其中 Apple Silicon 为 `arm64`，Intel 为 `amd64`。发布页在简介下直接链接安装包，随后提供英文 Changelog 和中文更新日志。
 
-完整构建会列出四份发行文件。首发 DMG 模式只产出第一项及更新清单。
+若改用其他文件托管，可用 `--feed` 指定长期使用的清单地址，用 `--assets-base` 指定本版本文件的下载目录。脚本为当前架构构建。Apple Silicon 与 Intel 如需同时发布，分别在对应架构环境构建，把两份清单的 `platforms` 条目合并到同一个 `latest.json`，再将两个架构的附件上传至同一版本。
+
+完整构建会在本地生成四份文件。首发 DMG 模式只产出安装包和更新清单。
 
 - `.dmg` 供用户首次下载安装。安装时将 LinkRead 拖入「应用程序」。
 - `.app.tar.gz` 供已安装的应用下载更新。
-- `.app.tar.gz.sig` 是对应签名。签名内容也写入更新清单。
-- `latest.json` 是版本、下载地址和签名的清单。在其他文件可公开下载后上传清单。使用 GitHub Releases 时，可一次把四份文件上传到同一个草稿，再发布为最新正式版本。
+- `.app.tar.gz.sig` 是本地签名文件。签名已写入更新清单，公开附件可省略这一份。
+- `latest.json` 包含版本、更新包下载地址和签名。正式版从 GitHub 的固定地址读取它，每个设为最新的正式版本都要提供此附件。
+
+发布完整构建时，在 GitHub Releases 草稿中上传 DMG、更新包和 `latest.json`，核对下载地址后再发布为最新正式版本。
 
 在干净的 Mac 上打开 DMG 验证安装。从带相同更新地址和公钥的较旧构建启动，确认能弹出提示、安装后显示新版本，且原有书架可正常打开。更新地址和公钥会写入首次分发的 App，后续应继续维护该地址并沿用同一对密钥。
