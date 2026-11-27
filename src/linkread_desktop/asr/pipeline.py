@@ -26,6 +26,19 @@ def download_audio(url, folder, config, *, progress=None, auth_options=None):
         from ..extractors.apple_podcasts import download_episode_audio
         return download_episode_audio(url, folder, config, progress=progress)
     try:
+        return _download_audio_track(url, folder, config, progress, auth_options)
+    except LinkReadError as exc:
+        if not auth_options or exc.code != "audio_unavailable":
+            raise
+    # YouTube can withhold every media URL from a signed-in session (SABR-only streaming
+    # for some accounts) while the public session still receives audio.
+    report(progress, "audio_retry", "登录会话没有可下载的音轨，改为不使用 YouTube Cookie 重新获取")
+    return _download_audio_track(url, folder, config, progress, None)
+
+
+def _download_audio_track(url, folder, config, progress, auth):
+    """Fetch one audio-only track, using the given YouTube cookie options."""
+    try:
         from yt_dlp import YoutubeDL
     except ImportError as exc:
         raise AsrError("下载音频需要 yt-dlp，请检查桌面版后端是否完整安装") from exc
@@ -47,14 +60,19 @@ def download_audio(url, folder, config, *, progress=None, auth_options=None):
             "quiet": True, "no_warnings": True, "logger": _QuietLogger(),
             "socket_timeout": 20, "retries": 2, "fragment_retries": 2,
             "outtmpl": str(folder / "audio.%(ext)s"), "max_filesize": download_limit,
-            "progress_hooks": [hook], "overwrites": False}
-    opts.update(auth_options or {})
+            "progress_hooks": [hook], "overwrites": False,
+            # A session without any selectable track is reported below instead of raised by yt-dlp.
+            "ignore_no_formats_error": True}
+    opts.update(auth or {})
     report(progress, "audio_download", "正在获取可访问的音轨（不下载视频画面）")
     try:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             if not isinstance(info, dict) or info.get("_type") in {"playlist", "multi_video"} or info.get("is_live"):
                 raise AsrError("ASR 仅支持单个已结束的视频，不支持直播和播放列表")
+            if not info.get("format_id"):
+                raise AsrError("来源没有为当前会话提供可下载的音轨，未下载或提交转写。可稍后重试、检查登录状态或网络，或导入已有字幕文件。",
+                               code="audio_unavailable")
             duration = info.get("duration")
             if not isinstance(duration, (int, float)) or not 0 < duration <= config.max_minutes * 60:
                 raise AsrError(f"无法确认视频时长，或超过 {config.max_minutes} 分钟转写上限；未下载或提交转写")

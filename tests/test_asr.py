@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -7,7 +9,7 @@ import requests
 
 from linkread_desktop.asr.bailian import BailianAsr, MultipartBody, segments_from_result
 from linkread_desktop.asr.config import AsrConfig, AsrError
-from linkread_desktop.asr.pipeline import transcribe_video
+from linkread_desktop.asr.pipeline import download_audio, transcribe_video
 from linkread_desktop.errors import ExtractionError, SubtitleUnavailableError
 from linkread_desktop.models import SourceInfo, TranscriptDocument, TranscriptSegment
 from linkread_desktop.pipeline import extract
@@ -182,3 +184,107 @@ def test_explicit_rejection_allows_user_to_retry_but_timeout_does_not(tmp_path, 
     monkeypatch.setattr(api, "submit", uncertain)
     with pytest.raises(AsrError): api.transcribe(tmp_path/"unused", state)
     assert json.loads(state.read_text())["submitting"] is True
+
+
+class AudioYoutubeDL:
+    """Mirror yt-dlp for an account that YouTube serves no media URL to: with the account
+    cookies only storyboard images remain, while the public session still gets audio.
+    yt-dlp raises on that unless ignore_no_formats_error is set, then returns no format."""
+    created = []
+    audio = {"format_id": "140", "ext": "m4a", "url": "https://media.example/audio.m4a",
+             "acodec": "mp4a.40.2", "vcodec": "none"}
+    storyboard = {"format_id": "sb0", "ext": "mhtml", "url": "https://i.ytimg.com/sb/storyboard",
+                  "acodec": "none", "vcodec": "none"}
+    signed_in_error = None
+    public_audio = True
+
+    def __init__(self, options):
+        self.options = options
+        self.created.append(options)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+    def extract_info(self, url, download=False):
+        assert not download
+        if "cookiesfrombrowser" in self.options:
+            if self.signed_in_error:
+                raise RuntimeError(self.signed_in_error)
+            media = []
+        else:
+            media = [self.audio] if self.public_audio else []
+        info = {"id": "1-Fo8McCD9w", "title": "Video", "duration": 31, "uploader": "Creator",
+                "formats": [self.storyboard, *media]}
+        if media:
+            return {**info, **media[0]}
+        if not self.options.get("ignore_no_formats_error"):
+            raise RuntimeError("ERROR: [youtube] 1-Fo8McCD9w: Requested format is not available. "
+                               "Use --list-formats for a list of available formats")
+        return {**info, "format_id": None}
+
+    def prepare_filename(self, info):
+        return self.options["outtmpl"] % {"ext": info["ext"]}
+
+    def process_info(self, info):
+        info["filepath"] = self.prepare_filename(info)
+        Path(info["filepath"]).write_bytes(b"audio-bytes")
+
+
+@pytest.fixture
+def audio_downloader(monkeypatch):
+    AudioYoutubeDL.created = []
+    AudioYoutubeDL.signed_in_error = None
+    AudioYoutubeDL.public_audio = True
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=AudioYoutubeDL))
+    return AudioYoutubeDL
+
+
+EDGE_COOKIES = {"cookiesfrombrowser": ("edge", None, None, None)}
+
+
+def test_signed_in_session_without_media_downloads_public_audio_without_cookies(audio_downloader, tmp_path):
+    events = []
+    audio, source = download_audio(URL, tmp_path, CONFIG, progress=events.append, auth_options=EDGE_COOKIES)
+    assert audio == tmp_path / "audio.m4a"
+    assert audio.read_bytes() == b"audio-bytes"
+    assert (source.platform, source.title, source.author, source.duration_ms) == ("youtube", "Video", "Creator", 31000)
+    # The explicitly configured cookies are tried first; only the public retry carries none.
+    assert ["cookiesfrombrowser" in options for options in AudioYoutubeDL.created] == [True, False]
+    assert [event.stage for event in events if event.stage == "audio_retry"] == ["audio_retry"]
+
+
+@pytest.mark.parametrize("signed_in_error", [
+    "ERROR: Could not copy Edge cookie database: Operation not permitted",
+    "ERROR: [youtube] 1-Fo8McCD9w: Sign in to confirm you're not a bot",
+])
+def test_other_signed_in_download_errors_never_fall_back_to_public_audio(audio_downloader, tmp_path, signed_in_error):
+    audio_downloader.signed_in_error = signed_in_error
+    with pytest.raises(AsrError, match="音轨下载失败") as failure:
+        download_audio(URL, tmp_path, CONFIG, auth_options=EDGE_COOKIES)
+    assert failure.value.code == "asr_failed"
+    assert len(AudioYoutubeDL.created) == 1
+    assert not list(tmp_path.iterdir())
+
+
+def test_no_audio_in_either_session_reports_unavailable_without_downloading(audio_downloader, tmp_path):
+    audio_downloader.public_audio = False
+    with pytest.raises(AsrError) as failure:
+        download_audio(URL, tmp_path, CONFIG, auth_options=EDGE_COOKIES)
+    assert failure.value.code == "audio_unavailable"
+    assert failure.value.stage == "audio"
+    assert failure.value.retryable is False
+    assert len(AudioYoutubeDL.created) == 2
+    assert not list(tmp_path.iterdir())
+
+
+def test_english_retry_progress_and_unavailable_error_have_their_own_messages(monkeypatch):
+    from linkread_desktop.messages import localize_event
+
+    monkeypatch.setenv("LINKREAD_UI_LANGUAGE", "en")
+    progress = localize_event("progress", {"stage": "audio_retry", "message": "原始消息"})
+    assert "cookies" in progress["message"].lower()
+    error = localize_event("error", {"code": "audio_unavailable", "message": "原始消息"})
+    assert "audio track" in error["message"].lower()
