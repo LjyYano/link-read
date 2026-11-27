@@ -951,6 +951,7 @@ fn generation_command(
         .map_err(|e| GenerationFailure::context(e, "configuration", "settings"))
 }
 
+#[cfg(test)]
 fn configure_generation(
     command: Command,
     locations: &Locations,
