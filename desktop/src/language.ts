@@ -40,8 +40,20 @@ export function tr(message: string, ...values: (string | number | null | undefin
   return values.length ? template.replace(/\{(\d+)\}/g, (match, index) => String(values[Number(index)] ?? match)) : template
 }
 
-export function localizedDetail(message: string, fallback: string): string {
+export function translateDetail(message: string): string {
   const localized = tr(message)
+  if (localized !== message) return localized
+  // Rust composes diagnostics as "message（detail）"; translate the head and keep the raw detail.
+  const separator = message.indexOf("（")
+  if (separator > 0) {
+    const head = tr(message.slice(0, separator))
+    if (head !== message.slice(0, separator)) return head + "（" + message.slice(separator + 1)
+  }
+  return message
+}
+
+export function localizedDetail(message: string, fallback: string): string {
+  const localized = translateDetail(message)
   if (currentLocale === "en" && localized === message && /\p{Script=Han}/u.test(message)) return fallback
   return localized
 }

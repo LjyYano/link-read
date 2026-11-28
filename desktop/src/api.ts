@@ -1,4 +1,4 @@
-import { tr, locale, localizedDetail, type PageLanguage, type Locale } from "./language.ts"
+import { tr, locale, localizedDetail, translateDetail, type PageLanguage, type Locale } from "./language.ts"
 import { Channel, invoke as invokeNative, type InvokeArgs } from "@tauri-apps/api/core"
 import type { AsrOptions } from "./asrSettings"
 import type { TaskJournal } from "./taskJournal"
@@ -7,7 +7,7 @@ import type { YoutubeCookieOptions } from "./youtubeCookies"
 function invoke<T>(command: string, args?: InvokeArgs): Promise<T> {
   return invokeNative<T>(command, args).catch(error => {
     if (typeof error === "string" && locale() === "en") {
-      throw localizedDetail(error, "The operation could not be completed. Check settings or try again.")
+      throw localizedDetail(error, "The operation could not be completed. Try again.")
     }
     throw error
   })
@@ -72,10 +72,10 @@ export function normalizeGenerationFailure(error: unknown): GenerationFailure {
     const value = error as Partial<GenerationFailure>
     const action = ["retry", "settings", "setup", "source", "details"].includes(value.action ?? "")
       ? value.action! : "details"
-    return { message: String(value.message), code: typeof value.code === "string" ? value.code : "unknown",
+    return { message: translateDetail(String(value.message)), code: typeof value.code === "string" ? value.code : "unknown",
       stage: typeof value.stage === "string" ? value.stage : null, retryable: value.retryable === true, action }
   }
-  const message = String(error)
+  const message = translateDetail(String(error))
   const cancelled = message === "已取消生成" || message === "Generation cancelled" || message === tr("已取消生成")
   return { message, code: cancelled ? "cancelled" : "unknown", stage: null,
     retryable: true, action: "retry" }
