@@ -6,6 +6,9 @@ or directly to this Python class. It is not written into project files.
 
 import json
 import os
+import random
+import threading
+import time
 from urllib.parse import urlsplit
 
 import requests
@@ -14,6 +17,31 @@ from requests.adapters import HTTPAdapter
 from .provider import ProviderError
 
 _DEFAULT_POST = requests.post
+_TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
+_RETRY_DELAYS = (1.0, 2.5)
+_sleep = time.sleep
+
+
+def _close_response(response) -> None:
+    close = getattr(response, "close", None)
+    if callable(close):
+        close()
+
+
+def _retry_delay(response, attempt: int) -> float:
+    headers = getattr(response, "headers", None)
+    if headers and hasattr(headers, "get"):
+        raw = headers.get("Retry-After")
+        if raw is not None:
+            try:
+                parsed = float(str(raw).strip())
+                if 0 < parsed <= 10.0:
+                    return parsed
+                if parsed > 10.0:
+                    return 10.0
+            except ValueError:
+                pass
+    return _RETRY_DELAYS[attempt] * random.uniform(0.8, 1.2)
 
 
 def _is_dashscope_endpoint(base_url: str) -> bool:
@@ -63,34 +91,40 @@ class OpenAICompatibleProvider:
         if not self.model or len(self.model) > 256 or any(ord(c) < 32 for c in self.model):
             raise ProviderError("请填写有效的模型名称", code="configuration_invalid", retryable=False, action="settings")
         self._token = token if token is not None else os.environ.get("LINKREAD_API_TOKEN", "")
-        if not self._token or any(c in self._token for c in "\r\n"):
+        if not self._token or any(ord(c) < 32 or ord(c) == 127 for c in self._token):
             raise ProviderError("未配置 API Token，请在设置中填写 API Token", code="authentication_missing", retryable=False, action="settings")
         # Hybrid Qwen3/3.5/3.8 models on DashScope default to slow thinking mode.
         # Disable it for structured extraction unless the chosen model rejects it.
         dashscope = _is_dashscope_endpoint(self.base_url)
+        self._lock = threading.Lock()
         self._disable_thinking = dashscope
         self._use_json_object = dashscope
-        self._session = requests.Session()
-        adapter = HTTPAdapter(pool_connections=8, pool_maxsize=8)
-        self._session.mount("https://", adapter)
-        self._session.mount("http://", adapter)
+        self._local = threading.local()
+        self._sessions: list[requests.Session] = []
+        self._session = self._new_session()
+        self._local.session = self._session
 
-    def _post(self, payload: dict, *, timeout: tuple[int, int], expect_json: bool = False):
-        headers = {
-            "Authorization": "Bearer " + self._token,
-            "Content-Type": "application/json",
-        }
-        use_session = requests.post is _DEFAULT_POST
-        post = self._session.post if use_session else requests.post
-        disable_thinking = self._disable_thinking
-        use_json_object = expect_json and self._use_json_object
-        body = dict(payload)
-        if disable_thinking:
-            body["enable_thinking"] = False
-        if use_json_object:
-            body["response_format"] = {"type": "json_object"}
+    def _new_session(self) -> requests.Session:
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=4, pool_maxsize=4)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        with self._lock:
+            self._sessions.append(session)
+        return session
+
+    def _thread_session(self) -> requests.Session:
+        session = getattr(self._local, "session", None)
+        if session is None:
+            session = self._new_session()
+            self._local.session = session
+        return session
+
+    def _send_once(
+        self, post, session: requests.Session | None, body: dict, headers: dict, timeout: tuple[int, int],
+    ):
         try:
-            response = post(
+            return post(
                 self.base_url + "/chat/completions",
                 json=body,
                 headers=headers,
@@ -98,29 +132,56 @@ class OpenAICompatibleProvider:
                 allow_redirects=False,
             )
         except requests.ConnectionError:
-            if not use_session:
+            if session is None:
                 raise
-            # A pooled keep-alive connection may have been closed by the remote server.
-            self._session.close()
-            response = self._session.post(
+            # Only close this thread's own pooled connections; never disrupt sibling workers.
+            session.close()
+            return session.post(
                 self.base_url + "/chat/completions",
                 json=body,
                 headers=headers,
                 timeout=timeout,
                 allow_redirects=False,
             )
+
+    def _post(self, payload: dict, *, timeout: tuple[int, int], expect_json: bool = False, retry_transient: bool = False):
+        headers = {
+            "Authorization": "Bearer " + self._token,
+            "Content-Type": "application/json",
+        }
+        use_session = requests.post is _DEFAULT_POST
+        session = self._thread_session() if use_session else None
+        post = session.post if session is not None else requests.post
+        with self._lock:
+            disable_thinking = self._disable_thinking
+            use_json_object = expect_json and self._use_json_object
+        body = dict(payload)
+        if disable_thinking:
+            body["enable_thinking"] = False
+        if use_json_object:
+            body["response_format"] = {"type": "json_object"}
+        started = time.monotonic()
+        active_body = body
+        response = self._send_once(post, session, active_body, headers, timeout)
         if response.status_code == 400 and (disable_thinking or use_json_object):
             # Thinking-only or legacy models may reject enable_thinking or response_format.
-            self._disable_thinking = False
-            if use_json_object:
-                self._use_json_object = False
-            response = post(
-                self.base_url + "/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=timeout,
-                allow_redirects=False,
-            )
+            _close_response(response)
+            with self._lock:
+                self._disable_thinking = False
+                if use_json_object:
+                    self._use_json_object = False
+            active_body = payload
+            response = self._send_once(post, session, active_body, headers, timeout)
+        if retry_transient:
+            attempt = 0
+            while response.status_code in _TRANSIENT_STATUSES and attempt < len(_RETRY_DELAYS):
+                delay = _retry_delay(response, attempt)
+                if time.monotonic() - started + delay >= timeout[1]:
+                    break
+                _close_response(response)
+                _sleep(delay)
+                response = self._send_once(post, session, active_body, headers, timeout)
+                attempt += 1
         return response
 
     def generate(self, prompt: str, schema: dict, *, timeout_seconds: int) -> dict:
@@ -151,31 +212,40 @@ class OpenAICompatibleProvider:
                 },
                 timeout=(15, timeout_seconds),
                 expect_json=True,
+                retry_transient=True,
             )
         except requests.Timeout as exc:
             raise ProviderError(f"API 请求超时（{timeout_seconds} 秒），请检查网络或增大超时", code="model_timeout") from exc
         except requests.RequestException as exc:
             raise ProviderError("API 网络请求失败，请检查 Base URL 与网络连接", code="network_error") from exc
 
-        if 300 <= response.status_code < 400:
-            raise ProviderError("API 返回重定向；请检查 Base URL，出于安全原因没有跟随", code="configuration_invalid", retryable=False, action="settings")
-        if response.status_code >= 400:
-            raise _http_failure(response.status_code)
         try:
-            envelope = response.json()
-            choice = envelope["choices"][0]["message"]["content"]
-            if not isinstance(choice, str):
-                raise TypeError("content must be a string")
-            text = choice.strip()
-            fence = chr(96) * 3
-            if text.startswith(fence) and text.endswith(fence):
-                text = text.split("\n", 1)[1].rsplit(fence, 1)[0].strip()
-            result = json.loads(text)
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise ProviderError("API 未返回合法的结构化 JSON，请检查模型是否支持指令遵循", code="model_output_invalid") from exc
-        if not isinstance(result, dict):
-            raise ProviderError("API 输出必须是 JSON 对象", code="model_output_invalid")
-        return result
+            if 300 <= response.status_code < 400:
+                raise ProviderError("API 返回重定向；请检查 Base URL，出于安全原因没有跟随", code="configuration_invalid", retryable=False, action="settings")
+            if response.status_code >= 400:
+                raise _http_failure(response.status_code)
+            try:
+                envelope = response.json()
+                choice = envelope["choices"][0]["message"]["content"]
+                if not isinstance(choice, str):
+                    raise TypeError("content must be a string")
+                text = choice.strip()
+                fence = chr(96) * 3
+                if text.startswith(fence) and text.endswith(fence) and len(text) >= 6:
+                    inner = text[len(fence):-len(fence)]
+                    if "\n" in inner:
+                        first_line, rest = inner.split("\n", 1)
+                        text = rest.strip() if not first_line.strip().startswith("{") else inner.strip()
+                    else:
+                        text = inner.strip()
+                result = json.loads(text)
+            except (ValueError, KeyError, IndexError, TypeError) as exc:
+                raise ProviderError("API 未返回合法的结构化 JSON，请检查模型是否支持指令遵循", code="model_output_invalid") from exc
+            if not isinstance(result, dict):
+                raise ProviderError("API 输出必须是 JSON 对象", code="model_output_invalid")
+            return result
+        finally:
+            _close_response(response)
 
     def test_connection(self, *, timeout_seconds: int = 30) -> None:
         """Test the configured model via one inexpensive Chat Completions request.
@@ -194,26 +264,31 @@ class OpenAICompatibleProvider:
                 timeout=(10, timeout_seconds),
             )
         except requests.Timeout as exc:
-            raise ProviderError("模型连接测试超时，请检查网络或服务状态") from exc
+            raise ProviderError("模型连接测试超时，请检查网络或服务状态", code="model_timeout") from exc
         except requests.RequestException as exc:
-            raise ProviderError("无法连接 API 服务，请检查 Base URL 和网络") from exc
-        if 300 <= response.status_code < 400:
-            raise ProviderError("API 返回重定向，为保护 Token 未继续请求")
-        if response.status_code == 401:
-            raise ProviderError("认证失败（401），请检查 API Token")
-        if response.status_code == 403:
-            raise ProviderError("访问被拒绝（403），请检查模型权限")
-        if response.status_code == 404:
-            raise ProviderError("接口不存在（404），请检查 Base URL 是否指向兼容模式 /v1")
-        if response.status_code == 429:
-            raise ProviderError("请求过于频繁或额度不足（429）")
-        if response.status_code >= 400:
-            raise ProviderError(f"模型连接失败：HTTP {response.status_code}（请核对模型 ID 与服务商设置）")
+            raise ProviderError("无法连接 API 服务，请检查 Base URL 和网络", code="network_error") from exc
         try:
-            value = response.json()
-            if not isinstance(value.get("choices"), list) or not value["choices"]:
-                raise ValueError("missing choices")
-            if not isinstance(value["choices"][0].get("message"), dict):
-                raise ValueError("missing message")
-        except (ValueError, TypeError, IndexError, AttributeError) as exc:
-            raise ProviderError("服务端已响应，但未返回兼容 Chat Completions 的结果") from exc
+            if 300 <= response.status_code < 400:
+                raise ProviderError("API 返回重定向，为保护 Token 未继续请求", code="configuration_invalid", retryable=False, action="settings")
+            if response.status_code == 401:
+                raise ProviderError("认证失败（401），请检查 API Token", code="authentication_failed", retryable=False, action="settings")
+            if response.status_code == 403:
+                raise ProviderError("访问被拒绝（403），请检查模型权限", code="permission_denied", retryable=False, action="settings")
+            if response.status_code == 404:
+                raise ProviderError("接口不存在（404），请检查 Base URL 是否指向兼容模式 /v1", code="configuration_invalid", retryable=False, action="settings")
+            if response.status_code == 429:
+                raise ProviderError("请求过于频繁或额度不足（429）", code="rate_or_quota_limited", retryable=True, action="settings")
+            if response.status_code >= 500:
+                raise ProviderError(f"模型连接失败：HTTP {response.status_code}（请核对模型 ID 与服务商设置）", code="service_unavailable")
+            if response.status_code >= 400:
+                raise ProviderError(f"模型连接失败：HTTP {response.status_code}（请核对模型 ID 与服务商设置）", code="configuration_invalid", retryable=False, action="settings")
+            try:
+                value = response.json()
+                if not isinstance(value.get("choices"), list) or not value["choices"]:
+                    raise ValueError("missing choices")
+                if not isinstance(value["choices"][0].get("message"), dict):
+                    raise ValueError("missing message")
+            except (ValueError, TypeError, IndexError, AttributeError) as exc:
+                raise ProviderError("服务端已响应，但未返回兼容 Chat Completions 的结果", code="model_output_invalid") from exc
+        finally:
+            _close_response(response)

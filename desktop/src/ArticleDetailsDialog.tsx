@@ -103,7 +103,7 @@ export function ArticleDetailsDialog({ article, onSaved, onClose }: {
             <input id={id + "-category"} value={category} maxLength={80} disabled={saving}
               onChange={event => { setCategory(event.target.value); setResetCategory(false) }} />
           </label>
-          <div className="article-original"><span>{tr("Original category:")} {details.originalCategory || "None"}</span>
+          <div className="article-original"><span>{tr("Original category:")} {details.originalCategory || tr("None")}</span>
             <button className="text-button" type="button" disabled={saving || resetCategory} onClick={() => { setCategory(details.originalCategory); setResetCategory(true) }}>{tr("Reset to original")}</button></div>
           {error && <p className="error-line" role="alert">{error}</p>}
         </div>

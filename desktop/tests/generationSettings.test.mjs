@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { defaultAsr } from "../src/asrSettings.ts"
-import { GenerationSettingsGate } from "../src/generationSettings.ts"
+import { GenerationSettingsGate, taskSettingsForGeneration } from "../src/generationSettings.ts"
+import { parseTaskJournal, taskSnapshot } from "../src/taskJournal.ts"
 import { saveSettingsDraft, SettingsSaveError } from "../src/settingsState.ts"
 import { SerialTaskQueue } from "../src/taskQueue.ts"
 
@@ -144,5 +145,51 @@ test("an incomplete rollback blocks generation across reloads until settings are
   await reopened.save(async () => {})
   assert.equal(isPending(), false)
   const release = await reopened.admit(snapshot)
+  release()
+})
+
+test("YouTube task with ASR enabled and unconfigured cookies is admitted without infinite settings_changed loop", async () => {
+  const { saved, gate } = setup()
+  saved.preferences.asr.enabled = true
+  saved.preferences.youtubeCookies = { mode: "none", browser: "chrome", filePath: "" }
+  const ytUrl = "https://www.youtube.com/watch?v=1-Fo8McCD9w"
+  const settings = taskSettingsForGeneration(saved.preferences, { isYoutube: true, pageLanguage: "original" })
+  assert.equal(settings.asr.enabled, false, "effective ASR stays disabled on YouTube without cookies")
+  const spec = {
+    ...settings,
+    input: ytUrl,
+    localFile: false,
+    youtubeCookies: { ...saved.preferences.youtubeCookies },
+  }
+  const release = await gate.admit(spec)
+  release()
+
+  // Once the user configures YouTube cookies while queued, admission detects the change.
+  saved.preferences.youtubeCookies = { mode: "browser", browser: "chrome", filePath: "" }
+  await assert.rejects(gate.admit(spec), { code: "settings_changed" })
+})
+
+test("dormant invalid API or ASR settings do not poison task journal creation or gate admission", async () => {
+  const { saved, gate } = setup()
+  saved.preferences.provider = "codex"
+  saved.preferences.api = { baseUrl: "https://incomplete?bad=1", model: "bad\nmodel" }
+  saved.preferences.asr = { ...defaultAsr, enabled: false, baseUrl: "not-a-url", maxMinutes: 0, chunkMinutes: 99 }
+  const settings = taskSettingsForGeneration(saved.preferences, { isYoutube: false, pageLanguage: "original" })
+  assert.equal(settings.baseUrl, "")
+  assert.equal(settings.model, "")
+  assert.equal(settings.asr.enabled, false)
+  assert.equal(settings.asr.maxMinutes, 120)
+  assert.equal(settings.asr.chunkMinutes, 5)
+  const spec = {
+    ...settings,
+    input: "https://www.bilibili.com/video/BV1rxqmBhE91?p=1",
+    localFile: false,
+    sourceKey: "bilibili-BV1rxqmBhE91-p1",
+    replace: false,
+    identity: {},
+  }
+  const snap = taskSnapshot("task_dormant", spec, { status: "queued", message: "waiting" }, 1000, 1000)
+  assert.equal(parseTaskJournal({ version: 1, tasks: [snap] }).tasks.length, 1)
+  const release = await gate.admit(spec)
   release()
 })

@@ -76,7 +76,8 @@ export function normalizeGenerationFailure(error: unknown): GenerationFailure {
       stage: typeof value.stage === "string" ? value.stage : null, retryable: value.retryable === true, action }
   }
   const message = String(error)
-  return { message, code: message === "已取消生成" ? "cancelled" : "unknown", stage: null,
+  const cancelled = message === "已取消生成" || message === "Generation cancelled" || message === tr("已取消生成")
+  return { message, code: cancelled ? "cancelled" : "unknown", stage: null,
     retryable: true, action: "retry" }
 }
 

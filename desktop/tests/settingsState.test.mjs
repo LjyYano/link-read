@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { defaultAsr } from "../src/asrSettings.ts"
+import { setLocale } from "../src/language.ts"
 import {
   SettingsSaveError, SettingsValidationError, normalizeSettingsDraft, settingsDraftEqual,
   validateApiConfiguration, validateAsrConfiguration, validateSettingsDraft, saveSettingsDraft,
@@ -274,4 +275,22 @@ test("youtube cookie settings validate browser and absolute file paths explicitl
 
   value.preferences.youtubeCookies = { mode: "file", browser: "chrome", filePath: " /Users/yano/cookies.txt " }
   assert.equal(validateSettingsDraft(value).preferences.youtubeCookies.filePath, "/Users/yano/cookies.txt")
+})
+
+test("settings save failure message localizes cleanly in English without mixed Chinese text", async () => {
+  const previous = draft(), next = draft()
+  next.apiToken = "new-chat-key"
+  const target = storage(previous, operation => operation === "save-preferences")
+  setLocale("en")
+  try {
+    await assert.rejects(saveSettingsDraft(next, previous, target.ports), error => {
+      assert.equal(error instanceof SettingsSaveError, true)
+      assert.equal(error.rollbackFailed, false)
+      assert.doesNotMatch(error.message, /\p{Script=Han}/u)
+      assert.match(error.message, /Could not save/)
+      return true
+    })
+  } finally {
+    setLocale("zh-CN")
+  }
 })

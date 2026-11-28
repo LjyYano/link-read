@@ -41,8 +41,14 @@ def page_locale(document: TranscriptDocument, language: PageLanguage) -> Languag
     return "zh-CN" if han >= 3 and han > latin and not other else "en"
 
 
-_SIMPLIFIED_MARKERS = frozenset("这为说们与还会点个时来过国对开关机学体实当从现进经动问发无种头产让应义变专题画视频语")
-_TRADITIONAL_MARKERS = frozenset("這為說們與還會點個時來過國對開關機學體實當從現進經動問發無種頭產讓應義變專題畫視頻語")
+_SIMPLIFIED_MARKERS = frozenset(
+    "这为说们与还会点个时来过国对开关机学体实当从现进经动问发无种头产让应义变专题画视频语"
+    "统论习网软数据图书读写听讲试验证总记录转译简业计标确认权电脑资库档页编设"
+)
+_TRADITIONAL_MARKERS = frozenset(
+    "這為說們與還會點個時來過國對開關機學體實當從現進經動問發無種頭產讓應義變專題畫視頻語"
+    "統論習網軟數據圖書讀寫聽講試驗證總記錄轉譯簡業計標確認權電腦資庫檔頁編設"
+)
 
 
 def _looks_simplified_chinese(document: TranscriptDocument) -> bool:
@@ -56,10 +62,24 @@ def _looks_simplified_chinese(document: TranscriptDocument) -> bool:
     return document.source.platform == "bilibili" and (document.language or "").lower() == "ai-zh" and traditional == 0
 
 
+def _inferred_source_language(document: TranscriptDocument) -> str | None:
+    """Infer en / zh-cn for untagged local SRT/VTT and ASR transcripts."""
+    sample = "".join(cue.text for cue in document.segments[:40])[:3000]
+    if re.search(r"[\u3040-\u30ff\uac00-\ud7af]", sample):
+        return None
+    han = len(re.findall(r"[\u3400-\u9fff]", sample))
+    latin = len(re.findall(r"[A-Za-z]", sample))
+    if (latin >= 20 and latin > han * 3) or (latin >= 4 and han == 0):
+        return "en"
+    if han >= 3 and han > latin and _looks_simplified_chinese(document):
+        return "zh-cn"
+    return None
+
+
 def _needs_translation(document: TranscriptDocument, language: PageLanguage) -> bool:
     if language == "original":
         return False
-    source = source_language(document) or ""
+    source = source_language(document) or _inferred_source_language(document) or ""
     if language == "en":
         return source.split("-")[0] != "en"
     if source in {"zh-cn", "zh-hans"} or source.startswith("zh-hans-"):
@@ -99,21 +119,30 @@ def reading_translation(source: list[str], translated: list[str], language: str,
     if not all(words) or "".join(proofread[index] for index in positions) != "".join(words):
         return join_translation(translated, language)
 
-    parts = []
+    parts: list[str] = []
     offset = start = 0
+    allowed_marks = ".!?;:,…" if language == "en" else "。！？；：、，.!?;:,…"
     for text, word, same in zip(translated, words, unchanged, strict=True):
         offset += len(word)
         end = positions[offset] if offset < len(positions) else len(proofread)
         if same:
-            parts.append(proofread[start:end])
+            chunk = proofread[start:end]
         else:
             # Keep translated wording. An established sentence separator or
             # dialogue break at the cue boundary can still carry over.
             boundary = proofread[positions[offset - 1] + 1:end]
             mark = boundary.strip()
-            if mark and mark in "。！？；：、，.!?;:,…" and lexical_character(text[-1]):
+            if mark and mark in allowed_marks and text and lexical_character(text[-1]):
                 text += mark
-            parts.append(text + boundary[len(boundary.rstrip()):])
+            chunk = text + boundary[len(boundary.rstrip()):]
+        if parts and chunk:
+            prev = parts[-1]
+            if language == "en":
+                if prev and not prev[-1].isspace() and not chunk[0].isspace() and chunk[0] not in ".,!?;:)]}\"'":
+                    parts.append(" ")
+            elif re.fullmatch(r"[A-Za-z0-9]", prev[-1:]) and re.match(r"[A-Za-z0-9]", chunk):
+                parts.append(" ")
+        parts.append(chunk)
         start = end
     return "".join(parts)
 

@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from dataclasses import asdict
 from hashlib import sha256
 import json
+import os
 import shutil
 from pathlib import Path
 from threading import Lock
@@ -15,7 +16,7 @@ from .ai.checkpoints import provider_identity
 from .asr.config import AsrConfig
 from .asr.bailian import BailianAsr
 from .metadata import canonical_video_url, video_metadata, thumbnail_url, shownotes_metadata
-from .article_state import archive_mutation, patch_reading_state, reading_state, save_reading_state
+from .article_state import archive_mutation, file_lock, patch_reading_state, reading_state, save_reading_state
 from .article_details import DETAILS_FILENAME, detail_value, linked_source_value, read_article_details, save_article_details
 from .ai.models import NoteDocument
 from .ai.openai_compatible import OpenAICompatibleProvider
@@ -604,7 +605,13 @@ def _generate_with_replacement(
             saved_identity = old_workspace / ".generation-identity.json"
             if saved_identity.is_symlink():
                 raise LinkReadError("模型缓存配置文件不可用", code="cache_invalid")
-            recorded_identity = json.loads(saved_identity.read_text(encoding="utf-8")) if saved_identity.is_file() else None
+            if saved_identity.is_file():
+                try:
+                    recorded_identity = json.loads(saved_identity.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    recorded_identity = None
+            else:
+                recorded_identity = None
             for name in ("note-polished.json", "note.json"):
                 cached_file = old_workspace / name
                 if cached_file.is_symlink():
@@ -637,12 +644,13 @@ def _generate_with_replacement(
     if library.is_symlink() or stages.is_symlink():
         raise LinkReadError("独立生成目录不可用", code="cache_invalid")
     stages.mkdir(mode=0o700, exist_ok=True)
-    # Persistent stages, unlike unique temporary directories, could otherwise
-    # be used by two app processes at once. Keep their lock outside the stage
-    # retired after publication, and leave ordinary library reads unblocked.
-    with archive_mutation(stages):
-        stage_root = _generation_stage(library, duplicate["key"], identity,
-                                       extract_local(Path(source)) if local_file else None)
+    # Lock only the individual stage key outside stage_root so two processes do not
+    # share one staging workspace, while never holding a global staging lock across
+    # archive_mutation(library) calls (preventing cross-process AB-BA deadlocks).
+    expected = extract_local(Path(source)) if local_file else None
+    stage_key, value = _resolve_generation_stage(stages, duplicate["key"], identity, expected)
+    with file_lock(stages / f".{stage_key}.lock"):
+        stage_root = _prepare_generation_stage(stages, stage_key, value)
         report(progress, "replace", "正在独立生成新版本，复用同一来源及模型的已验证阶段；旧文章保留到完成")
         generated = generate_article(source, provider, library=stage_root, progress=persisted_progress, **options)
         report(progress, "replace_publish", "新版本已完成，正在替换旧文章")
@@ -657,36 +665,59 @@ def _generate_with_replacement(
         return result
 
 
-def _generation_stage(library: Path, source_key: str, identity: dict,
-                      expected: TranscriptDocument | None) -> Path:
-    stages = library / ".generation-staging"
-    if library.is_symlink() or stages.is_symlink():
-        raise LinkReadError("独立生成目录不可用", code="cache_invalid")
-    stages.mkdir(mode=0o700, exist_ok=True)
+def _stage_hash(value: dict) -> str:
+    return sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def _resolve_generation_stage(
+    stages: Path, source_key: str, identity: dict, expected: TranscriptDocument | None,
+) -> tuple[str, dict]:
     value = {"version": 1, "sourceKey": source_key, "provider": identity}
-    key = sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+    key = _stage_hash(value)
+    if expected is not None:
+        with file_lock(stages / f".{key}.lock"):
+            stage = stages / key
+            if stage.is_symlink():
+                raise LinkReadError("独立生成目录不可用", code="cache_invalid")
+            if stage.is_dir():
+                existing = find_workspace(stage, source_key)
+                if existing and (existing / "transcript.json").is_file():
+                    if (existing / "transcript.json").is_symlink():
+                        raise LinkReadError("独立生成原文缓存不可用", code="cache_invalid")
+                    if load_transcript(existing / "transcript.json") != expected:
+                        value = {**value, "transcriptId": snapshot_id(expected)}
+                        key = _stage_hash(value)
+    return key, value
+
+
+def _prepare_generation_stage(stages: Path, key: str, value: dict) -> Path:
     stage = stages / key
-    if stage.is_symlink():
-        raise LinkReadError("独立生成目录不可用", code="cache_invalid")
-    if expected is not None and stage.is_dir():
-        existing = find_workspace(stage, source_key)
-        if existing and (existing / "transcript.json").is_file():
-            if (existing / "transcript.json").is_symlink():
-                raise LinkReadError("独立生成原文缓存不可用", code="cache_invalid")
-            if load_transcript(existing / "transcript.json") != expected:
-                value["transcriptId"] = snapshot_id(expected)
-                key = sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
-                stage = stages / key
     if stage.is_symlink():
         raise LinkReadError("独立生成目录不可用", code="cache_invalid")
     stage.mkdir(mode=0o700, exist_ok=True)
     manifest = stage / "identity.json"
     if manifest.is_symlink():
         raise LinkReadError("独立生成配置文件不可用", code="cache_invalid")
-    if manifest.exists() and json.loads(manifest.read_text(encoding="utf-8")) != value:
-        raise LinkReadError("独立生成缓存与当前来源或模型不匹配", code="cache_invalid")
+    if manifest.exists():
+        try:
+            existing = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise LinkReadError("独立生成配置文件损坏", code="cache_invalid") from exc
+        if existing != value:
+            raise LinkReadError("独立生成缓存与当前来源或模型不匹配", code="cache_invalid")
     write_text(manifest, json.dumps(value, ensure_ascii=False, sort_keys=True))
     return stage
+
+
+def _generation_stage(
+    library: Path, source_key: str, identity: dict, expected: TranscriptDocument | None,
+) -> Path:
+    stages = library / ".generation-staging"
+    if library.is_symlink() or stages.is_symlink():
+        raise LinkReadError("独立生成目录不可用", code="cache_invalid")
+    stages.mkdir(mode=0o700, exist_ok=True)
+    key, value = _resolve_generation_stage(stages, source_key, identity, expected)
+    return _prepare_generation_stage(stages, key, value)
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=("LinkRead desktop generation and offline reader" if english_mode()
@@ -757,6 +788,9 @@ def main() -> int:
     state.add_argument("article_id")
     args = parser.parse_args()
     library = args.library.expanduser()
+    # Pop secret tokens from process env immediately so child processes (codex, claude, ffmpeg, yt-dlp) never inherit them.
+    api_token = os.environ.pop("LINKREAD_API_TOKEN", None)
+    asr_token = os.environ.pop("LINKREAD_ASR_TOKEN", None)
 
     try:
         if args.command in {"generate", "library"}:
@@ -786,15 +820,17 @@ def main() -> int:
             if local_input and (not Path(source).is_absolute() or not Path(source).is_file()):
                 raise LinkReadError("找不到字幕文件，请重新选择", code="source_missing", stage="extract", action="source")
             with error_context("setup"):
-                provider = make_provider(args.provider, executable=args.executable, model=args.model,
-                                         base_url=args.base_url)
+                provider_kwargs = {"executable": args.executable, "model": args.model, "base_url": args.base_url}
+                if args.provider == "api" and api_token is not None:
+                    provider_kwargs["token"] = api_token
+                provider = make_provider(args.provider, **provider_kwargs)
             article = _generate_with_replacement(
                 source, library, send_progress, local_file=local_input,
                 replace=args.replace, provider=provider, page_language=args.page_language,
                 cookies_from_browser=args.cookies_from_browser, cookies_file=args.cookies,
                 asr=(AsrConfig(base_url=args.asr_base_url, model=args.asr_model,
                                max_minutes=args.asr_max_minutes, chunk_minutes=args.asr_chunk_minutes,
-                               ffmpeg_path=args.ffmpeg_path) if args.asr else None))
+                               token=asr_token, ffmpeg_path=args.ffmpeg_path) if args.asr else None))
             _emit("completed", output="article.html", article=_article_record(article))
         elif args.command == "preview":
             _emit("preview", **video_metadata(args.source).public())
@@ -812,7 +848,7 @@ def main() -> int:
                 library, args.target_id, fmt=args.format, preview=args.preview,
             ))
         elif args.command == "test-asr":
-            client = BailianAsr(AsrConfig(base_url=args.base_url, model=args.model))
+            client = BailianAsr(AsrConfig(base_url=args.base_url, model=args.model, token=asr_token))
             segments = client.test_connection()
             _emit("connection", ok=True, message="已连接", sentences=len(segments))
         elif args.command == "test-youtube-cookies":
@@ -821,7 +857,7 @@ def main() -> int:
                 cookies_from_browser=args.cookies_from_browser, cookies_file=args.cookies,
             ))
         elif args.command == "test-api":
-            api = OpenAICompatibleProvider(base_url=args.base_url, model=args.model)
+            api = OpenAICompatibleProvider(base_url=args.base_url, model=args.model, token=api_token)
             api.test_connection()
             _emit("connection", ok=True, message="连接成功，模型和 Token 可用")
         elif args.command == "duplicate":

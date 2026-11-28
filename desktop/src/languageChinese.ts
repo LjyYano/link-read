@@ -79,5 +79,6 @@ export const chinese: Readonly<Record<string, string>> = {
   "Original transcript · Downloaded subtitles": "原始字幕 · 已下载",
   "Generate article": "生成文章",
   "Export SRT": "导出 SRT",
-  "Export VTT": "导出 VTT"
+  "Export VTT": "导出 VTT",
+  "None": "无"
 }

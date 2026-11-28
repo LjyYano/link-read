@@ -7,11 +7,6 @@ import "./reading-actions.css"
 
 export type ChangeArticleState = (id: string, patch: ArticleStatePatch) => Promise<void>
 
-const labels = {
-  unread: tr("Mark Unread"), read: tr("Mark Complete"), unstar: tr("Unstar"), star: tr("Star"), starred: tr("Starred"),
-  saveError: tr("Could not save."), dismissError: tr("Dismiss error"),
-} as const
-
 export function ReadingActions({ article, onChange, compact = false, className = "", nativeTooltips = true }: {
   article: Article; onChange: ChangeArticleState; compact?: boolean; className?: string
   nativeTooltips?: boolean
@@ -20,6 +15,10 @@ export function ReadingActions({ article, onChange, compact = false, className =
   const [error, setError] = useState("")
   const inFlight = useRef(false)
   const state = articleState(article)
+  const labels = {
+    unread: tr("Mark Unread"), read: tr("Mark Complete"), unstar: tr("Unstar"), star: tr("Star"), starred: tr("Starred"),
+    saveError: tr("Could not save."), dismissError: tr("Dismiss error"),
+  }
   const completeLabel = state.isRead ? labels.unread : labels.read
   const starLabel = state.isStarred ? labels.unstar : labels.star
 

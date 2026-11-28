@@ -44,7 +44,7 @@ def load_document(path: Path) -> TranscriptDocument | NoteDocument:
             return NoteDocument.model_validate(value)
         return TranscriptDocument.model_validate(value)
     except (OSError, UnicodeError, ValidationError, ValueError) as exc:
-        raise ExtractionError(f"不是有效的 LinkRead TranscriptDocument / NoteDocument：{path}（{exc}）") from exc
+        raise ExtractionError(f"不是有效的 LinkRead TranscriptDocument / NoteDocument：{path.name}") from exc
 
 
 def load_transcript(path: Path) -> TranscriptDocument:
@@ -52,7 +52,7 @@ def load_transcript(path: Path) -> TranscriptDocument:
     try:
         return TranscriptDocument.model_validate_json(path.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeError, ValidationError, ValueError) as exc:
-        raise ExtractionError(f"不是有效的 LinkRead TranscriptDocument v1.0：{path}（{exc}）") from exc
+        raise ExtractionError(f"不是有效的 LinkRead TranscriptDocument v1.0：{path.name}") from exc
 
 
 def article_metadata(

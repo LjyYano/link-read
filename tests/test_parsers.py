@@ -253,3 +253,59 @@ def test_render_subtitles_srt_and_vtt_roundtrip_timestamps_and_text():
         (1250, 3400, "Hello world"),
         (65000, 65000, "第二句"),
     ]
+
+
+def test_bilibili_json_preserves_angle_brackets_and_entities_verbatim():
+    payload = '{"body": [{"from": 0.5, "to": 2.0, "content": "if a < b and c > d and vector<int> &amp; x"}]}'
+    result = parse_bilibili_json(payload)
+    assert result[0].text == "if a < b and c > d and vector<int> &amp; x"
+
+
+def test_srt_vtt_preserves_math_note_cue_id_word_boundaries_and_rejects_inverted_times():
+    vtt = """WEBVTT
+
+NOTE-1
+00:00:01.000 --> 00:00:02.000
+if a < b and c > d
+
+00:00:02.000 --> 00:00:03.000
+<c>kept</c>
+"""
+    parsed = parse_srt_vtt(vtt)
+    assert [(s.start_ms, s.text) for s in parsed] == [(1000, "if a < b and c > d"), (2000, "kept")]
+
+    with pytest.raises(ExtractionError, match="早于"):
+        parse_srt_vtt("1\n00:00:05,000 --> 00:00:02,000\nreversed\n")
+
+    with pytest.raises(ExtractionError):
+        parse_bilibili_json('{"body": [{"from": true, "to": 2, "content": "bad"}]}')
+
+    with pytest.raises(ExtractionError):
+        parse_bilibili_json('{"body": [{"from": 5, "to": 2, "content": "reversed"}]}')
+
+    rolling_vtt = """WEBVTT
+
+00:00:00.000 --> 00:00:02.000
+I like art
+
+00:00:01.000 --> 00:00:03.000
+I like artificial intelligence
+"""
+    deduped = parse_srt_vtt(rolling_vtt, rolling=True)
+    assert [s.text for s in deduped] == ["I like art", "I like artificial intelligence"]
+
+
+def test_invalid_transcript_json_errors_do_not_leak_raw_subtitle_text(tmp_path):
+    from linkread_desktop.renderers.site import load_document, load_transcript
+
+    secret_line = "TOP_SECRET_PRIVATE_SUBTITLE_CONTENT"
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        f'{{"schema_version": "1.0", "source": {{"platform": "local", "title": "x"}}, '
+        f'"segments": [{{"start_ms": -5, "text": "{secret_line}"}}]}}',
+        encoding="utf-8",
+    )
+    for loader in (extract_local, load_document, load_transcript):
+        with pytest.raises(ExtractionError) as exc:
+            loader(bad)
+        assert secret_line not in str(exc.value)

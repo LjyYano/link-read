@@ -61,6 +61,7 @@ def test_api_errors_do_not_echo_response_or_secret(monkeypatch, status, expected
         status_code = status
         text = "private-token VERY PRIVATE transcript"
     monkeypatch.setattr("linkread_desktop.ai.openai_compatible.requests.post", lambda *a, **k: Response())
+    monkeypatch.setattr("linkread_desktop.ai.openai_compatible._sleep", lambda *_: None)
     api = OpenAICompatibleProvider(base_url="https://api.example.com/v1", model="test", token="private-token")
     with pytest.raises(ProviderError) as error:
         api.generate("原始字幕", {"type": "object"}, timeout_seconds=20)
@@ -210,3 +211,108 @@ def test_pooled_connection_reset_retries_once_but_timeout_never_retries(monkeypa
     with pytest.raises(ProviderError, match="超时"):
         api.generate("hello", {"type": "object"}, timeout_seconds=30)
     assert timeouts == 1
+
+
+def test_transient_429_and_503_retry_with_backoff_and_single_line_fence(monkeypatch):
+    sleeps = []
+    calls = 0
+
+    class Response:
+        def __init__(self, status_code, headers=None, payload=None):
+            self.status_code = status_code
+            self.headers = headers or {}
+            self._payload = payload
+            self.closed = False
+
+        def json(self):
+            return self._payload
+
+        def close(self):
+            self.closed = True
+
+    responses = [
+        Response(429, headers={"Retry-After": "2"}),
+        Response(503),
+        Response(200, payload={"choices": [{"message": {"content": '```{"ok": true}```'}}]}),
+    ]
+
+    def fake_post(url, **kwargs):
+        nonlocal calls
+        resp = responses[calls]
+        calls += 1
+        return resp
+
+    monkeypatch.setattr("linkread_desktop.ai.openai_compatible.requests.post", fake_post)
+    monkeypatch.setattr("linkread_desktop.ai.openai_compatible._sleep", sleeps.append)
+    api = OpenAICompatibleProvider(base_url="https://api.example.com/v1", model="gpt-4o-mini", token="secret")
+    assert api.generate("hello", {"type": "object"}, timeout_seconds=30) == {"ok": True}
+    assert calls == 3
+    assert sleeps[0] == 2.0 and len(sleeps) == 2
+    assert all(r.closed for r in responses)
+
+
+def test_concurrent_workers_use_isolated_thread_local_sessions():
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    api = OpenAICompatibleProvider(base_url="https://api.example.com/v1", model="gpt-4o-mini", token="secret")
+    barrier = threading.Barrier(4)
+
+    def worker():
+        session = api._thread_session()
+        barrier.wait(timeout=5)
+        return id(session)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        session_ids = [f.result() for f in [pool.submit(worker) for _ in range(4)]]
+    assert len(set(session_ids)) == 4
+
+
+def test_subprocess_providers_and_ffmpeg_never_inherit_linkread_secret_tokens(monkeypatch, tmp_path):
+    from pathlib import Path
+    import subprocess
+    from linkread_desktop.ai.provider import ClaudeProvider, CodexProvider
+    from linkread_desktop.asr.segments import split_audio
+
+    monkeypatch.setenv("LINKREAD_API_TOKEN", "chat-secret")
+    monkeypatch.setenv("LINKREAD_ASR_TOKEN", "asr-secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "claude-secret")
+
+    seen_envs = {}
+
+    def fake_codex_run(cmd, **kwargs):
+        seen_envs["codex"] = kwargs["env"]
+        answer = Path(cmd[cmd.index("--output-last-message") + 1])
+        answer.write_text('{"ok": true}', encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    def fake_claude_run(cmd, **kwargs):
+        seen_envs["claude"] = kwargs["env"]
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"structured_output": {"ok": true}}', stderr="")
+
+    monkeypatch.setattr("linkread_desktop.ai.provider.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("linkread_desktop.ai.provider.subprocess.run", fake_codex_run)
+    assert CodexProvider().generate("hi", {"type": "object"}, timeout_seconds=10) == {"ok": True}
+    assert "LINKREAD_API_TOKEN" not in seen_envs["codex"]
+    assert "LINKREAD_ASR_TOKEN" not in seen_envs["codex"]
+    assert "ANTHROPIC_API_KEY" not in seen_envs["codex"]
+
+    monkeypatch.setattr("linkread_desktop.ai.provider.subprocess.run", fake_claude_run)
+    assert ClaudeProvider().generate("hi", {"type": "object"}, timeout_seconds=10) == {"ok": True}
+    assert "LINKREAD_API_TOKEN" not in seen_envs["claude"]
+    assert "LINKREAD_ASR_TOKEN" not in seen_envs["claude"]
+    assert seen_envs["claude"].get("ANTHROPIC_API_KEY") == "claude-secret"
+
+    def fake_ffmpeg_run(cmd, **kwargs):
+        seen_envs["ffmpeg"] = kwargs["env"]
+        raise subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr("linkread_desktop.asr.segments.ffmpeg_binary", lambda *_: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("linkread_desktop.asr.segments.subprocess.run", fake_ffmpeg_run)
+    audio = tmp_path / "audio.m4a"
+    audio.write_bytes(b"fake")
+    with pytest.raises(Exception):
+        split_audio(audio, tmp_path, minutes=5, duration_ms=600_000)
+    assert "LINKREAD_API_TOKEN" not in seen_envs["ffmpeg"]
+    assert "LINKREAD_ASR_TOKEN" not in seen_envs["ffmpeg"]
+    assert "ANTHROPIC_API_KEY" not in seen_envs["ffmpeg"]

@@ -2,6 +2,7 @@
 
 import html
 import json
+import math
 import re
 
 from .errors import ExtractionError, SubtitleUnavailableError
@@ -10,7 +11,8 @@ from .models import TranscriptSegment
 _TIMESTAMP = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})(?:[.,](\d{1,3}))?$")
 _VTT_TIMESTAMPS = re.compile(r"<\d{2}:\d{2}(?::\d{2})?\.\d{3}>")
 _VTT_CLASS_TAG = re.compile(r"<c(?:\.[^>.\s]+)*>")
-_TAGS = re.compile(r"<[^>]+>")
+_VTT_META_BLOCK = re.compile(r"^(?:NOTE|STYLE|REGION)(?:\s|$)")
+_TAGS = re.compile(r"</?[a-zA-Z][a-zA-Z0-9._-]*(?:\s[^>]*)?>")
 
 
 def _milliseconds(value: str) -> int:
@@ -21,6 +23,10 @@ def _milliseconds(value: str) -> int:
     if int(seconds) >= 60 or (hours is not None and int(minutes) >= 60):
         raise ExtractionError(f"无效的字幕时间戳：{value!r}")
     return ((int(hours or 0) * 60 + int(minutes)) * 60 + int(seconds)) * 1000 + int((fraction or "0").ljust(3, "0"))
+
+
+def _plain_text(value: str) -> str:
+    return " ".join(value.replace("\u00a0", " ").split())
 
 
 def _text(value: str) -> str:
@@ -34,7 +40,7 @@ def _iter_cues(content: str):
     normalized = content.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
     for block in re.split(r"\n\s*\n", normalized):
         lines = [line.strip() for line in block.splitlines()]
-        if not lines or lines[0].startswith(("NOTE", "STYLE", "REGION")):
+        if not lines or _VTT_META_BLOCK.match(lines[0]):
             continue
         idx = next((i for i, line in enumerate(lines) if "-->" in line), -1)
         if idx < 0:
@@ -87,6 +93,8 @@ def parse_srt_vtt(content: str, *, rolling: bool = False) -> list[TranscriptSegm
     for left, end_token, raw_lines in _iter_cues(content):
         start_ms = _milliseconds(left)
         end_ms = _milliseconds(end_token)
+        if end_ms < start_ms:
+            raise ExtractionError(f"字幕结束时间早于开始时间：{left.strip()!r} --> {end_token!r}")
         text = _text(" ".join(raw_lines))
         if not text:
             continue
@@ -114,8 +122,14 @@ def parse_srt_vtt(content: str, *, rolling: bool = False) -> list[TranscriptSegm
                     previous_short = True
                 continue
             # YouTube auto-caption cues often repeat all the previous words.
+            # Never slice across the middle of an ASCII word ("art" vs "artificial").
+            mid_word = (
+                bool(previous) and len(text) > len(previous)
+                and previous[-1].isascii() and previous[-1].isalnum()
+                and text[len(previous)].isascii() and text[len(previous)].isalnum()
+            )
             if ((overlaps_previous or (contiguous and previous_short))
-                    and previous and text.startswith(previous) and len(text) > len(previous)):
+                    and previous and text.startswith(previous) and len(text) > len(previous) and not mid_word):
                 text = text[len(previous) :].strip()
                 if not text:
                     previous = original_text
@@ -157,17 +171,28 @@ def parse_bilibili_json(content: str) -> list[TranscriptSegment]:
         try:
             if not isinstance(cue, dict):
                 raise ValueError("cue is not an object")
-            text = _text(str(cue["content"]))
+            raw_from, raw_to = cue["from"], cue["to"]
+            if isinstance(raw_from, bool) or isinstance(raw_to, bool):
+                raise ValueError("timestamp cannot be boolean")
+            start_sec = float(raw_from)
+            end_sec = float(raw_to)
+            if not (math.isfinite(start_sec) and math.isfinite(end_sec)):
+                raise ValueError("timestamp must be finite")
+            start_ms = round(start_sec * 1000)
+            end_ms = round(end_sec * 1000)
+            if start_ms < 0 or end_ms < start_ms:
+                raise ValueError("invalid timestamp range")
+            text = _plain_text(str(cue["content"]))
             if not text:
                 continue
             segments.append(
                 TranscriptSegment(
-                    start_ms=round(float(cue["from"]) * 1000),
-                    end_ms=round(float(cue["to"]) * 1000),
+                    start_ms=start_ms,
+                    end_ms=end_ms,
                     text=text,
                 )
             )
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise ExtractionError("B 站字幕包含无效的时间戳或内容") from exc
     if not segments:
         raise SubtitleUnavailableError("B 站字幕为空")

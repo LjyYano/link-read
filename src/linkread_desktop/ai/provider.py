@@ -5,6 +5,7 @@ Codex login, or a Claude Console API key for `claude --bare`.
 """
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,6 +13,17 @@ from tempfile import TemporaryDirectory
 from typing import Protocol
 
 from ..errors import LinkReadError
+
+_SENSITIVE_ENV_VARS = ("LINKREAD_API_TOKEN", "LINKREAD_ASR_TOKEN")
+
+
+def _subprocess_env(*, keep_anthropic: bool) -> dict[str, str]:
+    env = dict(os.environ)
+    for key in _SENSITIVE_ENV_VARS:
+        env.pop(key, None)
+    if not keep_anthropic:
+        env.pop("ANTHROPIC_API_KEY", None)
+    return env
 
 
 class ProviderError(LinkReadError):
@@ -27,11 +39,14 @@ class StructuredProvider(Protocol):
     def generate(self, prompt: str, schema: dict, *, timeout_seconds: int) -> dict: ...
 
 
-def _process(command: list[str], prompt: str, *, cwd: str, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+def _process(
+    command: list[str], prompt: str, *, cwd: str, timeout_seconds: int, keep_anthropic: bool = False,
+) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             command, input=prompt, text=True, encoding="utf-8", errors="replace",
-            cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cwd=cwd, env=_subprocess_env(keep_anthropic=keep_anthropic),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=timeout_seconds, check=False,
         )
     except FileNotFoundError as exc:
@@ -85,7 +100,7 @@ class CodexProvider:
             if reasoning_effort in {"low", "medium", "high"}:
                 cmd.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
             cmd.append("-")
-            proc = _process(cmd, prompt, cwd=directory, timeout_seconds=timeout_seconds)
+            proc = _process(cmd, prompt, cwd=directory, timeout_seconds=timeout_seconds, keep_anthropic=False)
             if proc.returncode != 0:
                 raise _failure(self.name, proc)
             if not answer_file.is_file():
@@ -111,7 +126,7 @@ class ClaudeProvider:
             ]
             if self.model:
                 cmd.extend(["--model", self.model])
-            proc = _process(cmd, prompt, cwd=directory, timeout_seconds=timeout_seconds)
+            proc = _process(cmd, prompt, cwd=directory, timeout_seconds=timeout_seconds, keep_anthropic=True)
             if proc.returncode != 0:
                 raise _failure(self.name, proc)
             envelope = _json_object(proc.stdout, self.name)

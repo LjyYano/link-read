@@ -31,17 +31,23 @@ def reading_state(folder: Path) -> dict[str, bool]:
 
 
 @contextmanager
-def archive_mutation(library: Path):
-    """Serialize state patches and the final archive replacement across sidecars."""
+def file_lock(lock: Path):
+    """Acquire an exclusive cross-process flock on a private lock file."""
     import fcntl  # Desktop targets macOS; flock also works in Linux verification.
 
-    lock = library / ".article-state.lock"
     descriptor = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         yield
     finally:
         os.close(descriptor)
+
+
+@contextmanager
+def archive_mutation(library: Path):
+    """Serialize state patches and the final archive replacement across sidecars."""
+    with file_lock(library / ".article-state.lock"):
+        yield
 
 
 def save_reading_state(folder: Path, state: dict[str, bool]) -> None:

@@ -941,6 +941,8 @@ fn sidecar(locations: &Locations) -> AppResult<Command> {
             locations.library.as_os_str().to_owned(),
         ])
         .current_dir(&locations.data)
+        .env_remove("LINKREAD_API_TOKEN")
+        .env_remove("LINKREAD_ASR_TOKEN")
         .env("PYTHONUTF8", "1")
         .env("LINKREAD_UI_LANGUAGE", locations.language())
         .stdin(Stdio::null())
@@ -1273,10 +1275,34 @@ fn lock_archive(dir: &Path) -> AppResult<fs::File> {
     let lock = fs::OpenOptions::new().read(true).write(true).create(true).mode(0o600)
         .custom_flags(libc::O_NOFOLLOW).open(dir.join(".article-state.lock"))
         .map_err(|error| details("无法锁定资料库", error))?;
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(details("无法锁定资料库", io::Error::last_os_error()));
+    loop {
+        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            return Ok(lock);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(details("无法锁定资料库", error));
+        }
     }
-    Ok(lock)
+}
+
+fn try_lock_file(path: &Path) -> AppResult<Option<fs::File>> {
+    let lock = fs::OpenOptions::new().read(true).write(true).create(true).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW).open(path)
+        .map_err(|error| details("无法锁定暂存目录", error))?;
+    loop {
+        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(Some(lock));
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::Interrupted {
+            continue;
+        }
+        if error.kind() == io::ErrorKind::WouldBlock {
+            return Ok(None);
+        }
+        return Err(details("无法锁定暂存目录", error));
+    }
 }
 
 fn valid_source_key(key: &str) -> bool {
@@ -1344,16 +1370,38 @@ fn cleanup_source_caches_locked(
     if let Some(key) = resolved_key.as_deref() {
         let stages = library.join(".generation-staging");
         if fs::symlink_metadata(&stages).is_ok_and(|meta| meta.file_type().is_dir()) {
-            let _stage_lock = lock_archive(&stages)?;
+            // Never acquire a blocking staging lock while holding library/.article-state.lock:
+            // Python holds per-stage locks while calling archive_mutation(library).
+            let legacy_lock_path = stages.join(".article-state.lock");
+            let _legacy_guard = if fs::symlink_metadata(&legacy_lock_path).is_ok() {
+                match try_lock_file(&legacy_lock_path)? {
+                    Some(guard) => Some(guard),
+                    None => return Err("暂存目录正在处理中，请等待当前任务结束后再试".into()),
+                }
+            } else {
+                None
+            };
             if let Ok(entries) = fs::read_dir(&stages) {
                 for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let Some(stage_name) = name.to_str() else { continue };
+                    if stage_name.starts_with('.') { continue; }
                     let path = entry.path();
                     if fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_dir()) {
                         let matched = read_bounded_json(&path.join("identity.json"), 64 * 1024)
                             .and_then(|v| v.get("sourceKey").and_then(|k| k.as_str()).map(|k| k == key))
                             .unwrap_or(false);
                         if matched {
-                            fs::remove_dir_all(&path).map_err(|error| details("删除暂存缓存失败", error))?;
+                            let stage_lock = stages.join(format!(".{stage_name}.lock"));
+                            let Some(_stage_guard) = try_lock_file(&stage_lock)? else {
+                                return Err("该来源的暂存目录正在处理中，请等待当前任务结束后再试".into());
+                            };
+                            let still_matched = read_bounded_json(&path.join("identity.json"), 64 * 1024)
+                                .and_then(|v| v.get("sourceKey").and_then(|k| k.as_str()).map(|k| k == key))
+                                .unwrap_or(false);
+                            if still_matched {
+                                fs::remove_dir_all(&path).map_err(|error| details("删除暂存缓存失败", error))?;
+                            }
                         }
                     }
                 }
@@ -1404,21 +1452,8 @@ fn cleanup_source_caches_locked(
     Ok(())
 }
 
-fn remove_pasted_subtitle_if_managed(data: &Path, source: &str) {
-    let imports = data.join("subtitle-imports");
-    if !fs::symlink_metadata(&imports).is_ok_and(|meta| meta.file_type().is_dir()) {
-        return;
-    }
-    let candidate = Path::new(source);
-    let Some(parent) = candidate.parent() else { return };
-    if parent.parent() != Some(imports.as_path()) { return; }
-    let Some(hash_dir) = parent.file_name().and_then(|n| n.to_str()) else { return };
-    if preview_id(hash_dir).is_err() { return; }
-    let _ = remove_dir_if_real(parent);
-}
-
 #[tauri::command]
-fn delete_article(
+async fn delete_article(
     state: State<'_, Generation>,
     locations: State<'_, Locations>,
     id: String,
@@ -1428,14 +1463,22 @@ fn delete_article(
     if state.0.lock().unwrap().active.is_some() {
         return Err("正在生成文章，请在当前任务结束后再删除".into());
     }
-    let fallback_key = article_file(&locations.library, &id)
-        .ok()
-        .and_then(|path| path.parent().and_then(cached_reading_key));
-    remove_article_files(&locations.library, &id)?;
-    if let Some(key) = reading_key.filter(|k| !k.is_empty()).or(fallback_key) {
-        let _ = durable_state::delete_position(&locations.data, &key);
-    }
-    Ok(())
+    let library = locations.library.clone();
+    let data = locations.data.clone();
+    tokio::task::spawn_blocking(move || {
+        let fallback_key = article_file(&library, &id)
+            .ok()
+            .and_then(|path| path.parent().and_then(cached_reading_key));
+        let result = remove_article_files(&library, &id);
+        if let Some(key) = reading_key.filter(|k| !k.is_empty()).or(fallback_key) {
+            if article_file(&library, &id).is_err() {
+                let _ = durable_state::delete_position(&data, &key);
+            }
+        }
+        result
+    })
+    .await
+    .map_err(|error| details("删除文章失败", error))?
 }
 
 fn remove_article_files(library: &Path, id: &str) -> AppResult<()> {
@@ -1454,63 +1497,25 @@ fn remove_article_files(library: &Path, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Deleting a failed/cancelled task record preserves reusable stage caches
+/// (`.generation-staging`, `.ai-checkpoints`, `.asr`, and `.transcript-previews`)
+/// per AGENTS.md so retries do not repeat paid ASR or verified AI batches.
 fn remove_task_files(
-    library: &Path,
-    data: Option<&Path>,
-    source: Option<&str>,
-    local_file: bool,
-    source_key: Option<&str>,
+    _library: &Path,
+    _data: Option<&Path>,
+    _source: Option<&str>,
+    _local_file: bool,
+    _source_key: Option<&str>,
     preview_id_value: Option<&str>,
 ) -> AppResult<()> {
     if let Some(pid) = preview_id_value {
         preview_id(pid)?;
     }
-    let mut effective_key = source_key.filter(|k| valid_source_key(k)).map(str::to_owned);
-    if effective_key.is_none() && !local_file {
-        effective_key = source.and_then(video_links::source_key);
-    }
-    if fs::symlink_metadata(library).is_ok_and(|meta| meta.file_type().is_dir()) {
-        let _lock = lock_archive(library)?;
-        if effective_key.is_none() {
-            if let Some(pid) = preview_id_value {
-                let manifest_path = library.join(".transcript-previews").join(pid).join("request.json");
-                if let Some(manifest) = read_bounded_json(&manifest_path, 1024 * 1024) {
-                    if let Some(key) = manifest.get("sourceKey").and_then(|v| v.as_str()).filter(|k| valid_source_key(k)) {
-                        effective_key = Some(key.to_owned());
-                    }
-                }
-            }
-        }
-        // Only remove an unfinished workspace directory (never one with a published article.html).
-        if let Some(key) = effective_key.as_deref() {
-            let suffix = format!(" [{key}]");
-            if let Ok(entries) = fs::read_dir(library) {
-                for entry in entries.flatten() {
-                    let name = entry.file_name();
-                    let Some(name) = name.to_str() else { continue };
-                    if name.starts_with('.') || !name.ends_with(&suffix) { continue; }
-                    let folder = entry.path();
-                    if fs::symlink_metadata(&folder).is_ok_and(|meta| meta.file_type().is_dir()) {
-                        let published = folder.join("article.html");
-                        if fs::symlink_metadata(&published).is_err() {
-                            fs::remove_dir_all(&folder).map_err(|error| details("删除未完成任务目录失败", error))?;
-                        }
-                    }
-                }
-            }
-        }
-        cleanup_source_caches_locked(library, effective_key.as_deref(), preview_id_value)?;
-    }
-    if local_file {
-        if let (Some(data_dir), Some(path_str)) = (data, source) {
-            remove_pasted_subtitle_if_managed(data_dir, path_str);
-        }
-    }
     Ok(())
 }
 
 #[tauri::command]
-fn delete_task_data(
+async fn delete_task_data(
     state: State<'_, Generation>,
     locations: State<'_, Locations>,
     source: Option<String>,
@@ -1529,14 +1534,20 @@ fn delete_task_data(
             }
         }
     }
-    remove_task_files(
-        &locations.library,
-        Some(&locations.data),
-        source.as_deref(),
-        is_local,
-        source_key.as_deref(),
-        preview_id_value.as_deref(),
-    )
+    let library = locations.library.clone();
+    let data = locations.data.clone();
+    tokio::task::spawn_blocking(move || {
+        remove_task_files(
+            &library,
+            Some(&data),
+            source.as_deref(),
+            is_local,
+            source_key.as_deref(),
+            preview_id_value.as_deref(),
+        )
+    })
+    .await
+    .map_err(|error| details("删除任务记录失败", error))?
 }
 
 async fn query<T: serde::de::DeserializeOwned>(
@@ -2867,16 +2878,17 @@ mod tests {
         let pasted_file = managed_import.join("pasted.srt");
         fs::write(&pasted_file, "1\n00:00:00,000 --> 00:00:01,000\nhi\n").unwrap();
 
+        // Removing a failed task record preserves reusable stage, preview and paid ASR caches per AGENTS.md.
         super::remove_task_files(&library, Some(&data), Some(pasted_file.to_str().unwrap()), true, Some(key), Some(&preview_id)).unwrap();
-        assert!(!unfinished.exists());
-        assert!(!stage.exists());
-        assert!(!preview.exists());
-        assert!(!asr_dir.exists());
-        assert!(!managed_import.exists());
+        assert!(unfinished.exists());
+        assert!(stage.exists());
+        assert!(preview.exists());
+        assert!(asr_dir.exists());
+        assert!(managed_import.exists());
         assert!(other_stage.exists());
         assert!(keep_preview.exists());
 
-        // Failed regeneration task must NEVER delete a completed article with article.html.
+        // Failed regeneration task must NEVER delete a completed article or its reusable caches.
         let published_id = format!("Published [{other_key}]");
         let published = library.join(&published_id);
         fs::create_dir_all(&published).unwrap();
@@ -2884,10 +2896,10 @@ mod tests {
         fs::write(published.join("cover.jpg"), b"\xff\xd8\xff\xe0").unwrap();
         super::remove_task_files(&library, Some(&data), None, false, Some(other_key), None).unwrap();
         assert!(published.join("article.html").exists());
-        assert!(!other_stage.exists());
-        assert!(!keep_preview.exists());
+        assert!(other_stage.exists());
+        assert!(keep_preview.exists());
 
-        // Deleting the published article removes the folder, backup, and reading position.
+        // Permanently deleting the published article removes the folder, backup, related caches, and reading position.
         let backup = library.join(".linkread-backups").join(&published_id);
         fs::create_dir_all(&backup).unwrap();
         super::durable_state::save_position(&data, "youtube:2-OtherVid9w", &serde_json::json!({
@@ -2897,6 +2909,50 @@ mod tests {
         super::durable_state::delete_position(&data, "youtube:2-OtherVid9w").unwrap();
         assert!(!published.exists());
         assert!(!backup.exists());
+        assert!(!other_stage.exists());
+        assert!(!keep_preview.exists());
+        assert!(stage.exists());
+        assert!(asr_dir.exists());
         assert_eq!(super::durable_state::load_position(&data, "youtube:2-OtherVid9w").unwrap(), serde_json::Value::Null);
+    }
+
+    #[test]
+    fn deleting_article_never_deadlocks_against_active_per_stage_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let stages = library.join(".generation-staging");
+        let active_key = "youtube-1-Fo8McCD9w";
+        let other_key = "youtube-2-OtherVid9w";
+
+        let active_stage = stages.join("stage-active");
+        fs::create_dir_all(&active_stage).unwrap();
+        fs::write(active_stage.join("identity.json"), serde_json::json!({"version": 1, "sourceKey": active_key}).to_string()).unwrap();
+
+        let other_stage = stages.join("stage-other");
+        fs::create_dir_all(&other_stage).unwrap();
+        fs::write(other_stage.join("identity.json"), serde_json::json!({"version": 1, "sourceKey": other_key}).to_string()).unwrap();
+
+        let article_a_id = format!("Active [{active_key}]");
+        let article_b_id = format!("Other [{other_key}]");
+        for id in [&article_a_id, &article_b_id] {
+            let folder = library.join(id);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join("article.html"), "<html>ok</html>").unwrap();
+        }
+
+        // Simulate Python holding the per-stage lock for Source A while regenerating.
+        let held_stage_lock = super::try_lock_file(&stages.join(".stage-active.lock")).unwrap().unwrap();
+
+        // Deleting unrelated Article B succeeds immediately without blocking on Source A's stage lock.
+        remove_article_files(&library, &article_b_id).unwrap();
+        assert!(!library.join(&article_b_id).exists());
+        assert!(!other_stage.exists());
+        assert!(active_stage.exists());
+
+        // Attempting to clean Source A's actively locked stage returns an immediate non-blocking error instead of deadlocking.
+        let err = remove_article_files(&library, &article_a_id).unwrap_err();
+        assert!(err.contains("暂存目录正在处理中"));
+        assert!(active_stage.exists());
+        drop(held_stage_lock);
     }
 }

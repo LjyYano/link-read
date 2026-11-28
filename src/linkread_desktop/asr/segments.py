@@ -103,13 +103,17 @@ def split_audio(audio: Path, folder: Path, *, minutes: int, duration_ms: int, pr
     report(progress, "audio_split", f"正在将音轨按约 {minutes} 分钟分片，不下载视频画面")
     with TemporaryDirectory(prefix=".split-", dir=folder) as tmp:
         stage = Path(tmp)
+        ffmpeg_env = {
+            key: value for key, value in os.environ.items()
+            if key not in {"LINKREAD_API_TOKEN", "LINKREAD_ASR_TOKEN", "ANTHROPIC_API_KEY"}
+        }
         try:
             subprocess.run([
                 binary, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                 "-i", str(audio), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(RATE),
                 "-c:a", "pcm_s16le", "-f", "segment", "-segment_time", str(minutes * 60),
                 "-reset_timestamps", "1", str(stage / "part-%04d.wav"),
-            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            ], check=True, env=ffmpeg_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 timeout=max(120, min(1800, duration_ms // 1000)))
         except FileNotFoundError as exc:
             raise AsrError("没有找到 FFmpeg，请安装后重试", code="dependency_missing", action="setup") from exc

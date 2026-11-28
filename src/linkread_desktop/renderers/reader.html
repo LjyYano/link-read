@@ -161,6 +161,11 @@
 .quote-translation{margin:0 0 10px;font-size:.95em;color:var(--muted)}
 .quote-translation>span{display:block;font-size:.75em;font-weight:650}
 @media print{
+  :root,[data-theme=dark]{color-scheme:light;--bg:#fff;--aside:#f7f7f5;--fg:#1f1f1f;--muted:#595855;--soft:#6b6a67;--line:#ddd;--surface:#f7f7f5;--hover:#f3f3f1;--accent:#1d6ec2;--red:#b42318;--marked:transparent}
+  body{background:#fff!important;color:#1f1f1f!important}
+  mark{background:transparent!important;outline:none!important}
+  .transcript-section h2,.transcript-section h3{break-after:avoid;page-break-after:avoid}
+  .reading-paragraph{orphans:3;widows:3}
   .shell{display:block}.main{padding:0}
   .sidebar,.crumb,.tabs,.toolbar,.reading-tools,.reading-actions,.mobile-toc,#toast,.reading-resume,.panel:not(#panel-transcript){display:none!important}
   #panel-transcript{display:block!important}

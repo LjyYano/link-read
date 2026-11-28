@@ -476,7 +476,7 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
   }
   async function handleRemove() {
     if (removing) return
-    if (!window.confirm(tr("确认删除任务「{0}」？\n未生成的本地字幕、预览快照和临时处理缓存也会一并从磁盘删除，且无法撤销。", title))) return
+    if (!window.confirm(tr("确认移除任务记录「{0}」？\n仅移除此任务记录，已保存的字幕与可复用的阶段缓存会保留。", title))) return
     setRemoving(true)
     setActionError("")
     try {
@@ -504,7 +504,7 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
           ) : <>
             <button className="secondary" type="button" disabled={removing} onClick={recover}>{recoveryLabel}</button>
             {recoveryAction !== "retry" && !unsupportedAudio && <button className="text-button" type="button" disabled={removing} onClick={onRetry}>{tr("重试")}</button>}
-            <button className="icon-button" type="button" disabled={removing} title={tr("删除任务与本地缓存")} aria-label={tr("删除任务与本地缓存")} onClick={() => void handleRemove()}>
+            <button className="icon-button" type="button" disabled={removing} title={tr("移除任务记录")} aria-label={tr("移除任务记录")} onClick={() => void handleRemove()}>
               <Trash2 size={16} />
             </button>
           </>}

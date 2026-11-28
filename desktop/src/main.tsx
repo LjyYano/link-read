@@ -7,7 +7,7 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "re
 import { createRoot } from "react-dom/client"
 import { BookOpen, CircleCheck, ListTodo, Search, Settings as SettingsIcon, X } from "lucide-react"
 import {
-  cancelGeneration, checkDuplicate, checkTool, deleteArticle, deleteTaskData,
+  cancelGeneration, checkDuplicate, checkTool, deleteArticle,
   articleTranscriptPath, exportSubtitles, generateArticle, listArticles, pickSubtitle, providerNames, updateArticleState,
   loadTaskJournal, saveTaskJournal, normalizeGenerationFailure, openVideo, setNativeLanguage,
   readSubtitleClipboard, resolveSubtitlePath, savePastedSubtitle,
@@ -32,14 +32,14 @@ import { SourceReadinessPanel } from "./SourceReadinessPanel"
 import { useSubtitleDownload, forgetSubtitleDownload, clearSubtitleDownloadErrors } from "./useSubtitleDownload"
 import { defaultYoutubeCookies, loadYoutubeCookies, type YoutubeCookieOptions } from "./youtubeCookies"
 import {
-  effectiveAsrForSource, failureToYoutubePrompt, hasYoutubeCookiesConfigured,
+  failureToYoutubePrompt, hasYoutubeCookiesConfigured,
   resolveYoutubeSubtitlePrompt, type YoutubeSubtitlePrompt,
 } from "./youtubeGuidance"
 import { YoutubeSubtitleDialog } from "./YoutubeSubtitleDialog"
 import { flushReadingPositions } from "./readingPositionBridge"
 import { progressFromEvent } from "./progress"
 import { SerialTaskQueue } from "./taskQueue"
-import { GenerationSettingsGate } from "./generationSettings"
+import { GenerationSettingsGate, taskSettingsForGeneration } from "./generationSettings"
 import { TaskJournalWriter, parseTaskJournal, restoreTaskJournal, resumeNeedsAsrConfirmation, taskSnapshot,
   type GenerationInput, type TaskJournal } from "./taskJournal"
 import { recordProgress } from "./taskProgress"
@@ -794,17 +794,12 @@ function App() {
       if (!localFile && !downloaded && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled) { void showSettings("asr"); return }
       if (toolWarning) { void showSettings("ai"); return }
       enqueueTask({
+        ...taskSettingsForGeneration(preferences, { isYoutube, pageLanguage: language.pageLanguage }),
         input,
         localFile,
-        provider: preferences.provider,
-        executable: preferences.provider === "api" ? "" : preferences.paths[preferences.provider],
-        baseUrl: preferences.api.baseUrl,
-        model: preferences.api.model,
-        pageLanguage: language.pageLanguage,
         sourceKey: checked.key,
         replace: false,
         previewId: downloaded?.previewId,
-        asr: effectiveAsrForSource(preferences.asr, isYoutube, hasCookies),
         youtubeCookies: preferences.youtubeCookies ? { ...preferences.youtubeCookies } : undefined,
         identity: {
           ...(linkPreview.status === "ready" && linkPreview.source === input ? linkPreview.metadata : {}),
@@ -862,19 +857,17 @@ function App() {
   }
 
   async function removeJob(id: string) {
-    if (requestId.current === id) return
-    const input = taskInputs.current.get(id)
-    const task = jobsRef.current.find(item => item.id === id)
-    const previewId = (task && task.job.status !== "done" ? task.job.previewId : undefined) ?? input?.previewId
-    if (input || previewId) {
-      await deleteTaskData({
-        source: input?.input,
-        localFile: input?.localFile,
-        sourceKey: input?.sourceKey,
-        previewId,
-      })
+    if (requestId.current === id || taskQueue.current.activeId === id) return
+    if (!journalReady.current) throw new Error(tr("请先恢复任务记录"))
+    // Removing a failed/cancelled/interrupted task record preserves reusable
+    // stage caches, previews and paid ASR results. Persist before mutating UI.
+    try {
+      await journalWriter.current.write(journalSnapshot(jobsRef.current.filter(task => task.id !== id)))
+    } catch (failure) {
+      setJournalError(tr("任务记录未能保存。") + String(failure))
+      throw new Error(tr("移除未完成，任务记录已保留。") + String(failure))
     }
-    if (input && !input.localFile) forgetSubtitleDownload(input.input)
+    if (requestId.current === id || taskQueue.current.activeId === id) return
     taskQueue.current.cancelWaiting(id)
     taskInputs.current.delete(id)
     taskTimes.current.delete(id)
@@ -963,10 +956,9 @@ function App() {
       const duplicate = await checkDuplicate(input, true)
       if (matchingTask(duplicate.key)) throw new Error(tr("该文章已在处理或排队，可在任务中心查看。"))
       enqueueTask({
-        input, localFile: true, provider: preferences.provider,
-        executable: preferences.provider === "api" ? "" : preferences.paths[preferences.provider],
-        baseUrl: preferences.api.baseUrl, model: preferences.api.model, pageLanguage: language.pageLanguage,
-        sourceKey: duplicate.key, replace: true, asr: { ...preferences.asr },
+        ...taskSettingsForGeneration(preferences, { isYoutube: false, pageLanguage: language.pageLanguage }),
+        input, localFile: true,
+        sourceKey: duplicate.key, replace: true,
         identity: selected, replacementArticleId: selected.id,
       })
     } finally {
@@ -999,14 +991,12 @@ function App() {
         ? tr("《{0}》已在书架中。是否重新生成并替换？\n旧文章会在新版本成功后被替换。", duplicate.article.title)
         : tr("该内容已经在生成或排队。是否继续添加重新生成任务？\n新任务会排在后面，并替换前一个版本。"))) return
       const isYoutube = !original.localFile && sourcePlatform(original.input) === "youtube"
-      const hasCookies = hasYoutubeCookiesConfigured(preferences.youtubeCookies)
-      const asr = effectiveAsrForSource(preferences.asr, isYoutube, hasCookies)
+      const nextSettings = taskSettingsForGeneration(preferences, { isYoutube, pageLanguage: original.pageLanguage })
       const subtitleLogin = previous.status === "error" && previous.failure?.code === "subtitle_login_required"
         && sourcePlatform(original.input) === "bilibili"
-      if (!subtitleLogin && !original.localFile && !previewId && resumeNeedsAsrConfirmation(original.asr, asr) && !window.confirm(
+      if (!subtitleLogin && !original.localFile && !previewId && resumeNeedsAsrConfirmation(original.asr, nextSettings.asr) && !window.confirm(
         tr("当前语音识别设置比此任务上次使用的范围更大，或服务/分片配置已改变。\n继续时只会在没有可读取字幕的情况下使用已启用的语音识别，可能产生新费用。是否继续？"))) return
-      enqueueTask({ ...original, provider, executable,
-        baseUrl: preferences.api.baseUrl, model: preferences.api.model, asr,
+      enqueueTask({ ...original, ...nextSettings,
         youtubeCookies: preferences.youtubeCookies ? { ...preferences.youtubeCookies } : undefined,
         sourceKey: duplicate.key, replace, previewId,
       }, id)

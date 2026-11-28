@@ -558,12 +558,13 @@ def test_failed_generation_preserves_source_and_avoids_partial_note(tmp_path):
 
 def test_codex_cli_schema_output_contract(monkeypatch):
     monkeypatch.setattr('linkread_desktop.ai.provider.shutil.which', lambda name: '/mock/'+name)
-    def fake_run(cmd, *, input, text, encoding, errors, cwd, stdout, stderr, timeout, check):
+    def fake_run(cmd, *, input, text, encoding, errors, cwd, env, stdout, stderr, timeout, check):
         assert cmd[:2] == ['codex', 'exec']
         assert ['--sandbox','read-only'] == cmd[2:4]
         assert '--output-schema' in cmd and '--output-last-message' in cmd
         assert cmd[-1]=='-'
         assert 'only test prompt' == input
+        assert 'LINKREAD_API_TOKEN' not in env and 'LINKREAD_ASR_TOKEN' not in env
         Path(cmd[cmd.index('--output-last-message')+1]).write_text('{"summary":"okay"}',encoding='utf-8')
         return subprocess.CompletedProcess(cmd,0,'','')
     monkeypatch.setattr('linkread_desktop.ai.provider.subprocess.run',fake_run)
@@ -572,10 +573,11 @@ def test_codex_cli_schema_output_contract(monkeypatch):
 
 def test_claude_bare_uses_schema_and_disabled_tools(monkeypatch):
     monkeypatch.setattr('linkread_desktop.ai.provider.shutil.which', lambda name: '/mock/'+name)
-    def fake_run(cmd, *, input, text, encoding, errors, cwd, stdout, stderr, timeout, check):
+    def fake_run(cmd, *, input, text, encoding, errors, cwd, env, stdout, stderr, timeout, check):
         assert cmd[:3]==['claude','--bare','-p']
         assert '--json-schema' in cmd and '--no-session-persistence' in cmd
         assert ['--tools',''] == cmd[cmd.index('--tools'):cmd.index('--tools')+2]
+        assert 'LINKREAD_API_TOKEN' not in env and 'LINKREAD_ASR_TOKEN' not in env
         return subprocess.CompletedProcess(cmd,0,json.dumps({'structured_output':{'summary':'okay'}}),'')
     monkeypatch.setattr('linkread_desktop.ai.provider.subprocess.run',fake_run)
     assert ClaudeProvider().generate('prompt',CHUNK_SCHEMA,timeout_seconds=60)=={'summary':'okay'}
@@ -583,7 +585,7 @@ def test_claude_bare_uses_schema_and_disabled_tools(monkeypatch):
 
 def test_cli_failure_and_timeout(monkeypatch):
     monkeypatch.setattr('linkread_desktop.ai.provider.shutil.which', lambda name: '/mock/'+name)
-    def fake_timeout(cmd, *, input, text, encoding, errors, cwd, stdout, stderr, timeout, check):
+    def fake_timeout(cmd, *, input, text, encoding, errors, cwd, env, stdout, stderr, timeout, check):
         raise subprocess.TimeoutExpired(cmd,timeout)
     monkeypatch.setattr('linkread_desktop.ai.provider.subprocess.run',fake_timeout)
     with pytest.raises(ProviderError,match='超过 23 秒'):

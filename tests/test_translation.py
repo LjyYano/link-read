@@ -202,3 +202,54 @@ def test_english_original_uses_english_prompts_and_arabic_section_numbers(tmp_pa
     assert "一、" not in html
     assert section_title(1, "Chapter 1: Building High Trust", language="en") == "1. Building High Trust"
     assert section_title(1, "玩法与创新", language="zh-CN") == "一、玩法与创新"
+
+
+def test_cjk_to_english_reading_translation_preserves_spaces_with_unchanged_cues():
+    source = ["今天我们讲", "人工智能", "和", "ChatGPT"]
+    proofread = "今天我们讲人工智能和ChatGPT"
+    translated = ["Today we talk about", "artificial intelligence", "and", "ChatGPT"]
+    body = reading_translation(source, translated, "en", proofread)
+    assert body == "Today we talk about artificial intelligence and ChatGPT"
+
+
+def test_untagged_local_and_asr_transcripts_skip_redundant_same_language_translation():
+    from linkread_desktop.models import SourceInfo, TranscriptDocument, TranscriptSegment
+    from linkread_desktop.translation import needs_translation
+
+    local_en = TranscriptDocument(
+        source=SourceInfo(platform="local", title="English Talk"),
+        transcript_source="local",
+        language=None,
+        segments=[TranscriptSegment(start_ms=0, end_ms=2000, text="Building reliable software systems takes clear architecture.")],
+    )
+    assert needs_translation(local_en, "en") is False
+    assert needs_translation(local_en, "zh-CN") is True
+
+    asr_zh = TranscriptDocument(
+        source=SourceInfo(platform="apple_podcasts", title="中文播客"),
+        transcript_source="asr",
+        language=None,
+        segments=[TranscriptSegment(start_ms=0, end_ms=2000, text="今天我们来讨论系统设计与开发效率的问题。")],
+    )
+    assert needs_translation(asr_zh, "zh-CN") is False
+    assert needs_translation(asr_zh, "en") is True
+
+    local_trad = TranscriptDocument(
+        source=SourceInfo(platform="local", title="繁體字幕"),
+        transcript_source="local",
+        language=None,
+        segments=[TranscriptSegment(start_ms=0, end_ms=2000, text="這是一個關於系統設計與開發效率的討論問題。")],
+    )
+    assert needs_translation(local_trad, "zh-CN") is True
+
+
+def test_reader_print_css_resets_dark_theme_and_localizes_copy_time():
+    from linkread_desktop.renderers.html import render_html
+
+    raw = make_transcript(2, "Dark mode print test")
+    html = render_html(raw, language="zh-CN")
+    print_section = html.split("@media print{", 1)[1].split("}", 6)
+    joined_print = "".join(print_section)
+    assert "[data-theme=dark]" in joined_print
+    assert "--fg:#1f1f1f" in joined_print
+    assert "${t('Time')}: ${stamp}" in html

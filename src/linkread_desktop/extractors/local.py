@@ -38,7 +38,7 @@ def extract_local(path: Path, *, progress: ProgressCallback | None = None) -> Tr
             try:
                 document = TranscriptDocument.model_validate(data)
             except ValidationError as exc:
-                raise ExtractionError(f"不是有效的 LinkRead TranscriptDocument v1.0：{path}（{exc}）") from exc
+                raise ExtractionError(f"不是有效的 LinkRead TranscriptDocument v1.0：{path.name}") from exc
             report(progress, "parsed", f"已读取 LinkRead 字幕：{len(document.segments)} 个片段")
             return document
     report(progress, "parse", "正在解析字幕时间戳和文本")

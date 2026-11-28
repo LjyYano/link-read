@@ -230,6 +230,6 @@ export async function saveSettingsDraft(
     if (rollbackFailed) {
       throw new SettingsSaveError(tr("保存{0}失败，且部分密钥未能恢复。请重新读取配置后再试。", stage), true)
     }
-    throw new SettingsSaveError(`保存${stage}失败，${undo.length ? tr("已恢复原有密钥") : tr("原有设置未更改")}。请重试。`)
+    throw new SettingsSaveError(tr("保存{0}失败，{1}。请重试。", stage, undo.length ? tr("已恢复原有密钥") : tr("原有设置未更改")))
   }
 }
