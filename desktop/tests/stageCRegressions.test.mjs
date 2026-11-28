@@ -101,6 +101,13 @@ test("Stage C static guards: no blocking confirm, Safari 15 incompatible CSS, or
   const bookshelf = readFileSync(join(srcDir, "BookshelfSection.tsx"), "utf8")
   assert.match(bookshelf, /className="shelf-list"/)
   assert.match(bookshelf, /className="shelf-row"/)
+  assert.match(bookshelf, /className="shelf-media"><Cover \{\.\.\.article\} withBackdrop \/>/)
+
+  const homeCss = readFileSync(join(srcDir, "home.css"), "utf8")
+  assert.doesNotMatch(homeCss, /\.shelf-media\s*>\s*\.shelf-cover\[data-platform="apple_podcasts"\]\s*\{\s*width:\s*auto/)
+  assert.match(homeCss, /\.shelf-media\s*>\s*\.shelf-cover\[data-platform="apple_podcasts"\][^}]*aspect-ratio:\s*auto/)
+  assert.match(homeCss, /\.shelf-media\s+\.shelf-cover\[data-platform="apple_podcasts"\]\s*>\s*img\s*\{\s*background:\s*transparent/)
+  assert.match(homeCss, /\.shelf-cover\[data-platform="apple_podcasts"\]\s*>\s*img\.cover-backdrop\s*\{[^}]*object-fit:\s*cover/)
 
   const reader = readFileSync(join(srcDir, "Reader.tsx"), "utf8")
   assert.match(reader, /isAllowedReaderOrigin\(event\.origin\)/)

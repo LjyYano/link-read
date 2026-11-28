@@ -251,7 +251,7 @@ function ArticleRow({ article, onRead, onDelete, onRegenerate, onStateChange, on
         setContextMenu({ x: event.clientX, y: event.clientY })
       }}>
       <button type="button" className="shelf-article-link" onClick={() => onRead(article)}>
-        <span className="shelf-media"><Cover {...article} /></span>
+        <span className="shelf-media"><Cover {...article} withBackdrop /></span>
         <span className="shelf-article-info">
           <span className="shelf-article-heading">
             <span className="shelf-article-title" title={article.title}>{article.title}</span>

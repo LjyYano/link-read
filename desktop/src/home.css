@@ -247,9 +247,6 @@ button.shelf-article-link:focus-visible { outline-offset: 1px; }
   height: calc(var(--shelf-media-width) * 9 / 16);
 }
 
-.shelf-media > .shelf-cover { width: 100%; height: 100%; }
-.shelf-media > .shelf-cover[data-platform="apple_podcasts"] { width: auto; }
-
 .shelf-cover {
   position: relative;
   display: grid;
@@ -258,6 +255,7 @@ button.shelf-article-link:focus-visible { outline-offset: 1px; }
   width: 98px;
   aspect-ratio: 16 / 9;
   overflow: hidden;
+  isolation: isolate;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   color: var(--muted);
@@ -268,6 +266,25 @@ button.shelf-article-link:focus-visible { outline-offset: 1px; }
 .shelf-cover > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .shelf-cover[data-platform="apple_podcasts"] { aspect-ratio: 1; width: 56px; }
 .shelf-cover[data-platform="apple_podcasts"] > img { object-fit: contain; background: var(--surface); }
+.shelf-cover[data-platform="apple_podcasts"] > img.cover-backdrop {
+  object-fit: cover;
+  background: transparent;
+  filter: blur(18px);
+  transform: scale(1.2);
+  opacity: 0.68;
+}
+
+.shelf-media > .shelf-cover,
+.shelf-media > .shelf-cover[data-platform="apple_podcasts"] {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+.shelf-media .shelf-cover[data-platform="apple_podcasts"] > img { background: transparent; }
+.shelf-media .shelf-cover[data-platform="apple_podcasts"] > img.cover-backdrop {
+  filter: blur(10px);
+  transform: scale(1.25);
+}
 .shelf-article-info { display: grid; gap: 5px; min-width: 0; }
 .shelf-article-heading { display: flex; align-items: start; gap: 7px; min-width: 0; }
 .shelf-article-status { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 5px; padding-top: 3px; }
