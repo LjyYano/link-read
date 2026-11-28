@@ -363,21 +363,40 @@ def test_keychain_denial_during_cookie_test_not_misclassified_as_empty(monkeypat
     monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=KeychainDeniedYoutubeDL))
     with pytest.raises(ExtractionError) as ex:
         test_youtube_cookies(cookies_from_browser="edge")
-    assert ex.value.code == "youtube_cookies_permission_denied"
+    assert ex.value.code == "youtube_cookies_keychain_denied"
     assert ex.value.action == "settings"
     assert "Microsoft Edge" in str(ex.value)
+    assert "钥匙串" in str(ex.value)
+
+    class KeychainExceptionYoutubeDL(FakeYoutubeDL):
+        @property
+        def cookiejar(self):
+            raise RuntimeError("ERROR: find-generic-password failed while decrypting edge cookies")
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=KeychainExceptionYoutubeDL))
+    with pytest.raises(ExtractionError) as ex:
+        test_youtube_cookies(cookies_from_browser="edge")
+    assert ex.value.code == "youtube_cookies_keychain_denied"
+    assert ex.value.action == "settings"
 
 
 def test_english_permission_denied_message_mentions_disk_and_keychain(monkeypatch):
     from linkread_desktop.messages import localize_event
 
     monkeypatch.setenv("LINKREAD_UI_LANGUAGE", "en")
-    localized = localize_event("error", {
+    disk = localize_event("error", {
         "code": "youtube_cookies_permission_denied",
         "message": "raw error",
     })
-    assert "Full Disk Access" in localized["message"]
-    assert "Keychain" in localized["message"]
+    assert "Full Disk Access" in disk["message"]
+
+    for kind, extra in (("error", {}), ("source_check", {"status": "unknown"})):
+        keychain = localize_event(kind, {
+            "code": "youtube_cookies_keychain_denied",
+            "message": "raw error",
+            **extra,
+        })
+        assert "Keychain" in keychain["message"]
 
 
 def test_unencrypted_youtube_cookie_does_not_mask_keychain_denial(monkeypatch):
@@ -397,7 +416,7 @@ def test_unencrypted_youtube_cookie_does_not_mask_keychain_denial(monkeypatch):
     monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=PartialDecryptYoutubeDL))
     with pytest.raises(ExtractionError) as ex:
         test_youtube_cookies(cookies_from_browser="edge")
-    assert ex.value.code == "youtube_cookies_permission_denied"
+    assert ex.value.code == "youtube_cookies_keychain_denied"
     assert ex.value.action == "settings"
     assert "Microsoft Edge" in str(ex.value)
 
@@ -442,7 +461,10 @@ def test_extract_youtube_distinguishes_configured_cookie_failures(monkeypatch):
             self._logger = opts["logger"]
 
         def extract_info(self, url, download=False):
-            if self.scenario == "keychain":
+            if self.scenario == "disk_permission":
+                self._logger.warning("Operation not permitted while reading edge cookies")
+                self.cookiejar = []
+            elif self.scenario == "keychain":
                 self._logger.warning("find-generic-password failed")
                 self._logger.warning("cannot decrypt v10 cookies: no key found")
                 self.cookiejar = []
@@ -468,10 +490,16 @@ def test_extract_youtube_distinguishes_configured_cookie_failures(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=BotCheckYoutubeDL))
 
-    BotCheckYoutubeDL.scenario = "keychain"
+    BotCheckYoutubeDL.scenario = "disk_permission"
     with pytest.raises(ExtractionError) as ex:
         extract_youtube("https://www.youtube.com/watch?v=O_zcc6Xl12g", cookies_from_browser="edge")
     assert ex.value.code == "youtube_cookies_permission_denied"
+    assert ex.value.action == "settings"
+
+    BotCheckYoutubeDL.scenario = "keychain"
+    with pytest.raises(ExtractionError) as ex:
+        extract_youtube("https://www.youtube.com/watch?v=O_zcc6Xl12g", cookies_from_browser="edge")
+    assert ex.value.code == "youtube_cookies_keychain_denied"
     assert ex.value.action == "settings"
 
     BotCheckYoutubeDL.scenario = "empty"

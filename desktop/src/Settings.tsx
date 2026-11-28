@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from "react"
-import { ArrowLeft, FolderOpen, LoaderCircle } from "lucide-react"
+import { ChevronLeft, FolderOpen, LoaderCircle } from "lucide-react"
 import {
   checkTool, deleteApiToken, deleteAsrToken, listCliModels, loadApiToken, loadAsrToken, pickExecutable, providerNames,
   saveApiToken, saveAsrToken, testApiConnection, type Provider, type ToolStatus,
@@ -30,7 +30,7 @@ export type SettingsLeaveGuard = {
 }
 
 export function Settings({ preferences, onSave, onBack, onTokenChanged, settingsGate, settingsRecovery,
-  leaveGuard, target, language, onLanguageChange, languageError, theme, onThemeChange }: {
+  leaveGuard, target, language, onLanguageChange, languageError, theme, onThemeChange, unifiedHeader = false }: {
   preferences: Preferences
   onSave: (preferences: Preferences) => Promise<void> | void
   onBack: () => void
@@ -44,6 +44,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   languageError: string
   theme: ThemeMode
   onThemeChange: (theme: ThemeMode) => void | Promise<void>
+  unifiedHeader?: boolean
 }) {
   const [draft, setDraft] = useState<SettingsDraft>(() => ({ preferences, apiToken: "", asrToken: "" }))
   const [baseline, setBaseline] = useState(draft)
@@ -368,13 +369,17 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   ]
   const clearLabel = confirmClearKind === "apiToken" ? tr("AI API 密钥") : tr("语音 API 密钥")
 
-  return <section className="settings-page" aria-labelledby="settings-heading">
-    <header className="settings-heading">
-      <button className="icon-button settings-back" type="button" aria-label={tr("返回")} title={tr("返回")} disabled={saving} onClick={onBack}>
-        <ArrowLeft size={20} aria-hidden="true" />
-      </button>
-      <h1 id="settings-heading">{tr("设置")}</h1>
-    </header>
+  return <section className={`settings-page${unifiedHeader ? " settings-page-unified" : ""}`} aria-labelledby="settings-heading">
+    {unifiedHeader ? (
+      <h1 id="settings-heading" className="sr-only">{tr("设置")}</h1>
+    ) : (
+      <header className="settings-heading">
+        <button className="icon-button settings-back" type="button" aria-label={tr("返回")} title={tr("返回")} disabled={saving} onClick={onBack}>
+          <ChevronLeft size={18} strokeWidth={2.1} aria-hidden="true" />
+        </button>
+        <h1 id="settings-heading">{tr("设置")}</h1>
+      </header>
+    )}
     <form className="settings-form" onSubmit={event => { void save(event) }} noValidate aria-busy={saving || loading}>
       {loadError && <div className="settings-load-error" role="alert">
         <p>{loadError}</p>

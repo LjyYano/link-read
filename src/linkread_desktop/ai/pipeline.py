@@ -15,7 +15,7 @@ from ..progress import ProgressCallback, report
 from ..text_language import is_english_language, is_latin_heavy, looks_english_text
 from .batches import ordered_batches
 from .checkpoints import validated_call
-from .models import Chapter, ChunkInsights, Highlight, NoteAnalysis, NoteDocument
+from .models import MAX_HIGHLIGHT_CUES, MAX_HIGHLIGHT_SPAN, Chapter, ChunkInsights, Highlight, NoteAnalysis, NoteDocument
 from .provider import ProviderError, StructuredProvider
 
 
@@ -134,6 +134,43 @@ def default_analysis_budget(segments: list[TranscriptSegment]) -> int:
     return 16000 if _latin_heavy(segments) else 9000
 
 
+class ChunkValidationError(ValueError):
+    """A fixed application-authored constraint message, safe to show in errors and retries."""
+
+
+def _chunk_validation_hint(exc: Exception) -> str:
+    """Return a content-free constraint summary for a single corrective retry."""
+    if isinstance(exc, ChunkValidationError):
+        return str(exc)
+    if isinstance(exc, ValidationError):
+        parts = []
+        for item in exc.errors()[:4]:
+            location = ".".join(str(part) for part in item.get("loc", ())) or "root"
+            kind = str(item.get("type", "invalid"))
+            parts.append(f"{location} ({kind})")
+        if parts:
+            return "字段不符合 Schema 或长度/类型约束：" + "；".join(parts)
+    return "返回结果不符合 JSON Schema、数量上限或字幕索引约束"
+
+
+def _retry_prompt(prompt: str, *, hint: str, english: bool) -> str:
+    if english:
+        return (
+            f"[Schema Retry] The previous response failed validation ({hint}). "
+            f"Fix every issue: keep summary non-empty, takeaways <= 5, chapters <= 4 with strictly increasing valid local indexes, "
+            f"highlights ordered and non-overlapping with at most {MAX_HIGHLIGHT_CUES} consecutive cues (end_index - start_index <= {MAX_HIGHLIGHT_SPAN}), "
+            "keywords <= 8, and return a single valid JSON object.\n"
+            + prompt
+        )
+    return (
+        f"【格式修正重试】上次返回未通过校验（{hint}）。"
+        f"请严格修正上述问题：summary 非空，takeaways 最多 5 条，chapters 最多 4 项且 start_index 在当前分块范围内严格递增，"
+        f"highlights 按原文顺序互不重叠且单条不超过 {MAX_HIGHLIGHT_CUES} 句连续字幕（end_index - start_index <= {MAX_HIGHLIGHT_SPAN}），"
+        "keywords 最多 8 个，只返回单个 JSON 对象。\n"
+        + prompt
+    )
+
+
 @error_operation("analysis")
 def enrich(
     transcript: TranscriptDocument, provider: StructuredProvider, *, max_chars: int | None = None,
@@ -158,17 +195,30 @@ def enrich(
     keywords: list[str] = []
     def process_chunk(position: int, chunk: TranscriptChunk) -> tuple[ChunkInsights, list[Chapter], list[Highlight]]:
         report(progress, "ai_chunk", f"已调度提炼批次 {position}/{len(chunks)}（{len(chunk.segments)} 条字幕）")
+        max_index = len(chunk.segments) - 1
         def validate(payload):
             part = ChunkInsights.model_validate(payload)
-            if len(part.chapters) > 4 or len(part.highlights) > len(chunk.segments) or len(part.takeaways) > 5 or len(part.keywords) > 8:
-                raise ValueError("model output exceeds allowed count")
+            if len(part.chapters) > 4:
+                raise ChunkValidationError("chapters 超过上限（最多 4 项）")
+            if len(part.takeaways) > 5:
+                raise ChunkValidationError("takeaways 超过上限（最多 5 条）")
+            if len(part.keywords) > 8:
+                raise ChunkValidationError("keywords 超过上限（最多 8 个）")
+            if len(part.highlights) > len(chunk.segments):
+                raise ChunkValidationError("highlights 数量超过当前分块字幕条数")
             # Validate the whole chunk before adding anything to aggregated lists.
             local_chapters: list[Chapter] = []
             prev_index = -1
-            for item in part.chapters:
+            for chapter_pos, item in enumerate(part.chapters, 1):
                 idx = item.start_index
-                if idx >= len(chunk.segments) or idx <= prev_index:
-                    raise ValueError("invalid chapter index/order")
+                if idx < 0 or idx >= len(chunk.segments):
+                    raise ChunkValidationError(
+                        f"第 {chapter_pos} 条 chapter 的 start_index={idx} 超出当前分块有效范围（0~{max_index}）"
+                    )
+                if idx <= prev_index:
+                    raise ChunkValidationError(
+                        f"第 {chapter_pos} 条 chapter 的 start_index={idx} 不满足严格递增（上一条为 {prev_index}）"
+                    )
                 prev_index = idx
                 local_chapters.append(Chapter(
                     start_segment_index=chunk.offset + idx,
@@ -177,10 +227,25 @@ def enrich(
                 ))
             local_highlights: list[Highlight] = []
             previous_end = -1
-            for item in part.highlights:
+            for hl_pos, item in enumerate(part.highlights, 1):
                 a, b = item.start_index, item.end_index
-                if a <= previous_end or a > b or b >= len(chunk.segments) or b - a > 7:
-                    raise ValueError("invalid highlight span")
+                if a < 0 or b >= len(chunk.segments):
+                    raise ChunkValidationError(
+                        f"第 {hl_pos} 条 highlight 的区间 [{a}, {b}] 超出当前分块有效范围（0~{max_index}）"
+                    )
+                if a > b:
+                    raise ChunkValidationError(
+                        f"第 {hl_pos} 条 highlight 的 start_index={a} 大于 end_index={b}"
+                    )
+                if a <= previous_end:
+                    raise ChunkValidationError(
+                        f"第 {hl_pos} 条 highlight 的区间 [{a}, {b}] 与上一条（结束于 {previous_end}）重叠或乱序"
+                    )
+                if b - a > MAX_HIGHLIGHT_SPAN:
+                    raise ChunkValidationError(
+                        f"第 {hl_pos} 条 highlight 的区间 [{a}, {b}] 共 {b - a + 1} 句，"
+                        f"超过单条上限（最多 {MAX_HIGHLIGHT_CUES} 句连续字幕，end_index - start_index <= {MAX_HIGHLIGHT_SPAN}）"
+                    )
                 previous_end = b
                 text = " ".join(seg.text for seg in chunk.segments[a:b + 1])
                 local_highlights.append(Highlight(
@@ -188,13 +253,28 @@ def enrich(
                     start_ms=chunk.segments[a].start_ms, text=text,
                 ))
             return part, local_chapters, local_highlights
+        english = _use_english_prompt(language, chunk.segments)
+        prompt = _prompt(chunk, title=transcript.source.title, position=position, count=len(chunks), language=language)
         try:
-            return validated_call(provider,
-                _prompt(chunk, title=transcript.source.title, position=position, count=len(chunks), language=language),
-                CHUNK_SCHEMA, validate, timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="analysis", cancel=cancel)
+            try:
+                return validated_call(
+                    provider, prompt, CHUNK_SCHEMA, validate,
+                    timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="analysis", cancel=cancel,
+                )
+            except (ValidationError, ValueError) as first_error:
+                hint = _chunk_validation_hint(first_error)
+                report(progress, "ai_retry", f"第 {position}/{len(chunks)} 块未通过结构校验（{hint}），正在按约束重试一次")
+                return validated_call(
+                    provider, _retry_prompt(prompt, hint=hint, english=english), CHUNK_SCHEMA, validate,
+                    timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="analysis", cancel=cancel,
+                    cache_key_prompt=prompt,
+                )
         except (ValidationError, ValueError) as exc:
-            raise ProviderError(f"第 {position}/{len(chunks)} 块 AI 返回内容不符合结构或字幕索引约束",
-                                code="model_output_invalid", stage="analysis") from exc
+            reason = _chunk_validation_hint(exc)
+            raise ProviderError(
+                f"第 {position}/{len(chunks)} 块 AI 返回内容不符合结构或字幕索引约束（{reason}）",
+                code="model_output_invalid", stage="analysis",
+            ) from exc
 
     def chunk_complete(position: int, completed: int) -> None:
         report(progress, "ai_done", f"第 {position}/{total} 块提炼完成", completed=completed, total=total)

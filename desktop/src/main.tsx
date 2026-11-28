@@ -28,7 +28,8 @@ import { MarkdownExportDialog } from "./MarkdownExportDialog"
 import { progressFromEvent } from "./progress"
 import { QuickOpen } from "./QuickOpen"
 import { loadRecentArticles, rememberArticle } from "./quickOpenState"
-import { Reader } from "./Reader"
+import { FileUp } from "lucide-react"
+import { Reader, type ReaderTheme } from "./Reader"
 import { flushReadingPositions } from "./readingPositionBridge"
 import { Settings, type SettingsLeaveGuard, type SettingsTarget } from "./Settings"
 import { isLoopbackBaseUrl, type Preferences } from "./settingsState"
@@ -217,7 +218,10 @@ function App() {
   languageRef.current = language
   const themeModeRef = useRef(themeMode)
   themeModeRef.current = themeMode
-  const [readerTheme, setReaderTheme] = useState<"light" | "dark">()
+  const [readerTheme, setReaderTheme] = useState<ReaderTheme>()
+  const [readerLeadingSlot, setReaderLeadingSlot] = useState<HTMLDivElement | null>(null)
+  const [readerCenterSlot, setReaderCenterSlot] = useState<HTMLDivElement | null>(null)
+  const [readerActionsSlot, setReaderActionsSlot] = useState<HTMLDivElement | null>(null)
 
   async function changeLanguage(next: LanguageSettings) {
     if (isTauri()) {
@@ -682,7 +686,10 @@ function App() {
   }, [screen])
 
   const resolvedAppTheme = resolveTheme(themeMode, systemDark)
-  const resolvedActiveTheme = (screen === "reader" && readerTheme) || resolvedAppTheme
+  const resolvedActiveTheme = screen === "reader" && readerTheme
+    ? (readerTheme === "dark" ? "dark" : "light")
+    : resolvedAppTheme
+  const activeReaderTone = screen === "reader" && readerTheme === "sepia" ? "sepia" : ""
   useLayoutEffect(() => {
     const system = window.matchMedia("(prefers-color-scheme: dark)")
     const handleSystemChange = () => setSystemDark(system.matches)
@@ -692,7 +699,9 @@ function App() {
   }, [])
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = resolvedActiveTheme
-  }, [resolvedActiveTheme])
+    if (activeReaderTone) document.documentElement.dataset.readerTone = activeReaderTone
+    else delete document.documentElement.dataset.readerTone
+  }, [resolvedActiveTheme, activeReaderTone])
 
   useEffect(() => {
     if (!preferencesReady) return
@@ -1438,9 +1447,17 @@ function App() {
         onToggleTheme={next => {
           void changeTheme(next).catch(() => {})
         }}
+        onNavigate={next => {
+          if (next === "library") goToLibrary()
+          else navigateTo("create")
+        }}
+        onBackFromSettings={() => navigateTo(previousScreen)}
         onTasks={showTasks}
         onSettings={() => void showSettings()}
         onQuickOpen={showQuickOpen}
+        readerLeadingRef={setReaderLeadingSlot}
+        readerCenterRef={setReaderCenterSlot}
+        readerActionsRef={setReaderActionsSlot}
       />
       <main ref={workspace} className={screen === "reader" ? "workspace workspace-reader" : "workspace"}>
         {screen === "create" && (
@@ -1476,7 +1493,7 @@ function App() {
         {screen === "settings" && (
           <Settings preferences={preferences} onSave={configure} leaveGuard={settingsLeaveGuard} target={settingsTarget}
             language={language} onLanguageChange={changeLanguage} languageError={languageError}
-            theme={themeMode} onThemeChange={changeTheme}
+            theme={themeMode} onThemeChange={changeTheme} unifiedHeader
             onTokenChanged={() => setApiTokenVersion(current => current + 1)}
             settingsGate={settingsGate.current} settingsRecovery={settingsRecovery}
             onBack={() => navigateTo(previousScreen)} />
@@ -1488,6 +1505,7 @@ function App() {
           onNavigationStart={beginNavigation}
           onThemeChange={setReaderTheme}
           forcedTheme={forcedReaderTheme}
+          toolbarSlots={{ leading: readerLeadingSlot, center: readerCenterSlot, actions: readerActionsSlot }}
           youtubeCookies={preferences.youtubeCookies}
           onViewRegeneration={readerTask ? () => openTasks(readerTask.id) : undefined}
           onOpenUpdated={readerUpdate ? () => void read(readerUpdate, true) : undefined}
@@ -1565,6 +1583,15 @@ function App() {
           }}
           onCancel={() => setCloseConfirmOpen(false)}
         />
+      )}
+      {dragging && (screen === "create" || screen === "library") && (
+        <div className="drop-overlay" role="status" aria-live="polite">
+          <div className="drop-overlay-card">
+            <FileUp size={28} strokeWidth={1.7} aria-hidden="true" />
+            <strong>{tr("松开以导入字幕文件")}</strong>
+            <span>{tr("支持 SRT、VTT、JSON 字幕格式")}</span>
+          </div>
+        </div>
       )}
       <ToastBanner
         readyArticle={readyArticle}

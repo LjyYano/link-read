@@ -8,6 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ..models import TranscriptDocument
 
 
+MAX_HIGHLIGHT_CUES = 16
+MAX_HIGHLIGHT_SPAN = MAX_HIGHLIGHT_CUES - 1
+
+
 class Chapter(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start_segment_index: int = Field(ge=0)
@@ -103,7 +107,7 @@ class NoteDocument(BaseModel):
             previous = idx
         for highlight in self.analysis.highlights:
             a, b = highlight.start_segment_index, highlight.end_segment_index
-            if not 0 <= a <= b < count or b - a > 7:
+            if not 0 <= a <= b < count or b - a > MAX_HIGHLIGHT_SPAN:
                 raise ValueError("highlight segment span invalid")
             exact = " ".join(s.text for s in segments[a:b + 1])
             if highlight.text != exact or highlight.start_ms != segments[a].start_ms:

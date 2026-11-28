@@ -4,6 +4,7 @@ import {
   effectiveAsrForSource,
   failureToYoutubePrompt,
   hasYoutubeCookiesConfigured,
+  resolveYoutubeCookiePermissionKind,
   resolveYoutubeSubtitlePrompt,
 } from '../src/youtubeGuidance.ts'
 
@@ -47,6 +48,7 @@ test('YouTube with cookies configured checks cookie failures first, then offers 
     'youtube_cookies_unavailable',
     'youtube_cookies_safari_permission',
     'youtube_cookies_permission_denied',
+    'youtube_cookies_keychain_denied',
     'youtube_cookies_not_found',
     'youtube_cookies_format_invalid',
     'youtube_cookies_empty',
@@ -92,4 +94,15 @@ test('non-YouTube sources are unaffected by YouTube subtitle prompts', () => {
     code: 'subtitles_unavailable',
     status: 'needs_asr',
   }), undefined)
+})
+
+test('resolveYoutubeCookiePermissionKind classifies macOS disk, Safari, and Keychain permission errors', () => {
+  assert.equal(resolveYoutubeCookiePermissionKind('youtube_cookies_permission_denied'), 'full_disk_access')
+  assert.equal(resolveYoutubeCookiePermissionKind('youtube_cookies_safari_permission'), 'safari_full_disk_access')
+  assert.equal(resolveYoutubeCookiePermissionKind('youtube_cookies_keychain_denied'), 'keychain')
+  assert.equal(resolveYoutubeCookiePermissionKind('youtube_cookies_empty'), null)
+  assert.equal(resolveYoutubeCookiePermissionKind('youtube_cookies_not_found'), null)
+  assert.equal(resolveYoutubeCookiePermissionKind('youtube_cookies_expired'), null)
+  assert.equal(resolveYoutubeCookiePermissionKind(null), null)
+  assert.equal(resolveYoutubeCookiePermissionKind(undefined), null)
 })

@@ -40,6 +40,13 @@ export function laneFor(stage: string): Lane | undefined {
   return undefined
 }
 
+export function laneLabelFor(stage: string): string | undefined {
+  const lane = laneFor(stage)
+  if (!lane) return undefined
+  if (lane === "audio" && stage.startsWith("audio_split")) return tr("分片音频")
+  return tr(labels[lane])
+}
+
 const completedStages = new Set([
   "audio_download_done", "audio_split_done", "asr_upload_done", "asr_done", "asr_reuse", "saved_transcript", "ai_saved", "reuse", "polish_complete", "polish_reuse", "polish_skipped",
   "publication_done", "article_ai_done", "saved_article", "saved_site",
@@ -78,7 +85,8 @@ export function recordProgress(previous: TaskActivity | undefined, event: Progre
     }
   }
   const history = activity.history.slice()
-  if (history.at(-1)?.message !== event.message) {
+  const recordInHistory = !event.request || event.request.phase === "failed"
+  if (recordInHistory && history.at(-1)?.message !== event.message) {
     history.push({ at: now, stage: event.stage, message: event.message })
   }
   const result = event.request && ["complete", "cache", "received"].includes(event.request.phase)

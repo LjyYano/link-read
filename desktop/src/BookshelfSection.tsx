@@ -23,13 +23,15 @@ export type ArticleListProps = {
   onExportMarkdown?: (article: Article) => void
 }
 
-export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkdown, onStateChange }: {
+export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExportMarkdown, onStateChange, contextMenu, onContextMenuClose }: {
   article: Article
   onDelete: (id: string) => Promise<void>
   onRegenerate: (article: Article) => Promise<void>
   onEdit?: (article: Article) => void
   onExportMarkdown?: (article: Article) => void
   onStateChange?: ChangeArticleState
+  contextMenu?: { x: number; y: number } | null
+  onContextMenuClose?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
@@ -39,11 +41,42 @@ export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExpo
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const [menuLayout, setMenuLayout] = useState<CSSProperties>()
+  const isOpen = open || Boolean(contextMenu)
+
+  function closeMenu() {
+    setOpen(false)
+    onContextMenuClose?.()
+  }
 
   useLayoutEffect(() => {
-    if (!open) return
+    if (!isOpen) return
     function place() {
-      if (!trigger.current || !panel.current) return
+      if (!panel.current) return
+      if (contextMenu) {
+        const width = panel.current.offsetWidth || 200
+        const height = panel.current.scrollHeight || 260
+        const margin = 10
+        const left = Math.max(margin, Math.min(contextMenu.x, window.innerWidth - width - margin))
+        const below = window.innerHeight - contextMenu.y - margin
+        const above = contextMenu.y - margin
+        const upwards = below < height && above > below
+        const top = upwards
+          ? Math.max(margin, contextMenu.y - Math.min(height, above))
+          : Math.max(margin, Math.min(contextMenu.y, window.innerHeight - Math.min(height, window.innerHeight - 2 * margin) - margin))
+        setMenuLayout({
+          position: "fixed",
+          left,
+          top,
+          right: "auto",
+          insetBlockStart: "auto",
+          insetBlockEnd: "auto",
+          maxHeight: Math.max(120, upwards ? above : below),
+          overflowY: "auto",
+          zIndex: 50,
+        })
+        return
+      }
+      if (!trigger.current) return
       const anchor = trigger.current.getBoundingClientRect()
       const workspace = trigger.current.closest(".workspace")?.getBoundingClientRect()
       const top = Math.max(0, workspace?.top ?? 0) + 8
@@ -61,17 +94,20 @@ export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExpo
     window.addEventListener("resize", place)
     window.addEventListener("scroll", place, true)
     return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true) }
-  }, [open, error])
+  }, [isOpen, contextMenu, error])
 
   useEffect(() => {
-    if (!open) return
+    if (!isOpen) return
     panel.current?.querySelector("button")?.focus({ preventScroll: true })
     function outside(event: PointerEvent) {
-      if (event.target instanceof Node && !container.current?.contains(event.target)) setOpen(false)
+      if (event.target instanceof Node && !container.current?.contains(event.target)) {
+        setOpen(false)
+        onContextMenuClose?.()
+      }
     }
     document.addEventListener("pointerdown", outside)
     return () => document.removeEventListener("pointerdown", outside)
-  }, [open])
+  }, [isOpen, onContextMenuClose])
 
   function focusFallbackAfterRowRemoval(row: Element | null | undefined, bookshelf: Element | null | undefined, neighbors: (Element | null | undefined)[]) {
     requestAnimationFrame(() => {
@@ -97,7 +133,7 @@ export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExpo
     setError("")
     try {
       await action()
-      setOpen(false)
+      closeMenu()
       requestAnimationFrame(() => {
         if (document.activeElement !== document.body && !menu?.contains(document.activeElement)) return
         if (button?.isConnected) {
@@ -115,7 +151,7 @@ export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExpo
 
   function save(format: ExportFormat) {
     if (format === "markdown" && onExportMarkdown) {
-      setOpen(false); trigger.current?.focus(); onExportMarkdown(article); return
+      closeMenu(); trigger.current?.focus(); onExportMarkdown(article); return
     }
     void perform(() => exportArticle(article.id, format))
   }
@@ -135,19 +171,23 @@ export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExpo
   const ReadIcon = isRead ? CircleCheck : Circle
   return (
     <div className="shelf-overflow" ref={container} onBlur={event => {
-      if (!pending && event.relatedTarget && !container.current?.contains(event.relatedTarget)) setOpen(false)
+      if (!pending && event.relatedTarget && !container.current?.contains(event.relatedTarget)) closeMenu()
     }} onKeyDown={event => {
-      if (open && menuNavigation(event)) return
-      if (event.key !== "Escape" || !open) return
+      if (isOpen && menuNavigation(event)) return
+      if (event.key !== "Escape" || !isOpen) return
       event.stopPropagation()
-      setOpen(false)
+      closeMenu()
       trigger.current?.focus()
     }}>
       <button ref={trigger} className="icon-button shelf-overflow-button" type="button" title={tr("更多操作")}
-        aria-label={tr("{0}的更多操作", article.title)} aria-expanded={open} onClick={() => { setError(""); setOpen(!open) }}>
-        <MoreHorizontal size={19} />
+        aria-label={tr("{0}的更多操作", article.title)} aria-expanded={isOpen} onClick={() => {
+          setError("")
+          if (isOpen) closeMenu()
+          else setOpen(true)
+        }}>
+        <MoreHorizontal size={18} />
       </button>
-      {open && <div ref={panel} style={menuLayout} className="shelf-overflow-panel" aria-label={tr("文章操作")} role="group" data-action-menu>
+      {isOpen && <div ref={panel} style={menuLayout} className="shelf-overflow-panel" aria-label={tr("文章操作")} role="group" data-action-menu>
         {onStateChange && <>
           <button type="button" disabled={pending} onClick={() => void perform(() => onStateChange(article.id, { isRead: !isRead }))}>
             <ReadIcon size={15} aria-hidden="true" /> {isRead ? tr("标为未读") : tr("标为已读")}
@@ -155,13 +195,15 @@ export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExpo
           <button type="button" disabled={pending} onClick={() => void perform(() => onStateChange(article.id, { isStarred: !isStarred }))}>
             <Star size={15} fill={isStarred ? "currentColor" : "none"} aria-hidden="true" /> {isStarred ? tr("取消收藏") : tr("收藏")}
           </button>
+          <div className="menu-separator" role="separator" />
         </>}
         <button type="button" disabled={pending} onClick={() => void perform(() => onRegenerate(article))}>
           <Sparkles size={15} /> {article.hasAnalysis === false ? tr("AI 整理文章") : tr("重新整理")}
         </button>
-        {onEdit && <button type="button" disabled={pending} onClick={() => { setOpen(false); trigger.current?.focus(); onEdit(article) }}>
+        {onEdit && <button type="button" disabled={pending} onClick={() => { closeMenu(); trigger.current?.focus(); onEdit(article) }}>
           <Pencil size={15} /> {tr("编辑详情")}
         </button>}
+        <div className="menu-separator" role="separator" />
         <button type="button" disabled={pending} onClick={() => save("html")}><ArrowDownToLine size={15} /> {tr("导出 HTML")}</button>
         <button type="button" disabled={pending} onClick={() => save("markdown")}><ArrowDownToLine size={15} /> {tr("导出 Markdown")}</button>
         <button type="button" disabled={pending} onClick={() => void perform(() => revealArticle(article.id))}>
@@ -170,7 +212,8 @@ export function ArticleActions({ article, onDelete, onRegenerate, onEdit, onExpo
         {sourceUrl && <button type="button" disabled={pending} onClick={() => void perform(() => openVideo(sourceUrl))}>
           <ArrowUpRight size={15} /> {article.platform === "apple_podcasts" ? tr("打开原节目") : tr("打开原视频")}
         </button>}
-        <button className="shelf-delete" type="button" disabled={pending} onClick={() => { setOpen(false); setConfirmDeleteOpen(true) }}>
+        <div className="menu-separator" role="separator" />
+        <button className="shelf-delete" type="button" disabled={pending} onClick={() => { closeMenu(); setConfirmDeleteOpen(true) }}>
           <Trash2 size={15} /> {tr("删除文章")}
         </button>
         {error && <p role="alert" className="shelf-overflow-error">{error}</p>}
@@ -199,8 +242,14 @@ function ArticleRow({ article, onRead, onDelete, onRegenerate, onStateChange, on
   onExportMarkdown?: (article: Article) => void
 }) {
   const { isRead, isStarred } = articleState(article)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   return (
-    <li className="shelf-row" data-platform={article.platform} data-article-id={article.id}>
+    <li className="shelf-row" data-platform={article.platform} data-article-id={article.id}
+      onContextMenu={event => {
+        if (event.target instanceof Element && event.target.closest("[data-action-menu]")) return
+        event.preventDefault()
+        setContextMenu({ x: event.clientX, y: event.clientY })
+      }}>
       <button type="button" className="shelf-article-link" onClick={() => onRead(article)}>
         <span className="shelf-media"><Cover {...article} /></span>
         <span className="shelf-article-info">
@@ -223,7 +272,8 @@ function ArticleRow({ article, onRead, onDelete, onRegenerate, onStateChange, on
         </span>
       </button>
       <ArticleActions article={article} onDelete={onDelete} onRegenerate={onRegenerate} onEdit={onEdit}
-        onExportMarkdown={onExportMarkdown} onStateChange={onStateChange} />
+        onExportMarkdown={onExportMarkdown} onStateChange={onStateChange}
+        contextMenu={contextMenu} onContextMenuClose={() => setContextMenu(null)} />
     </li>
   )
 }
@@ -237,8 +287,14 @@ export function ArticleCard({ article, onRead, onDelete, onRegenerate, onStateCh
   onEdit?: (article: Article) => void
   onExportMarkdown?: (article: Article) => void
 }) {
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   return (
-    <li className="article-card" data-platform={article.platform} data-article-id={article.id}>
+    <li className="article-card" data-platform={article.platform} data-article-id={article.id}
+      onContextMenu={event => {
+        if (event.target instanceof Element && event.target.closest("[data-action-menu]")) return
+        event.preventDefault()
+        setContextMenu({ x: event.clientX, y: event.clientY })
+      }}>
       <button type="button" className="article-card-link" onClick={() => onRead(article)}>
         <span className="article-card-media"><Cover {...article} withBackdrop /></span>
         <span className="article-card-info">
@@ -249,7 +305,8 @@ export function ArticleCard({ article, onRead, onDelete, onRegenerate, onStateCh
       <div className="article-card-footer">
         <ArticleUpdatedAt value={article.updatedAt} />
         <ArticleActions article={article} onDelete={onDelete} onRegenerate={onRegenerate} onEdit={onEdit}
-          onExportMarkdown={onExportMarkdown} onStateChange={onStateChange} />
+          onExportMarkdown={onExportMarkdown} onStateChange={onStateChange}
+          contextMenu={contextMenu} onContextMenuClose={() => setContextMenu(null)} />
       </div>
     </li>
   )
@@ -280,6 +337,20 @@ export function Bookshelf({
   const readFilters: { key: ReadFilter; label: string }[] = [
     { key: "all", label: tr("全部") }, { key: "unread", label: tr("未读") }, { key: "completed", label: tr("已读") },
   ]
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey) return
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") return
+      if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return
+      if (!searchField.current) return
+      event.preventDefault()
+      searchField.current.focus()
+      searchField.current.select()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
 
   function clearSearch() {
     onSearch("")

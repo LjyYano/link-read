@@ -1,6 +1,7 @@
 import { tr } from "./language.ts"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowLeft, ArrowUpRight, CircleAlert, Download, Ellipsis, ExternalLink, FileText, FolderOpen, LoaderCircle, Pencil, Printer, RotateCw, Share, SunMoon, Sparkles, Trash2, X } from "lucide-react"
+import { createPortal } from "react-dom"
+import { ArrowUpRight, ChevronLeft, CircleAlert, Download, Ellipsis, ExternalLink, FileText, FolderOpen, LoaderCircle, PanelLeft, Pencil, Printer, RotateCw, Share, Sparkles, Trash2, X } from "lucide-react"
 import { exportArticle, exportSubtitles, openArticle, openExternal, openVideo, prepareArticle, preparePreview, refreshShownotes, revealArticle, loadReadingPosition, saveReadingPosition, type Article, type ExportFormat, type SubtitleExportFormat } from "./api"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { menuNavigation } from "./menu"
@@ -21,17 +22,23 @@ type PreparedReader = { status: "loading" } | { status: "ready"; revision: strin
   | { status: "error"; message: string }
 type ShownotesRefresh = { status: "idle" | "loading" | "empty" } | { status: "error"; message: string }
 
+export type ReaderTheme = "light" | "sepia" | "dark"
 export type PreviewTask = { id: string; status: Job["status"]; message?: string; activity?: TaskActivity; article?: Article; onOpenComplete: () => void }
 export type StandaloneSubtitlePreview = { onGenerate: () => void }
+export type ReaderToolbarSlots = {
+  leading: HTMLDivElement | null
+  center: HTMLDivElement | null
+  actions: HTMLDivElement | null
+}
 
 export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onDelete, onStateChange, preview, standalonePreview,
   onNavigationStart, onEdit, onExportMarkdown, detailsRevision = 0, onThemeChange, onViewRegeneration, onOpenUpdated,
-  youtubeCookies, forcedTheme }: {
+  youtubeCookies, forcedTheme, toolbarSlots }: {
   article: Article; onBack: () => void; onRegenerate: (article: Article) => Promise<void>; onDelete?: (id: string) => Promise<void>; onStateChange: ChangeArticleState
   preview?: PreviewTask
   standalonePreview?: StandaloneSubtitlePreview
   backLabel?: string
-  onThemeChange?: (theme: "light" | "dark") => void
+  onThemeChange?: (theme: ReaderTheme) => void
   onViewRegeneration?: () => void
   onOpenUpdated?: () => void
   onNavigationStart?: () => () => boolean
@@ -40,6 +47,7 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
   detailsRevision?: number
   youtubeCookies?: YoutubeCookieOptions
   forcedTheme?: "light" | "dark"
+  toolbarSlots?: ReaderToolbarSlots
 }) {
   const frame = useRef<HTMLIFrameElement>(null)
   const actions = useRef<HTMLDivElement>(null)
@@ -51,6 +59,7 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
   const [exporting, setExporting] = useState(false)
   const [prepared, setPrepared] = useState<PreparedReader>({ status: "loading" })
   const [shownotesRefresh, setShownotesRefresh] = useState<ShownotesRefresh>({ status: "idle" })
+  const [sidebar, setSidebar] = useState<{ available: boolean; open: boolean }>({ available: false, open: true })
   const youtubeCookiesRef = useRef(youtubeCookies)
   youtubeCookiesRef.current = youtubeCookies
   const prepareVersion = useRef(0)
@@ -161,6 +170,12 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
         frame.current?.contentWindow?.postMessage({ linkReadCommand: "search" }, "*")
         return
       }
+      if (!event.altKey && (event.metaKey || event.ctrlKey)
+        && event.key === "\\" && prepared.status === "ready") {
+        event.preventDefault()
+        frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-sidebar" }, "*")
+        return
+      }
       if (event.key !== "Escape" || event.repeat) return
       event.preventDefault()
       event.stopImmediatePropagation()
@@ -181,7 +196,13 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
       if (event.source !== frame.current?.contentWindow || !isAllowedReaderOrigin(event.origin)) return
       escapeBridge.current.receive(event.data)
       const theme = event.data?.linkReadTheme
-      if (theme === "light" || theme === "dark") onThemeChange?.(theme)
+      if (theme === "light" || theme === "sepia" || theme === "dark") onThemeChange?.(theme)
+      if (event.data?.linkReadSidebar && typeof event.data.linkReadSidebar === "object") {
+        const next = event.data.linkReadSidebar as { available?: unknown; open?: unknown }
+        if (typeof next.available === "boolean" && typeof next.open === "boolean") {
+          setSidebar({ available: next.available, open: next.open })
+        }
+      }
       if (event.data?.linkReadGoBack === true && !readerShortcutsBlocked()) void leave(onBack)
       if (typeof event.data?.linkReadVideo === "string") {
         setError("")
@@ -193,7 +214,9 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
       }
       if (event.data?.linkReadRefreshShownotes === true && !isPreview) void prepare(true)
       const key = event.data?.linkReadShortcut
-      if (key === "Escape" || key === "o" || key === "," || key === "k") {
+      if (key === "\\") {
+        frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-sidebar" }, "*")
+      } else if (key === "Escape" || key === "o" || key === "," || key === "k") {
         document.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: key !== "Escape", bubbles: true, cancelable: true }))
       }
     }
@@ -250,93 +273,135 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
     }
   }
 
+  const leadingControls = (
+    <div className="desktop-reader-leading">
+      <button className="desktop-reader-action desktop-reader-back" type="button" onClick={() => void leave(onBack)}>
+        <ChevronLeft size={17} strokeWidth={2.1} aria-hidden="true" />
+        <span>{backLabel}</span>
+      </button>
+      {sidebar.available && (
+        <button
+          className={`icon-button desktop-reader-sidebar-toggle${sidebar.open ? " is-active" : ""}`}
+          type="button"
+          disabled={prepared.status !== "ready"}
+          aria-pressed={sidebar.open}
+          aria-label={sidebar.open ? tr("隐藏目录") : tr("显示目录")}
+          data-tooltip={sidebar.open ? tr("隐藏目录（⌘\\）") : tr("显示目录（⌘\\）")}
+          onClick={() => frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-sidebar" }, "*")}
+        >
+          <PanelLeft size={16} aria-hidden="true" />
+        </button>
+      )}
+    </div>
+  )
+
+  const titleControl = (
+    <h1 className="desktop-reader-title" title={article.title}>{article.title}</h1>
+  )
+
+  const actionsControl = (
+    <div className="desktop-reader-actions" ref={actions} onKeyDown={menuNavigation} onBlur={event => {
+      // Safari can blur a focused menu button to null on mouse-down. Keep
+      // it mounted for the following click; outside pointer-down dismisses.
+      if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setMenu(undefined)
+    }}>
+      {!isPreview && (
+        <>
+          <ReadingActions article={article} onChange={onStateChange} compact nativeTooltips={false} />
+          <span className="titlebar-divider" aria-hidden="true" />
+        </>
+      )}
+      {isPreview && (
+        <button className="desktop-reader-action" type="button" disabled={prepared.status !== "ready"}
+          aria-label={tr("Print transcript / Save PDF")}
+          onClick={() => frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")}>
+          <Printer size={16} aria-hidden="true" />
+        </button>
+      )}
+      {!isPreview && <>
+      <button className="desktop-reader-action" type="button" aria-label={tr("Open in Browser")}
+        onClick={() => void open(() => openArticle(article.id))}>
+        <ExternalLink size={16} aria-hidden="true" />
+      </button>
+      <div className="desktop-reader-popover">
+        <button className="desktop-reader-action" type="button" ref={exportButton} disabled={exporting}
+          aria-label={tr("Export")} aria-expanded={menu === "export"} onClick={() => toggle("export")}>
+          <Share size={16} aria-hidden="true" />
+        </button>
+        {menu === "export" && (
+          <div className="desktop-reader-menu" role="group" aria-label={tr("Export format")} data-action-menu>
+            <button type="button" onClick={() => void save("html")}><FileText size={15} aria-hidden="true" />HTML</button>
+            <button type="button" onClick={() => void save("markdown")}><FileText size={15} aria-hidden="true" />Markdown</button>
+            <div className="menu-separator" role="separator" />
+            <button type="button" onClick={() => void saveSubtitles("srt")}><Download size={15} aria-hidden="true" />{tr("SRT subtitles")}</button>
+            <button type="button" onClick={() => void saveSubtitles("vtt")}><Download size={15} aria-hidden="true" />{tr("WebVTT subtitles")}</button>
+            <div className="menu-separator" role="separator" />
+            <button type="button" disabled={prepared.status !== "ready"} onClick={() => {
+              frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")
+              setMenu(undefined)
+              exportButton.current?.focus()
+            }}><Printer size={15} aria-hidden="true" />{tr("Print transcript / Save PDF")}</button>
+          </div>
+        )}
+      </div>
+      <div className="desktop-reader-popover">
+        <button className="desktop-reader-action" type="button" ref={moreButton}
+          aria-label={tr("More actions")} aria-expanded={menu === "more"} onClick={() => toggle("more")}>
+          <Ellipsis size={18} aria-hidden="true" />
+        </button>
+        {menu === "more" && (
+          <div className="desktop-reader-menu" role="group" aria-label={tr("More actions")} data-action-menu>
+            {onEdit && <button type="button" onClick={() => { setMenu(undefined); moreButton.current?.focus(); onEdit(article) }}>
+              <Pencil size={15} aria-hidden="true" />{tr("Edit details")}
+            </button>}
+            <button type="button" disabled={Boolean(onViewRegeneration)} onClick={() => {
+              moreButton.current?.focus({ preventScroll: true })
+              void open(() => onRegenerate(article))
+            }}>
+              <Sparkles size={15} aria-hidden="true" />{tr(article.hasAnalysis === false ? "Enrich with AI" : "Regenerate")}
+            </button>
+            <div className="menu-separator" role="separator" />
+            <button type="button" onClick={() => {
+              void open(() => revealArticle(article.id))
+              moreButton.current?.focus()
+            }}><FolderOpen size={15} aria-hidden="true" />{tr("Show in Finder")}</button>
+            {article.sourceUrl && (
+              <button type="button" onClick={() => {
+                if (article.sourceUrl) void open(() => openVideo(article.sourceUrl!))
+                moreButton.current?.focus()
+              }}><ArrowUpRight size={15} aria-hidden="true" />{tr("Original Source")}</button>
+            )}
+            {onDelete && (
+              <>
+                <div className="menu-separator" role="separator" />
+                <button className="desktop-reader-delete" type="button" onClick={() => {
+                  setMenu(undefined)
+                  setConfirmDeleteOpen(true)
+                }}><Trash2 size={15} aria-hidden="true" />{tr("删除文章")}</button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      </>}
+    </div>
+  )
+
   return (
     <section className="desktop-reader" aria-label={tr("Article reader")}>
-      <header className="desktop-reader-toolbar">
-        <button className="desktop-reader-action desktop-reader-back" type="button" onClick={() => void leave(onBack)}>
-          <ArrowLeft size={17} aria-hidden="true" />{backLabel}
-        </button>
-        <h1 className="desktop-reader-title" title={article.title}>{article.title}</h1>
-        <div className="desktop-reader-actions" ref={actions} onKeyDown={menuNavigation} onBlur={event => {
-          // Safari can blur a focused menu button to null on mouse-down. Keep
-          // it mounted for the following click; outside pointer-down dismisses.
-          if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setMenu(undefined)
-        }}>
-          <button className="desktop-reader-action" type="button" disabled={prepared.status !== "ready"}
-            aria-label={tr("Toggle Theme")} title={tr("Toggle Theme")}
-            onClick={() => frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-theme" }, "*")}>
-            <SunMoon size={17} aria-hidden="true" />
-          </button>
-          {isPreview && (
-            <button className="desktop-reader-action" type="button" disabled={prepared.status !== "ready"}
-              aria-label={tr("Print transcript / Save PDF")} title={tr("Print transcript / Save PDF")}
-              onClick={() => frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")}>
-              <Printer size={17} aria-hidden="true" />
-            </button>
-          )}
-          {!isPreview && <>
-          <ReadingActions article={article} onChange={onStateChange} compact nativeTooltips={false} />
-          <button className="desktop-reader-action" type="button" aria-label={tr("Open in Browser")}
-            onClick={() => void open(() => openArticle(article.id))}>
-            <ExternalLink size={17} aria-hidden="true" />
-          </button>
-          <div className="desktop-reader-popover">
-            <button className="desktop-reader-action" type="button" ref={exportButton} disabled={exporting}
-              aria-label={tr("Export")} aria-expanded={menu === "export"} onClick={() => toggle("export")}>
-              <Share size={17} aria-hidden="true" />
-            </button>
-            {menu === "export" && (
-              <div className="desktop-reader-menu" role="group" aria-label={tr("Export format")} data-action-menu>
-                <button type="button" onClick={() => void save("html")}><FileText size={15} aria-hidden="true" />HTML</button>
-                <button type="button" onClick={() => void save("markdown")}><FileText size={15} aria-hidden="true" />Markdown</button>
-                <button type="button" onClick={() => void saveSubtitles("srt")}><Download size={15} aria-hidden="true" />{tr("SRT subtitles")}</button>
-                <button type="button" onClick={() => void saveSubtitles("vtt")}><Download size={15} aria-hidden="true" />{tr("WebVTT subtitles")}</button>
-                <button type="button" disabled={prepared.status !== "ready"} onClick={() => {
-                  frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")
-                  setMenu(undefined)
-                  exportButton.current?.focus()
-                }}><Printer size={15} aria-hidden="true" />{tr("Print transcript / Save PDF")}</button>
-              </div>
-            )}
-          </div>
-          <div className="desktop-reader-popover">
-            <button className="desktop-reader-action" type="button" ref={moreButton}
-              aria-label={tr("More actions")} aria-expanded={menu === "more"} onClick={() => toggle("more")}>
-              <Ellipsis size={20} aria-hidden="true" />
-            </button>
-            {menu === "more" && (
-              <div className="desktop-reader-menu" role="group" aria-label={tr("More actions")} data-action-menu>
-                {onEdit && <button type="button" onClick={() => { setMenu(undefined); moreButton.current?.focus(); onEdit(article) }}>
-                  <Pencil size={15} aria-hidden="true" />{tr("Edit details")}
-                </button>}
-                <button type="button" disabled={Boolean(onViewRegeneration)} onClick={() => {
-                  moreButton.current?.focus({ preventScroll: true })
-                  void open(() => onRegenerate(article))
-                }}>
-                  <Sparkles size={15} aria-hidden="true" />{tr(article.hasAnalysis === false ? "Enrich with AI" : "Regenerate")}
-                </button>
-                <button type="button" onClick={() => {
-                  void open(() => revealArticle(article.id))
-                  moreButton.current?.focus()
-                }}><FolderOpen size={15} aria-hidden="true" />{tr("Show in Finder")}</button>
-                {article.sourceUrl && (
-                  <button type="button" onClick={() => {
-                    if (article.sourceUrl) void open(() => openVideo(article.sourceUrl!))
-                    moreButton.current?.focus()
-                  }}><ArrowUpRight size={15} aria-hidden="true" />{tr("Original Source")}</button>
-                )}
-                {onDelete && (
-                  <button className="desktop-reader-delete" type="button" onClick={() => {
-                    setMenu(undefined)
-                    setConfirmDeleteOpen(true)
-                  }}><Trash2 size={15} aria-hidden="true" />{tr("删除文章")}</button>
-                )}
-              </div>
-            )}
-          </div>
-          </>}
-        </div>
-      </header>
+      {toolbarSlots ? (
+        <>
+          {toolbarSlots.leading && createPortal(leadingControls, toolbarSlots.leading)}
+          {toolbarSlots.center && createPortal(titleControl, toolbarSlots.center)}
+          {toolbarSlots.actions && createPortal(actionsControl, toolbarSlots.actions)}
+        </>
+      ) : (
+        <header className="desktop-reader-toolbar">
+          {leadingControls}
+          {titleControl}
+          {actionsControl}
+        </header>
+      )}
       {onOpenUpdated ? <div className="reader-update-notice" role="status">
         <span>{tr("A new version is ready.")}</span>
         <button className="text-button" type="button" onClick={() => void leave(onOpenUpdated)}>{tr("Open updated article")}</button>

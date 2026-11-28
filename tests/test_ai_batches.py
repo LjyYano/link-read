@@ -87,11 +87,16 @@ def test_failure_checks_whole_completed_batch_before_scheduling_more(monkeypatch
         # Neither result is allowed to cause a third model call.
         return wait(futures, return_when=ALL_COMPLETED)
 
+    completed = []
     monkeypatch.setattr(batches, "wait", completed_together)
     with pytest.raises(LinkReadError) as caught:
-        ordered_batches(list(range(8)), process, workers=2)
+        ordered_batches(
+            list(range(8)), process, workers=2,
+            on_complete=lambda index, count: completed.append((index, count)),
+        )
     assert caught.value is error
     assert sorted(started) == [1, 2]
+    assert completed == [(1, 1)]
 
 
 @pytest.mark.parametrize("workers", [0, -1, 5])
@@ -228,6 +233,7 @@ def test_parallel_polish_retries_only_bad_block_and_preserves_source_order():
 def test_parallel_failure_preserves_input_and_returns_no_partial_result(monkeypatch, command):
     both_started = Barrier(2)
     calls = []
+    seen = set()
 
     class Provider:
         name = "codex"
@@ -246,8 +252,11 @@ def test_parallel_failure_preserves_input_and_returns_no_partial_result(monkeypa
                 result = _edits(rows)
                 if first.startswith("第1句"):
                     result["blocks"][0]["index"] = 999
+            first_attempt = first not in seen
+            seen.add(first)
             calls.append(first)
-            both_started.wait(timeout=5)
+            if first_attempt:
+                both_started.wait(timeout=5)
             return result
 
     monkeypatch.setattr(batches, "wait", lambda futures, **kwargs: wait(futures, return_when=ALL_COMPLETED))
@@ -259,5 +268,7 @@ def test_parallel_failure_preserves_input_and_returns_no_partial_result(monkeypa
     operation = enrich if command == "enrich" else polish_reading
     with pytest.raises(ProviderError, match="结构"):
         operation(document, Provider(), max_chars=1000, workers=2)
-    assert len(calls) == 2
+    # No third chunk is scheduled after chunk 2 fails (enrich retries chunk 2 once).
+    assert seen == {source.segments[0].text, source.segments[1].text}
+    assert len(calls) == (3 if command == "enrich" else 2)
     assert document.model_dump_json() == original

@@ -12,7 +12,7 @@ import { sourcePresentation, updatedDatePresentation } from "./homePresentation"
 import { localizedDetail, tr } from "./language.ts"
 import { previewKey } from "./previewState"
 import type { SettingsTarget } from "./Settings"
-import { activeLanes, elapsedLabel, progressCaption, progressDetail, requestCaption, stageRows, type TaskActivity } from "./taskProgress"
+import { activeLanes, elapsedLabel, laneLabelFor, progressCaption, progressDetail, requestCaption, stageRows, type TaskActivity } from "./taskProgress"
 import { useLinkPreview } from "./useLinkPreview"
 import { isYoutubeCookieErrorCode } from "./youtubeGuidance"
 
@@ -187,6 +187,9 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
     : job.platform === "local" ? tr("字幕文件") : job.platform ? tr("{0} 视频", tr(platformLabel[job.platform])) : tr("新文章"))
   const lastMessage = localizedDetail(progressDetail(activity, job.message), caption)
   const jobMessage = localizedDetail(job.message, caption)
+  const firstErrorLine = jobMessage.split("\n")[0] ?? ""
+  const hasExtraErrorDetail = job.status === "error" && jobMessage.trim() !== firstErrorLine.trim()
+  const showEventStageTags = Boolean(activity && Object.keys(activity.lanes).length > 1)
   const percent = active ? Math.min(99, Math.max(0, job.percent)) : 0
   const requestStatus = requestCaption(activity, now)
   const recoveryAction = unsupportedAudio ? "source"
@@ -272,13 +275,14 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
         </>}
         {queued && <p className="task-detail-line">{tr("前一任务结束后自动开始，可继续添加链接。")}</p>}
         {job.status === "interrupted" && <p className="task-detail-line">{jobMessage}</p>}
-        {job.status === "error" && <p className="task-error-summary">{jobMessage.split("\n")[0].slice(0, 100)}</p>}
+        {job.status === "error" && <p className="task-error-summary">{firstErrorLine}</p>}
         {actionError && <p className="task-error-summary" role="alert">{actionError}</p>}
         {job.previewId && onPreview && <button className="text-button task-read-transcript" type="button" onClick={onPreview}>
           <BookOpen size={14} aria-hidden="true" />{tr("先读原文")}<ArrowRight size={13} aria-hidden="true" />
         </button>}
-        {(activity || job.status === "error") && <details className="task-details" ref={details}>
+        {(activity || hasExtraErrorDetail) && <details className="task-details" ref={details}>
           <summary>{job.status === "error" ? tr("查看错误详情") : tr("查看处理详情")}</summary>
+          {hasExtraErrorDetail && <pre className="task-error-detail">{jobMessage}</pre>}
           {activity && <>
             <ol className="task-stage-list">
               {stageRows(activity, job.status, job.failure?.stage).map(lane => <li key={lane.key} data-state={lane.state} data-lane={lane.key}>
@@ -293,13 +297,17 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
                 <span>{lane.statusLabel}</span>
               </li>)}
             </ol>
-            <ol className="task-event-list" aria-label={tr("最近处理记录")}>
-              {activity.history.map((line, index) => <li key={`${line.at}-${index}`}>
-                <time>{elapsedLabel(line.at - activity.startedAt)}</time><span>{localizedDetail(line.message, tr("正在处理"))}</span>
-              </li>)}
-            </ol>
+            {activity.history.length > 0 && <ol className="task-event-list" aria-label={tr("最近处理记录")}>
+              {activity.history.map((line, index) => {
+                const stageTag = showEventStageTags ? laneLabelFor(line.stage) : undefined
+                return <li key={`${line.at}-${index}`}>
+                  <time>{elapsedLabel(line.at - activity.startedAt)}</time>
+                  {stageTag && <span className="task-event-stage">{stageTag}</span>}
+                  <span>{localizedDetail(line.message, tr("正在处理"))}</span>
+                </li>
+              })}
+            </ol>}
           </>}
-          {job.status === "error" && <pre>{jobMessage}</pre>}
         </details>}
       </div>
       {confirmRemoveOpen && (

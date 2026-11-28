@@ -1,10 +1,12 @@
 import { tr } from "./language.ts"
 import { useEffect, useRef, useState } from "react"
-import { ChevronDown, FolderOpen, LoaderCircle, X } from "lucide-react"
-import { pickCookiesFile, testYoutubeCookies } from "./api"
+import { ChevronDown, ExternalLink, FolderOpen, LoaderCircle, ShieldAlert, X } from "lucide-react"
+import { openPrivacySettings, pickCookiesFile, testYoutubeCookies, type YoutubeCookieTestResult } from "./api"
 import { ConnectionRevision } from "./connectionState"
 import { SettingsHelp } from "./SettingsHelp"
+import { YoutubeCookiePermissionDialog } from "./YoutubeCookiePermissionDialog"
 import { youtubeBrowsers, type YoutubeBrowser, type YoutubeCookieMode, type YoutubeCookieOptions } from "./youtubeCookies"
+import { resolveYoutubeCookiePermissionKind } from "./youtubeGuidance"
 
 export function YoutubeCookiesPanel({ value, onChange, disabled }: {
   value: YoutubeCookieOptions
@@ -14,7 +16,10 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
   const [picking, setPicking] = useState(false)
   const [pickError, setPickError] = useState("")
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string }>()
+  const [testResult, setTestResult] = useState<YoutubeCookieTestResult>()
+  const [permissionDialogOpen, setPermissionDialogOpen] = useState(false)
+  const [openingSettings, setOpeningSettings] = useState(false)
+  const [settingsOpenError, setSettingsOpenError] = useState("")
   const revision = useRef(new ConnectionRevision())
   const identityRef = useRef("")
   const testIdentity = useRef("")
@@ -35,25 +40,35 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
     }
   }, [])
 
+  useEffect(() => {
+    setPermissionDialogOpen(false)
+    setSettingsOpenError("")
+  }, [identity])
+
   if (identityRef.current !== identity) {
     identityRef.current = identity
     revision.current.invalidate()
   }
   const currentResult = testIdentity.current === identity ? testResult : undefined
+  const permissionKind = currentResult && !currentResult.ok
+    ? resolveYoutubeCookiePermissionKind(currentResult.code)
+    : null
+  const browserLabel = youtubeBrowsers.find(item => item.id === value.browser)?.label ?? tr("所选浏览器")
   const canTest = !disabled && !testing && (
     value.mode === "browser" || (value.mode === "file" && Boolean(value.filePath.trim()))
   )
 
-  async function chooseFile() {
+  async function chooseFile(nextBase?: YoutubeCookieOptions) {
     if (disabled || picking) return
-    const snapshot = currentValue.current
+    const snapshot = nextBase ?? currentValue.current
     const rev = ++pickRevision.current
     setPicking(true)
     setPickError("")
     try {
       const selected = await pickCookiesFile()
       if (selected && mounted.current && !currentDisabled.current
-        && pickRevision.current === rev && currentValue.current === snapshot) {
+        && pickRevision.current === rev
+        && (nextBase !== undefined || currentValue.current === snapshot)) {
         onChange({ ...snapshot, mode: "file", filePath: selected })
       }
     } catch (error) {
@@ -63,10 +78,31 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
     }
   }
 
+  function handleUseCookiesFile() {
+    setPermissionDialogOpen(false)
+    setSettingsOpenError("")
+    const nextValue: YoutubeCookieOptions = { ...currentValue.current, mode: "file" }
+    onChange(nextValue)
+    void chooseFile(nextValue)
+  }
+
+  async function handleOpenPrivacySettings() {
+    if (openingSettings) return
+    setOpeningSettings(true)
+    setSettingsOpenError("")
+    try {
+      await openPrivacySettings("full_disk_access")
+    } catch (error) {
+      if (mounted.current) setSettingsOpenError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (mounted.current) setOpeningSettings(false)
+    }
+  }
+
   async function runTest() {
     if (!canTest) return
     setTesting(true)
-    setTestResult(undefined)
+    setSettingsOpenError("")
     const token = revision.current.snapshot()
     testIdentity.current = identity
     try {
@@ -74,10 +110,15 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
         ...value,
         filePath: value.filePath.trim(),
       })
-      if (mounted.current && revision.current.accepts(token)) setTestResult(result)
+      if (mounted.current && revision.current.accepts(token)) {
+        setTestResult(result)
+        const nextPermissionKind = !result.ok ? resolveYoutubeCookiePermissionKind(result.code) : null
+        setPermissionDialogOpen(Boolean(nextPermissionKind))
+      }
     } catch (error) {
       if (mounted.current && revision.current.accepts(token)) {
         setTestResult({ ok: false, message: error instanceof Error ? error.message : String(error) })
+        setPermissionDialogOpen(false)
       }
     } finally {
       if (mounted.current) setTesting(false)
@@ -169,8 +210,42 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
             {testing ? tr("读取中…") : currentResult?.ok ? tr("已读取 YouTube Cookie") : tr("测试读取 Cookie")}
           </button>
         </div>
-        {currentResult && !currentResult.ok && <p className="settings-test-error" role="alert">{currentResult.message}</p>}
+        {currentResult && !currentResult.ok && (
+          <div className="settings-test-error-block" role="alert">
+            <p className="settings-test-error">{currentResult.message}</p>
+            {permissionKind && (
+              <div className="settings-test-error-actions">
+                {permissionKind !== "keychain" && (
+                  <button type="button" className="secondary" disabled={openingSettings || testing}
+                    onClick={() => void handleOpenPrivacySettings()}>
+                    {openingSettings
+                      ? <LoaderCircle size={13} className="spin" aria-hidden="true" />
+                      : <ExternalLink size={13} aria-hidden="true" />}
+                    {openingSettings ? tr("正在打开…") : tr("打开系统设置")}
+                  </button>
+                )}
+                <button type="button" className="text-button" disabled={testing}
+                  onClick={() => setPermissionDialogOpen(true)}>
+                  <ShieldAlert size={13} aria-hidden="true" />
+                  {tr("查看授权指引…")}
+                </button>
+              </div>
+            )}
+            {settingsOpenError && <p className="settings-test-error">{settingsOpenError}</p>}
+          </div>
+        )}
       </>}
     </div>
+    {permissionDialogOpen && permissionKind && (
+      <YoutubeCookiePermissionDialog
+        kind={permissionKind}
+        browserLabel={browserLabel}
+        isDev={Boolean(currentResult?.isDev)}
+        testing={testing}
+        onRetry={() => void runTest()}
+        onUseCookiesFile={handleUseCookiesFile}
+        onClose={() => setPermissionDialogOpen(false)}
+      />
+    )}
   </section>
 }

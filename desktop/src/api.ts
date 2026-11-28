@@ -136,9 +136,19 @@ export const exportArticle = (id: string, format: ExportFormat, options?: Markdo
   invoke<boolean>("export_article", { id, format, uiLanguage: locale(), ...(options ? { options } : {}) })
 export const exportSubtitles = (id: string, format: SubtitleExportFormat, preview = false) =>
   invoke<boolean>("export_subtitles", { id, format, preview, uiLanguage: locale() })
+export type YoutubeCookieTestResult = {
+  ok: boolean
+  message: string
+  code?: string | null
+  isDev?: boolean
+}
+export type PrivacySettingsPane = "full_disk_access" | "privacy"
+
 export const pickCookiesFile = () => invoke<string | null>("pick_cookies_file", { uiLanguage: locale() })
 export const testYoutubeCookies = (options: YoutubeCookieOptions) =>
-  invoke<{ ok: boolean; message: string }>("test_youtube_cookies", { options })
+  invoke<YoutubeCookieTestResult>("test_youtube_cookies", { options })
+export const openPrivacySettings = (pane: PrivacySettingsPane) =>
+  invoke<void>("open_privacy_settings", { pane })
 export const getArticleDetails = (id: string) => invoke<ArticleDetails>("get_article_details", { id })
 export const updateArticleDetails = (id: string, title: string | null, category: string | null, sourceUrl?: string) =>
   invoke<Article>("update_article_details", { id, title, category, ...(sourceUrl === undefined ? {} : { sourceUrl }) })

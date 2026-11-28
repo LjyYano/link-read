@@ -304,23 +304,43 @@ async fn test_youtube_cookies(
     locations: State<'_, Locations>,
     queries: State<'_, ActiveQueries>,
     options: YoutubeCookieOptions,
-) -> AppResult<ApiConnectionCheck> {
+) -> AppResult<YoutubeCookieTestResult> {
     if options.mode == "none" {
         return Err("请先选择浏览器或 cookies.txt 文件".into());
     }
     let cookies =
         youtube_cookie_args("https://www.youtube.com/watch?v=1-Fo8McCD9w", Some(&options))?;
-    let mut owned: Vec<String> = vec!["test-youtube-cookies".into()];
-    owned.extend(cookies);
-    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-    query_tracked(
-        &locations,
-        &args,
+    let mut command = sidecar(&locations)?;
+    command.arg("test-youtube-cookies");
+    command.args(&cookies);
+    run_youtube_cookie_test(
+        command,
         Duration::from_secs(45),
         "读取 YouTube Cookie 超时；如系统弹出钥匙串授权窗口，请确认授权后重试",
         Some(&queries),
     )
     .await
+}
+
+#[tauri::command]
+async fn open_privacy_settings(pane: PrivacySettingsPane) -> AppResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("/usr/bin/open")
+            .arg(pane.macos_url())
+            .status()
+            .await
+            .map_err(|error| details("无法打开系统设置", error))?;
+        status
+            .success()
+            .then_some(())
+            .ok_or_else(|| "无法打开系统设置".to_owned())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pane;
+        Err("仅支持在 macOS 打开系统设置".into())
+    }
 }
 
 #[tauri::command]
@@ -1244,6 +1264,7 @@ fn main() {
             export_subtitles,
             pick_cookies_file,
             test_youtube_cookies,
+            open_privacy_settings,
             load_asr_token,
             save_asr_token,
             delete_asr_token,
@@ -2526,5 +2547,66 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn privacy_settings_panes_use_allowlisted_macos_urls() {
+        assert_eq!(
+            super::PrivacySettingsPane::FullDiskAccess.macos_url(),
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+        );
+        assert_eq!(
+            super::PrivacySettingsPane::Privacy.macos_url(),
+            "x-apple.systempreferences:com.apple.preference.security?Privacy"
+        );
+        let parsed: super::PrivacySettingsPane =
+            serde_json::from_str("\"full_disk_access\"").unwrap();
+        assert_eq!(parsed, super::PrivacySettingsPane::FullDiskAccess);
+        assert!(
+            serde_json::from_str::<super::PrivacySettingsPane>("\"file:///etc/passwd\"").is_err()
+        );
+    }
+
+    #[test]
+    fn youtube_cookie_test_preserves_structured_error_code_and_success() {
+        tauri::async_runtime::block_on(async {
+            let mut denied = Command::new("/bin/sh");
+            denied
+                .args([
+                    "-c",
+                    r#"printf '%s\n' '{"type":"error","code":"youtube_cookies_keychain_denied","message":"keychain blocked"}'; exit 1"#,
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            let result =
+                super::run_youtube_cookie_test(denied, Duration::from_secs(5), "timeout", None)
+                    .await
+                    .unwrap();
+            assert!(!result.ok);
+            assert_eq!(
+                result.code.as_deref(),
+                Some("youtube_cookies_keychain_denied")
+            );
+            assert_eq!(result.message, "keychain blocked");
+            assert_eq!(result.is_dev, cfg!(debug_assertions));
+
+            let mut ok_cmd = Command::new("/bin/sh");
+            ok_cmd
+                .args([
+                    "-c",
+                    r#"printf '%s\n' '{"type":"youtube_cookies_test","ok":true,"message":"cookies ready"}'"#,
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            let ok_result =
+                super::run_youtube_cookie_test(ok_cmd, Duration::from_secs(5), "timeout", None)
+                    .await
+                    .unwrap();
+            assert!(ok_result.ok);
+            assert_eq!(ok_result.code, None);
+            assert_eq!(ok_result.message, "cookies ready");
+        });
     }
 }

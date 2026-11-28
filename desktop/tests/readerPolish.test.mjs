@@ -33,9 +33,18 @@ test('titlebar action has permission and is not mixed with implicit double-click
   assert.ok(capabilities.permissions.includes('core:window:allow-toggle-maximize'))
   const main=read('../src/main.tsx')
   const titleBar=read('../src/TitleBar.tsx')
+  const quickOpenCss=read('../src/quick-open.css')
+  const reader=read('../src/Reader.tsx')
+  const bookshelf=read('../src/BookshelfSection.tsx')
   assert.match(titleBar,/titlebarMouseDown\(event, getCurrentWindow\(\)\)/)
   assert.doesNotMatch(main,/className="titlebar-drag"[^>]*data-tauri-drag-region/)
   assert.doesNotMatch(titleBar,/className="titlebar-drag"[^>]*data-tauri-drag-region/)
+  assert.match(titleBar,/className="titlebar-segmented"/)
+  assert.doesNotMatch(quickOpenCss,/\.titlebar-drag/)
+  assert.doesNotMatch(reader,/aria-label=\{tr\("Print transcript \/ Save PDF"\)\}\s+title=/)
+  assert.match(reader,/linkReadCommand:\s*"toggle-sidebar"/)
+  assert.match(bookshelf,/onContextMenu=/)
+  assert.match(bookshelf,/className="menu-separator"/)
 })
 
 test('Bilibili cover URLs accept HTTP or relative input but only fetch trusted HTTPS', () => {

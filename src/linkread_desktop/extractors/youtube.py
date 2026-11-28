@@ -147,10 +147,20 @@ def _browser_label(cookies_from_browser: str | None) -> str:
 def _cookie_permission_error(cookies_from_browser: str | None) -> ExtractionError:
     browser_label = _browser_label(cookies_from_browser)
     return ExtractionError(
-        f"系统拒绝读取 {browser_label} 的 Cookie（macOS 权限受限）。"
+        f"系统拒绝读取 {browser_label} 的 Cookie 目录（macOS 磁盘权限受限）。"
         "请在「系统设置 → 隐私与安全性 → 完全磁盘访问权限 / App 数据」中授权 LinkRead（或运行 dev.sh 的终端，授权后需重启该终端），"
-        "并允许钥匙串访问，或在设置中切换浏览器 / 使用 cookies.txt。",
+        "或在设置中切换浏览器 / 使用 cookies.txt。",
         code="youtube_cookies_permission_denied", action="settings",
+    )
+
+
+def _cookie_keychain_error(cookies_from_browser: str | None) -> ExtractionError:
+    browser_label = _browser_label(cookies_from_browser)
+    return ExtractionError(
+        f"无法解密 {browser_label} 的 Cookie（macOS 钥匙串访问被拒绝）。"
+        "请重新测试并在系统弹出的钥匙串密码窗口中输入开机密码后点「允许」或「始终允许」，"
+        "或在设置中切换浏览器 / 使用 cookies.txt。",
+        code="youtube_cookies_keychain_denied", action="settings",
     )
 
 
@@ -212,8 +222,10 @@ def _has_youtube_auth_cookies(jar: object, *, now: float | None = None) -> bool:
 def _configured_cookie_auth_error(
     lookup: _CookieDiagnosticLogger, loaded_jar: object, cookies_from_browser: str | None,
 ) -> ExtractionError:
-    if lookup.permission_denied or lookup.keychain_denied or lookup.decrypt_failed:
+    if lookup.permission_denied:
         return _cookie_permission_error(cookies_from_browser)
+    if lookup.keychain_denied or lookup.decrypt_failed:
+        return _cookie_keychain_error(cookies_from_browser)
     if lookup.cookies_invalidated:
         return _cookie_expired_error()
     if loaded_jar is not None and not _has_youtube_auth_cookies(loaded_jar):
@@ -292,9 +304,8 @@ def _classify_cookie_load_error(
     chain = _exception_chain(exc)
     names = {type(item).__name__ for item in chain}
     combined = " ".join(str(item).lower() for item in chain if str(item))
-    has_logger_permission = logger is not None and (
-        logger.permission_denied or logger.keychain_denied or logger.decrypt_failed
-    )
+    has_logger_fs_permission = logger is not None and logger.permission_denied
+    has_logger_keychain = logger is not None and (logger.keychain_denied or logger.decrypt_failed)
     is_cookie_load = (
         "CookieLoadError" in names
         or "LoadError" in names
@@ -318,28 +329,41 @@ def _classify_cookie_load_error(
         return None
     browser = cookies_from_browser.strip().lower() if cookies_from_browser else None
     browser_label = _browser_label(cookies_from_browser)
-    is_permission = (
+    is_fs_permission = (
         any(isinstance(item, PermissionError) for item in chain)
         or "operation not permitted" in combined
         or "permission denied" in combined
-        or has_logger_permission
+        or has_logger_fs_permission
+    )
+    is_keychain_denied = (
+        has_logger_keychain
+        or any(marker in combined for marker in (
+            "find-generic-password",
+            "keychain",
+            "keyring",
+            "secretstorage",
+            "cannot decrypt",
+            "failed to decrypt",
+        ))
     )
     is_not_found = (
         any(isinstance(item, FileNotFoundError) for item in chain)
         or "could not find " in combined
     )
-    if browser == "safari" and (is_permission or is_not_found):
+    if browser == "safari" and (is_fs_permission or is_not_found):
         return ExtractionError(
             "无法读取 Safari Cookie（macOS 默认限制读取 Safari 容器目录）。"
             "请在「系统设置 → 隐私与安全性 → 完全磁盘访问权限」授权应用或启动终端，或在设置中改选 Chrome / 使用 cookies.txt。",
             code="youtube_cookies_safari_permission", action="settings",
         )
-    if not is_permission and is_not_found and browser and browser != "safari":
+    if not is_fs_permission and is_not_found and browser and browser != "safari":
         search_dirs = _extract_cookie_search_dirs(chain)
         if search_dirs and _has_permission_error_in_search_dirs(search_dirs, browser=browser):
-            is_permission = True
-    if is_permission:
+            is_fs_permission = True
+    if is_fs_permission:
         return _cookie_permission_error(cookies_from_browser)
+    if is_keychain_denied:
+        return _cookie_keychain_error(cookies_from_browser)
     if cookies_file is not None and ("netscape" in combined or "LoadError" in names):
         return ExtractionError(
             "所选文件不是有效的 Netscape 格式 cookies.txt，请重新导出后在设置中选择。",
@@ -396,12 +420,10 @@ def test_youtube_cookies(
             code="youtube_cookies_unavailable", action="settings",
         ) from exc
     if not has_youtube_auth:
-        if (
-            diagnostic_logger.permission_denied
-            or diagnostic_logger.keychain_denied
-            or diagnostic_logger.decrypt_failed
-        ):
+        if diagnostic_logger.permission_denied:
             raise _cookie_permission_error(cookies_from_browser)
+        if diagnostic_logger.keychain_denied or diagnostic_logger.decrypt_failed:
+            raise _cookie_keychain_error(cookies_from_browser)
         raise _cookie_empty_error()
     return {"ok": True, "message": "已读取到 YouTube 登录 Cookie（仅本地检查，实际有效性以 YouTube 验证为准）"}
 

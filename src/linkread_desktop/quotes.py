@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .ai.models import lexical_content
+from .ai.models import MAX_HIGHLIGHT_SPAN, lexical_content
 from .models import TranscriptDocument
 
 
@@ -34,7 +34,7 @@ class QuoteCard(BaseModel):
 
     def verify_source(self, document: TranscriptDocument) -> None:
         start, end = self.start_segment_index, self.end_segment_index
-        if not start <= end < len(document.segments) or end - start > 7:
+        if not start <= end < len(document.segments) or end - start > MAX_HIGHLIGHT_SPAN:
             raise ValueError("金句字幕索引超出范围")
         if (lexical_content(self.front) != lexical_content(cue_text(document, start, end)) or
                 lexical_content(self.back) != lexical_content(cue_text(document, *context_bounds(document, start, end)))):

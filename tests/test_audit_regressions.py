@@ -12,6 +12,7 @@ from linkread_desktop.asr import bailian, segments as asr_segments
 from linkread_desktop.asr.config import AsrConfig
 from linkread_desktop.extractors import apple_podcasts, podcast_http
 from linkread_desktop.models import SourceInfo, TranscriptDocument, TranscriptSegment
+from linkread_desktop.renderers.html import render_html
 from linkread_desktop.renderers.markdown import render_markdown
 from linkread_desktop.renderers.shownotes import description_html
 from linkread_desktop.renderers.subtitles import render_subtitles
@@ -201,7 +202,14 @@ def test_podcast_http_ssrf_and_apple_podcasts_dtd_cdata_and_empty_cues():
 
 
 def test_renderers_and_reader_cache_regressions():
-    assert reader_cache.CACHE_VERSION == 15
+    assert reader_cache.CACHE_VERSION == 17
+
+    zh_html = render_html(_sample_doc(), language="zh-CN")
+    assert 'data-theme-choice="sepia"' in zh_html
+    assert 'data-reading-font="serif"' in zh_html
+    assert ">暖纸</button>" in zh_html
+    assert ">宋体</button>" in zh_html
+    assert "linkread-sidebar-v1" in zh_html
 
     md = render_markdown(_sample_doc())
     assert "Sample Video" in md

@@ -250,14 +250,16 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
         <strong>{tr("没有待处理任务")}</strong>
       </div>}
     </div>
-    <footer className="task-center-footer">
-      {clearError && <p className="task-center-error" role="alert">{clearError}</p>}
-      <button className="text-button" type="button" disabled={clearing || !removable.length}
-        onClick={clearReviewed} title={tr("仅清理已查看且已结束的任务记录，保留字幕与缓存")}>
-        <Trash2 size={14} aria-hidden="true" />{clearing ? tr("正在清理…") : tr("清理已查看记录")}
-        {removable.length > 0 && <span>({removable.length})</span>}
-      </button>
-    </footer>
+    {(removable.length > 0 || clearError || clearing) && (
+      <footer className="task-center-footer">
+        {clearError && <p className="task-center-error" role="alert">{clearError}</p>}
+        <button className="text-button" type="button" disabled={clearing || !removable.length}
+          onClick={clearReviewed} title={tr("仅清理已查看且已结束的任务记录，保留字幕与缓存")}>
+          <Trash2 size={14} aria-hidden="true" />{clearing ? tr("正在清理…") : tr("清理已查看记录")}
+          {removable.length > 0 && <span>({removable.length})</span>}
+        </button>
+      </footer>
+    )}
     {confirmClearIds && (
       <ConfirmDialog
         title={tr("清理已查看记录")}

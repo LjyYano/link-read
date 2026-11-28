@@ -149,14 +149,18 @@ class RunProvider:
             self._event(self._request_id, stage, "cache")
 
 
-def validated_call(provider, prompt, schema, validate, *, timeout_seconds, cache_dir=None, stage=None, cancel=None):
+def validated_call(
+    provider, prompt, schema, validate, *, timeout_seconds, cache_dir=None, stage=None, cancel=None,
+    cache_key_prompt=None,
+):
     """Never cache unverified model output; always revalidate stored checkpoints."""
     if cancel is not None and cancel.is_set():
         raise LinkReadError("生成已取消", code="cancelled")
     path = None
     if cache_dir is not None:
         identity = getattr(provider, "identity", provider_identity(provider))
-        fingerprint = sha256(json.dumps(["validated-v1", identity, prompt, schema],
+        key_prompt = prompt if cache_key_prompt is None else cache_key_prompt
+        fingerprint = sha256(json.dumps(["validated-v1", identity, key_prompt, schema],
                                         ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         folder = Path(cache_dir)
         if folder.is_symlink():

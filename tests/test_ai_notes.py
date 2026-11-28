@@ -166,7 +166,7 @@ def test_compact_prompt_indexes_map_back_to_all_source_cues():
                   {"start_index": 0, "title": "z", "summary": "y"}]},
     {"highlights": [{"start_index": 0, "end_index": 999}]},
     {"highlights": [{"start_index": 5, "end_index": 4}]},
-    {"highlights": [{"start_index": 0, "end_index": 9}]},
+    {"highlights": [{"start_index": 0, "end_index": 16}]},
 ])
 def test_invalid_ai_references_fail_without_writing_anything(bad):
     class BadProvider(FakeProvider):
@@ -175,7 +175,7 @@ def test_invalid_ai_references_fail_without_writing_anything(bad):
             data.update(bad)
             return data
     with pytest.raises(ProviderError, match="索引约束"):
-        enrich(make_transcript(), BadProvider())
+        enrich(make_transcript(num=20), BadProvider())
 
 
 def test_missing_ai_fields_rejected():
@@ -184,6 +184,77 @@ def test_missing_ai_fields_rejected():
             return {"summary": "too small"}
     with pytest.raises(ProviderError):
         enrich(make_transcript(), Missing())
+
+
+def test_enrich_allows_short_asr_highlight_up_to_16_cues_and_verifies_quote_card():
+    from linkread_desktop.quotes import QuoteCard, context_bounds, cue_text
+
+    class TwelveCueHighlightProvider(FakeProvider):
+        def generate(self, prompt, schema, *, timeout_seconds):
+            data = super().generate(prompt, schema, timeout_seconds=timeout_seconds)
+            data["highlights"] = [{"start_index": 0, "end_index": 11}]
+            return data
+
+    transcript = make_transcript(num=20)
+    note = enrich(transcript, TwelveCueHighlightProvider())
+    assert len(note.analysis.highlights) == 1
+    assert note.analysis.highlights[0].end_segment_index == 11
+    card = QuoteCard(
+        title="完整长句金句",
+        start_segment_index=0,
+        end_segment_index=11,
+        front=cue_text(transcript, 0, 11),
+        back=cue_text(transcript, *context_bounds(transcript, 0, 11)),
+    )
+    card.verify_source(transcript)
+
+
+def test_enrich_retries_once_with_exact_index_hint_and_caches_recovered_chunk(tmp_path):
+    from linkread_desktop.ai.checkpoints import RunProvider
+
+    events = []
+    prompts = []
+
+    class RecoveringProvider(FakeProvider):
+        def generate(self, prompt, schema, *, timeout_seconds):
+            prompts.append(prompt)
+            data = super().generate(prompt, schema, timeout_seconds=timeout_seconds)
+            if len(prompts) == 1:
+                data["highlights"] = [{"start_index": 0, "end_index": 16}]
+            return data
+
+    transcript = make_transcript(num=20)
+    note = enrich(transcript, RecoveringProvider(), progress=events.append, cache_dir=tmp_path)
+    assert len(prompts) == 2
+    assert "【格式修正重试】" in prompts[1]
+    assert "[0, 16]" in prompts[1]
+    assert "16 句连续字幕" in prompts[1]
+    assert any(event.stage == "ai_retry" and "[0, 16]" in event.message for event in events)
+    assert note.analysis.highlights[0].start_segment_index == 0
+
+    # A resumed run reuses the validated checkpoint saved from the corrective retry.
+    resumed = RunProvider(FakeProvider(), 1)
+    note2 = enrich(transcript, resumed, cache_dir=tmp_path)
+    assert resumed.cache_hits == 1
+    assert resumed.calls == 0
+    assert note2 == note
+
+
+def test_enrich_persistent_validation_error_reports_specific_safe_reason():
+    class StillTooLongHighlight(FakeProvider):
+        def generate(self, prompt, schema, *, timeout_seconds):
+            data = super().generate(prompt, schema, timeout_seconds=timeout_seconds)
+            data["highlights"] = [{"start_index": 0, "end_index": 16}]
+            return data
+
+    with pytest.raises(ProviderError) as caught:
+        enrich(make_transcript(num=20, text="秘密字幕文本"), StillTooLongHighlight())
+    assert caught.value.code == "model_output_invalid"
+    assert caught.value.stage == "analysis"
+    assert "索引约束" in str(caught.value)
+    assert "[0, 16]" in str(caught.value)
+    assert "16 句连续字幕" in str(caught.value)
+    assert "秘密字幕文本" not in str(caught.value)
 
 
 def test_source_reference_validation_on_reload():

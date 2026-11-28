@@ -697,6 +697,42 @@ pub async fn query_command_tracked<T: DeserializeOwned>(
     Ok(response)
 }
 
+pub async fn run_youtube_cookie_test(
+    command: Command,
+    deadline: Duration,
+    timeout_message: &str,
+    registry: Option<&ActiveQueries>,
+) -> AppResult<crate::types::YoutubeCookieTestResult> {
+    let (status, stdout, mut guard) = run_command_output(command, deadline, registry)
+        .await
+        .map_err(|error| match error {
+            QueryOutputError::Timeout => timeout_message.to_owned(),
+            QueryOutputError::Oversized => "无法读取资料库（输出超过上限）".to_owned(),
+            QueryOutputError::Start(inner) => details("无法启动 LinkRead 核心", inner),
+        })?;
+    if !status.success() {
+        if let Ok(SidecarEvent::Error { message, code, .. }) = serde_json::from_slice(&stdout) {
+            guard.disarm();
+            return Ok(crate::types::YoutubeCookieTestResult {
+                ok: false,
+                message,
+                code,
+                is_dev: cfg!(debug_assertions),
+            });
+        }
+        return Err("LinkRead 核心提前退出，请重试".into());
+    }
+    let check: crate::types::ApiConnectionCheck =
+        serde_json::from_slice(&stdout).map_err(|error| details("无法读取资料库", error))?;
+    guard.disarm();
+    Ok(crate::types::YoutubeCookieTestResult {
+        ok: check.ok,
+        message: check.message,
+        code: None,
+        is_dev: cfg!(debug_assertions),
+    })
+}
+
 pub async fn query_command_detailed<T: DeserializeOwned>(
     command: Command,
     deadline: Duration,

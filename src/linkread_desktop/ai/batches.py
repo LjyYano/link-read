@@ -53,12 +53,21 @@ def ordered_batches(
                 if not done:
                     continue
                 # Check every completed call before scheduling any more work.
+                # Record any completed successes in this wave before raising a failure.
+                first_error: BaseException | None = None
                 for future in done:
                     index = pending.pop(future)
                     _check_cancelled(cancel)
-                    results[index] = future.result()
-                    if on_complete is not None:
-                        on_complete(index, len(results))
+                    try:
+                        results[index] = future.result()
+                    except BaseException as exc:
+                        if first_error is None:
+                            first_error = exc
+                    else:
+                        if on_complete is not None:
+                            on_complete(index, len(results))
+                if first_error is not None:
+                    raise first_error
                 for _ in done:
                     _check_cancelled(cancel)
                     entry = next(queue, None)

@@ -15,8 +15,20 @@
 </style>
 <style id="linkread-notice-style">.reading-fallback{display:block}.reading-fallback summary{cursor:pointer}.reading-fallback p{margin:10px 0 0;color:var(--muted);font-size:13px;line-height:1.8}</style>
 <style id="linkread-reader-extensions">
-:root{--muted:#666561;--soft:#6f6e6b;--accent:#1a6bc4;--red:#c4332a}
-[data-theme=dark]{--muted:#acaba5;--soft:#9b9b96;--accent:#7bb8f3;--red:#f19084}
+:root{--bg:#fff;--aside:#f5f5f7;--fg:#1d1d1f;--muted:#6e6e73;--soft:#8e8e93;--line:#e5e5ea;--surface:#f5f5f7;--hover:#ebebef;--accent:#0066cc;--red:#d70015;--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Helvetica Neue","Noto Sans CJK SC",sans-serif;--font-serif:"New York","Songti SC","STSong","Noto Serif CJK SC",Georgia,"Times New Roman",serif}
+[data-theme=sepia]{color-scheme:light;--bg:#f8f3e8;--aside:#f0e9da;--fg:#2c251d;--muted:#6e6253;--soft:#8c7d6b;--line:#e3d9c6;--surface:#efe7d7;--hover:#e6dcc9;--accent:#8a5315;--red:#c4332a;--marked:#f3dc9b}
+[data-theme=dark]{--bg:#1c1c1e;--aside:#222225;--fg:#f5f5f7;--muted:#a1a1a6;--soft:#8e8e93;--line:#323236;--surface:#262629;--hover:#2f2f34;--accent:#409cff;--red:#ff6961}
+.brand,.tab.active,.summary-line strong{font-weight:600}
+.hero h1,.transcript-section h2{font-weight:700}
+.callout{border-left-color:var(--accent);border-radius:6px}
+.toc button,.mobile-toc button,.theme-btn{border-radius:6px}
+[data-theme=dark] .mindmap-wrap{background:linear-gradient(135deg,#1e1d26 0%,#18181f 100%)}
+[data-theme=sepia] .mindmap-wrap{background:linear-gradient(135deg,#f5efe2 0%,#ece3d0 100%)}
+.hero,.tabs,.toolbar,.reading-tools,.panel-inner{max-width:760px}
+:root[data-sidebar=collapsed] .shell{grid-template-columns:minmax(0,1fr)}
+:root[data-sidebar=collapsed] .sidebar{display:none}
+.linkread-desktop .shell.no-toc{grid-template-columns:minmax(0,1fr)}
+.linkread-desktop .shell.no-toc .sidebar{display:none}
 /* Keep the reading column at the top, independent of the active tab's height. */
 .main{margin:0 auto;align-self:start}
 .hero h1,.transcript-section h2,.transcript-section h3{overflow-wrap:anywhere}
@@ -97,7 +109,7 @@
 
 .reader-icon{width:18px;height:18px;flex:none;vertical-align:middle}
 .tab{display:inline-flex;align-items:center;gap:7px;font-size:14px;line-height:1.45;padding:14px 13px;transition:color .15s,border-color .15s}
-.tab.active{border-bottom-color:#8b5cf6}.tab .reader-icon{width:17px;height:17px}
+.tab.active{border-bottom-color:var(--accent)}.tab .reader-icon{width:17px;height:17px}
 .reader-tab-row{display:flex;align-items:stretch;gap:8px;min-width:0}
 .reader-tab-strip{display:flex;align-items:center;flex:1;min-width:0}
 .reader-tab-row .tabs-scroll{flex:1;min-width:0}
@@ -126,19 +138,25 @@
 .reader-size-controls{display:flex;align-items:center;justify-content:space-between;gap:10px}.reader-size-controls button{border:1px solid var(--line);padding:5px 9px;min-width:34px}
 #font-status{font-size:13px;color:var(--fg);font-variant-numeric:tabular-nums;min-width:42px;text-align:center}
 .reader-popover .reader-reset{display:block;min-height:26px;margin:9px 0 0 auto;padding:3px 6px;font-size:11px}
-#reader-appearance{width:246px;overflow:auto;overscroll-behavior:contain}
-.reader-popover-heading{display:block;font-size:13px;font-weight:650;margin:0 0 15px}
-.reader-appearance-group{margin-top:15px}.reader-appearance-group .reader-popover-label{margin-bottom:6px}
-.reader-segmented{display:flex;border:1px solid var(--line);border-radius:6px;padding:2px;gap:2px}
-.reader-segmented button{flex:1;min-width:0;min-height:29px;padding:4px 7px}
-.reader-segmented button[aria-pressed=true]{color:var(--accent);background:var(--surface);box-shadow:0 0 0 1px var(--line);font-weight:600}
-.reader-appearance-status{display:block;color:var(--muted);font-size:11px;line-height:1.5;border-top:1px solid var(--line);margin-top:9px;padding-top:9px}
+#reader-appearance{width:254px;overflow:auto;overscroll-behavior:contain;padding:13px 14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.14)}
+[data-theme=dark] #reader-appearance{box-shadow:0 12px 36px rgba(0,0,0,.48)}
+.reader-popover-heading{display:block;font-size:13px;font-weight:600;margin:0 0 11px}
+.reader-appearance-group{margin-top:11px}.reader-appearance-group:first-of-type{margin-top:0}.reader-appearance-group .reader-popover-label{margin-bottom:5px}
+.reader-segmented{display:flex;border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px;background:var(--surface)}
+.reader-segmented button{flex:1;min-width:0;min-height:28px;padding:4px 7px;border-radius:6px;gap:5px}
+.reader-segmented button[aria-pressed=true]{color:var(--fg);background:var(--bg);box-shadow:0 1px 2px rgba(0,0,0,.09);font-weight:600}
+.theme-swatch{display:inline-block;width:10px;height:10px;border-radius:999px;border:1px solid rgba(0,0,0,.18);flex:none}
+.theme-swatch-light{background:#ffffff}
+.theme-swatch-sepia{background:#f5ecd7}
+.theme-swatch-dark{background:#1c1c1e;border-color:rgba(255,255,255,.28)}
+.reader-appearance-status{display:block;color:var(--muted);font-size:11px;line-height:1.5;border-top:1px solid var(--line);margin-top:9px;padding-top:8px}
 .reader-appearance-status[data-error=true]{color:var(--red)}
-/* Only reading text changes width and spacing. Map geometry and other views stay stable. */
+/* Only reading text changes width, spacing and typeface. Map geometry and other views stay stable. */
 #panel-transcript,#panel-shownotes{max-width:1024px}
-#panel-transcript .panel-inner,#panel-shownotes .panel-inner{max-width:var(--reading-column,830px)}
-:root[data-reading-width=wide]{--reading-column:980px}
+#panel-transcript .panel-inner,#panel-shownotes .panel-inner{max-width:var(--reading-column,760px)}
+:root[data-reading-width=wide]{--reading-column:940px}
 :root[data-reading-spacing=compact] .article-body,:root[data-reading-spacing=compact] .reading-paragraph,:root[data-reading-spacing=compact] .shownotes-copy{line-height:1.7}
+:root[data-reading-font=serif] .article-body,:root[data-reading-font=serif] .shownotes-copy{font-family:var(--font-serif);letter-spacing:.015em}
 .anki-buttons{flex-wrap:wrap;align-items:center}.anki-card[open]{overflow:visible}
 .anki-card[open]>summary{border-radius:6px 6px 0 0}
 .quote-copy-control{position:relative;display:inline-flex;align-items:stretch}
@@ -183,7 +201,7 @@
 .quote-translation{margin:0 0 10px;font-size:.95em;color:var(--muted)}
 .quote-translation>span{display:block;font-size:.75em;font-weight:650}
 @media print{
-  :root,[data-theme=dark]{color-scheme:light;--bg:#fff;--aside:#f7f7f5;--fg:#1f1f1f;--muted:#595855;--soft:#6b6a67;--line:#ddd;--surface:#f7f7f5;--hover:#f3f3f1;--accent:#1d6ec2;--red:#b42318;--marked:transparent}
+  :root,[data-theme=dark],[data-theme=sepia]{color-scheme:light;--bg:#fff;--aside:#f7f7f5;--fg:#1f1f1f;--muted:#595855;--soft:#6b6a67;--line:#ddd;--surface:#f7f7f5;--hover:#f3f3f1;--accent:#1d6ec2;--red:#b42318;--marked:transparent}
   body{background:#fff!important;color:#1f1f1f!important}
   mark{background:transparent!important;outline:none!important}
   .transcript-section h2,.transcript-section h3{break-after:avoid;page-break-after:avoid}
@@ -219,8 +237,9 @@
             <button class="reader-tool-button reader-aa" id="reader-appearance-toggle" type="button" aria-label="Reading appearance" title="Reading appearance" aria-controls="reader-appearance" aria-expanded="false">Aa</button>
             <div class="reader-popover" id="reader-appearance" role="group" aria-label="Reading appearance" hidden>
               <span class="reader-popover-heading">Reading appearance</span>
-              <span class="reader-popover-label">Text size</span>
-              <div class="reader-size-controls"><button type="button" id="font-decrease" aria-label="Decrease font size">A−</button><span id="font-status" role="status"></span><button type="button" id="font-increase" aria-label="Increase font size">A+</button></div>
+              <div class="reader-appearance-group" role="group" aria-label="Page theme"><span class="reader-popover-label">Page theme</span><div class="reader-segmented"><button type="button" data-theme-choice="light" aria-pressed="true"><span class="theme-swatch theme-swatch-light" aria-hidden="true"></span>Light</button><button type="button" data-theme-choice="sepia" aria-pressed="false"><span class="theme-swatch theme-swatch-sepia" aria-hidden="true"></span>Sepia</button><button type="button" data-theme-choice="dark" aria-pressed="false"><span class="theme-swatch theme-swatch-dark" aria-hidden="true"></span>Dark</button></div></div>
+              <div class="reader-appearance-group"><span class="reader-popover-label">Text size</span><div class="reader-size-controls"><button type="button" id="font-decrease" aria-label="Decrease font size">A−</button><span id="font-status" role="status"></span><button type="button" id="font-increase" aria-label="Increase font size">A+</button></div></div>
+              <div class="reader-appearance-group" role="group" aria-label="Font style"><span class="reader-popover-label">Font style</span><div class="reader-segmented"><button type="button" data-reading-font="sans" aria-pressed="true">Sans</button><button type="button" data-reading-font="serif" aria-pressed="false">Serif</button></div></div>
               <div class="reader-appearance-group" role="group" aria-label="Line width"><span class="reader-popover-label">Line width</span><div class="reader-segmented"><button type="button" data-reading-width="standard" aria-pressed="true">Standard</button><button type="button" data-reading-width="wide" aria-pressed="false">Wide</button></div></div>
               <div class="reader-appearance-group" role="group" aria-label="Line spacing"><span class="reader-popover-label">Line spacing</span><div class="reader-segmented"><button type="button" data-reading-spacing="compact" aria-pressed="false">Compact</button><button type="button" data-reading-spacing="relaxed" aria-pressed="true">Relaxed</button></div></div>
               <button class="reader-reset" type="button" id="font-reset">Reset appearance</button>

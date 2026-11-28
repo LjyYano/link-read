@@ -9,11 +9,14 @@ export type YoutubeSubtitlePrompt = {
   detail?: string
 }
 
+export type YoutubeCookiePermissionKind = "full_disk_access" | "safari_full_disk_access" | "keychain"
+
 const youtubeCookieErrorCodes = new Set([
   "youtube_verification_required",
   "youtube_cookies_unavailable",
   "youtube_cookies_safari_permission",
   "youtube_cookies_permission_denied",
+  "youtube_cookies_keychain_denied",
   "youtube_cookies_not_found",
   "youtube_cookies_format_invalid",
   "youtube_cookies_empty",
@@ -22,6 +25,13 @@ const youtubeCookieErrorCodes = new Set([
 
 export function isYoutubeCookieErrorCode(code?: string | null): boolean {
   return Boolean(code && youtubeCookieErrorCodes.has(code))
+}
+
+export function resolveYoutubeCookiePermissionKind(code?: string | null): YoutubeCookiePermissionKind | null {
+  if (code === "youtube_cookies_safari_permission") return "safari_full_disk_access"
+  if (code === "youtube_cookies_permission_denied") return "full_disk_access"
+  if (code === "youtube_cookies_keychain_denied") return "keychain"
+  return null
 }
 
 const youtubeSubtitleFailureCodes = new Set([

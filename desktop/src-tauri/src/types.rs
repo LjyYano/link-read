@@ -230,6 +230,35 @@ pub struct ApiConnectionCheck {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YoutubeCookieTestResult {
+    pub ok: bool,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub is_dev: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivacySettingsPane {
+    FullDiskAccess,
+    Privacy,
+}
+
+impl PrivacySettingsPane {
+    pub fn macos_url(self) -> &'static str {
+        match self {
+            Self::FullDiskAccess => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+            }
+            Self::Privacy => "x-apple.systempreferences:com.apple.preference.security?Privacy",
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AsrOptions {

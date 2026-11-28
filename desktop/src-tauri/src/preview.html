@@ -3,6 +3,8 @@
 <style>
 /* The app toolbar already provides navigation back to the bookshelf. */
 .linkread-desktop .crumb { display: none; }
+.linkread-desktop .sidebar .brand { display: none; }
+.linkread-desktop .sidebar { padding-top: 18px; }
 .linkread-desktop .theme-btn { display: none; }
 .linkread-desktop [data-reading-actions] { display: none; }
 .linkread-desktop [data-refresh-shownotes] { display: inline-flex; }
@@ -24,11 +26,13 @@
 
   const systemTheme = matchMedia("(prefers-color-scheme: dark)");
   const themeKey = "linkread-desktop-theme";
+  const validTheme = value => value === "light" || value === "sepia" || value === "dark";
   let theme = null;
   try { theme = localStorage.getItem(themeKey); } catch {}
   function applyTheme() {
-    const effectiveTheme = theme === "light" || theme === "dark" ? theme : systemTheme.matches ? "dark" : "light";
+    const effectiveTheme = validTheme(theme) ? theme : systemTheme.matches ? "dark" : "light";
     document.documentElement.dataset.theme = effectiveTheme;
+    window.linkreadSyncThemeButtons?.();
     window.parent.postMessage({ linkReadTheme: effectiveTheme }, "*");
   }
   applyTheme();
@@ -40,7 +44,7 @@
       window.parent.postMessage({ linkReadEscapeResult: { id: event.data.linkReadEscapeRequest, handled } }, "*");
       return;
     }
-    if (event.data?.linkReadCommand === "set-theme" && (event.data.theme === "light" || event.data.theme === "dark")) {
+    if (event.data?.linkReadCommand === "set-theme" && validTheme(event.data.theme)) {
       theme = event.data.theme;
       applyTheme();
       try { localStorage.setItem(themeKey, theme); } catch {}
@@ -70,7 +74,7 @@
     const key = event.key.toLowerCase();
     if (!event.isTrusted || event.defaultPrevented ||
         event.isComposing || event.keyCode === 229 || event.altKey || (key === "escape" && event.repeat) ||
-        !(key === "escape" || ((event.metaKey || event.ctrlKey) && (key === "o" || key === "," || key === "k")))) return;
+        !(key === "escape" || ((event.metaKey || event.ctrlKey) && (key === "o" || key === "," || key === "k" || key === "\\")))) return;
     event.preventDefault();
     window.parent.postMessage({ linkReadShortcut: key === "escape" ? "Escape" : key }, "*");
   });
