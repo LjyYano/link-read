@@ -105,7 +105,6 @@ export const english: Readonly<Record<string, string>> = {
   "整体流程进度（按阶段估算，不代表剩余时间）": "Progress by stage",
   "{0} · {1} 秒未收到新结果": "{0} · No new result for {1}s",
   "前一任务结束后自动开始，可继续添加链接。": "Starts when the previous task finishes. You can keep adding links.",
-  "先读原文": "Read original",
   "查看错误详情": "View error details",
   "查看处理详情": "View processing details",
   "最近处理记录": "Recent tasks",

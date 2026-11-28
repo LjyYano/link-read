@@ -38,7 +38,6 @@ type HomeProps = ArticleListProps & {
   onCancel: (id: string) => void
   onRetry: (id: string) => void
   onRemove: (id: string) => Promise<void> | void
-  onPreview?: (id: string) => void
   journalLoading?: boolean
   journalError?: string
   onRetryJournal?: () => void
@@ -73,7 +72,7 @@ export function Home({
   onPaste, nativePaste, pasting,
   toolWarning, preferencesReady = true, inputError, onSettings, onLibrary, library, error,
   onRead, onRefresh, onDelete, onRegenerate, onStateChange,
-  onPreview, journalLoading, journalError, onRetryJournal,
+  journalLoading, journalError, onRetryJournal,
   onTasks, taskSummary, resume, sourceReadiness, sourceBlocked, sourceNeedsAsr, sourceNeedsYoutubeCookies,
   youtubeCookiesConfigured = false, asrEnabled = false,
   existingArticle, existingTask, onViewExistingTask, onEdit, onExportMarkdown, focusComposerNonce = 0,
@@ -276,7 +275,7 @@ export function Home({
         <ul className="task-list">
           {currentJobs.map(task => <JobRow key={task.id} taskId={task.id} job={task.job}
             onCancel={() => onCancel(task.id)} onRetry={() => onRetry(task.id)} onRemove={() => onRemove(task.id)}
-            onPreview={onPreview ? () => onPreview(task.id) : undefined} onSettings={onSettings}
+            onSettings={onSettings}
             youtubeCookiesConfigured={youtubeCookiesConfigured} asrEnabled={asrEnabled} />)}
         </ul>
       </section>}

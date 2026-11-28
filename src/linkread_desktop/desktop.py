@@ -895,7 +895,7 @@ def main() -> int:
                         raw = load_transcript(Path(event.work_dir) / "transcript.json")
                         fields["metadata"] = _source_metadata(raw)
                         fields["previewId"] = save_preview(library, raw, source=requested_source,
-                                                           local_file=args.local_file)
+                                                           local_file=args.local_file, render_preview=False)
                     _emit("progress", **fields)
 
             requested_source = args.source if args.local_file else _video_url(args.source.strip())

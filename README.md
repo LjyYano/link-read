@@ -16,7 +16,7 @@
 1. **Install the app.** On a Mac with an M-series chip, open the downloaded DMG, drag LinkRead into Applications, and launch it.
 2. **Connect your AI provider.** Open **Settings → AI generation**. For **Custom API**, enter your provider’s OpenAI-compatible API base URL, model ID, and API key. You can also use a signed-in Codex CLI or Claude Code configured with an Anthropic API key. Choose **Save settings**.
 3. **Add something to read.** On Home, paste a YouTube or Bilibili video link, or the share link to an individual Apple Podcasts episode. You can also drop in a subtitle file (SRT, VTT, or subtitle JSON from LinkRead or Bilibili). Choose **Generate article**.
-4. **Start reading.** Once the subtitles are ready, **Read original** opens the transcript while the AI works. The finished article appears in your library. For future articles, **Settings → Language → Generated page language** lets you keep the subtitle language or choose English or Simplified Chinese.
+4. **Start reading.** Once generation finishes, the finished article appears in your library. For future articles, **Settings → Language → Generated page language** lets you keep the subtitle language or choose English or Simplified Chinese.
 
 **Try it with a 35-second example.** Open the sample on GitHub and choose **Download raw file**. Drag it into Home and choose **Generate article**. In the original transcript, press **⌘F** and search for `bell` to find both mentions of the bicycle bell. [Soundwalk.vtt](docs/examples/Soundwalk.vtt)
 

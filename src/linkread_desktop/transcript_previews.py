@@ -127,8 +127,8 @@ def load_preview(library: Path, preview_id: str) -> tuple[Path, TranscriptDocume
 
 
 def save_preview(library: Path, document: TranscriptDocument, *, source: str,
-                 local_file: bool) -> str:
-    """Publish a complete snapshot before reporting that a transcript is readable."""
+                 local_file: bool, render_preview: bool = True) -> str:
+    """Publish a complete immutable transcript snapshot for resume or preview."""
     preview_id = snapshot_id(document)
     binding = _binding(source, local_file)
     if library.is_symlink():
@@ -151,7 +151,7 @@ def save_preview(library: Path, document: TranscriptDocument, *, source: str,
             manifest["requests"].append(binding)
             manifest["requests"] = manifest["requests"][-64:]
             write_text(folder / "request.json", json.dumps(manifest, ensure_ascii=False))
-        if not (folder / "preview.html").is_file():
+        if render_preview and not (folder / "preview.html").is_file():
             write_text(folder / "preview.html", _render_preview(library, document))
     return preview_id
 

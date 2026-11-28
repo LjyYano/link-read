@@ -8,8 +8,6 @@ import { menuNavigation } from "./menu"
 import { ReadingActions, type ChangeArticleState } from "./ReadingActions"
 import { ReadingPositionBridge } from "./readingPositionBridge"
 import { ReaderEscapeBridge, readerShortcutsBlocked } from "./readerEscape"
-import type { TaskActivity } from "./taskProgress"
-import type { Job } from "./JobCard"
 import type { YoutubeCookieOptions } from "./youtubeCookies"
 import "./reader.css"
 
@@ -23,7 +21,6 @@ type PreparedReader = { status: "loading" } | { status: "ready"; revision: strin
 type ShownotesRefresh = { status: "idle" | "loading" | "empty" } | { status: "error"; message: string }
 
 export type ReaderTheme = "light" | "sepia" | "dark"
-export type PreviewTask = { id: string; status: Job["status"]; message?: string; activity?: TaskActivity; article?: Article; onOpenComplete: () => void }
 export type StandaloneSubtitlePreview = { onGenerate: () => void }
 export type ReaderToolbarSlots = {
   leading: HTMLDivElement | null
@@ -31,11 +28,10 @@ export type ReaderToolbarSlots = {
   actions: HTMLDivElement | null
 }
 
-export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onDelete, onStateChange, preview, standalonePreview,
+export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onDelete, onStateChange, standalonePreview,
   onNavigationStart, onEdit, onExportMarkdown, detailsRevision = 0, onThemeChange, onViewRegeneration, onOpenUpdated,
   youtubeCookies, forcedTheme, toolbarSlots }: {
   article: Article; onBack: () => void; onRegenerate: (article: Article) => Promise<void>; onDelete?: (id: string) => Promise<void>; onStateChange: ChangeArticleState
-  preview?: PreviewTask
   standalonePreview?: StandaloneSubtitlePreview
   backLabel?: string
   onThemeChange?: (theme: ReaderTheme) => void
@@ -446,17 +442,9 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
           onViewRegeneration()
         }}>{tr("View task")}</button>
       </div>}
-      {isPreview && <div className="reader-preview-notice" role="status" data-status={preview?.status ?? (standalonePreview ? "done" : "interrupted")}>
-        {preview?.status === "running" && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
-        <span>{preview?.status === "done" ? tr("Finished article ready")
-          : preview?.status === "running" ? tr("Original transcript · AI in progress")
-          : preview?.status === "queued" ? tr("Original transcript · AI queued")
-          : standalonePreview ? tr("Original transcript · Downloaded subtitles")
-          : tr("Original transcript · AI stopped")}</span>
-        {preview?.status === "done" && preview.article && <button className="text-button" type="button" onClick={() => void leave(preview.onOpenComplete)}>
-          {tr("View finished article")}<ArrowUpRight size={13} aria-hidden="true" />
-        </button>}
-        {standalonePreview && !preview && <>
+      {isPreview && <div className="reader-preview-notice" role="status" data-status="done">
+        <span>{tr("Original transcript · Downloaded subtitles")}</span>
+        {standalonePreview && <>
           <button className="text-button" type="button" onClick={() => void leave(standalonePreview.onGenerate)}>
             <Sparkles size={13} aria-hidden="true" />{tr("Generate article")}
           </button>

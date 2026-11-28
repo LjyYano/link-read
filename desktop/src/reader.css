@@ -247,7 +247,6 @@
 .reader-update-notice { justify-content: space-between; padding-block: 4px; }
 .reader-preview-notice > span, .reader-position-error > span { flex: 1; min-width: 0; }
 .reader-preview-notice .text-button { display: inline-flex; gap: 4px; align-items: center; flex-shrink: 0; }
-.reader-preview-notice[data-status="running"] { color: var(--accent-dark); background: var(--tint); }
 .reader-preview-notice[data-status="done"] { color: var(--success); }
 
 .completion-toast-content { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

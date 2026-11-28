@@ -19,7 +19,6 @@ export type TaskCenterProps = {
   onCancel: (id: string) => void
   onRetry: (id: string) => void
   onRemove: (id: string) => Promise<void> | void
-  onPreview?: (id: string) => void
   onOpenArticle: (article: Article) => void
   onSettings: (target?: SettingsTarget) => void
   onClearReviewed: (ids: string[]) => Promise<void> | void
@@ -30,7 +29,7 @@ export type TaskCenterProps = {
 }
 
 export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArticleId, reviewedIds, onReviewed, onClose, onCancel, onRetry, onRemove,
-  onPreview, onOpenArticle, onSettings, onClearReviewed, journalError, onRetryJournal,
+  onOpenArticle, onSettings, onClearReviewed, journalError, onRetryJournal,
   youtubeCookiesConfigured = false, asrEnabled = false }: TaskCenterProps) {
   const id = useId()
   const dialog = useRef<HTMLDialogElement>(null)
@@ -158,7 +157,7 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
   function record(task: TaskJob) {
     return <JobRow key={task.id} taskId={task.id} job={task.job} onCancel={() => onCancel(task.id)}
       onRetry={() => onRetry(task.id)} onRemove={() => onRemove(task.id)}
-      onPreview={onPreview ? () => onPreview(task.id) : undefined} onSettings={onSettings}
+      onSettings={onSettings}
       youtubeCookiesConfigured={youtubeCookiesConfigured} asrEnabled={asrEnabled} />
   }
 

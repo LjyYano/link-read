@@ -64,7 +64,7 @@ import "./source-preview.css"
 import "./experience.css"
 
 type Screen = "create" | "library" | "settings" | "reader"
-type ReadingOrigin = { screen: Exclude<Screen, "reader">; scroll: number; tasks: boolean; completedArticleId?: string; taskId?: string }
+type ReadingOrigin = { screen: Exclude<Screen, "reader">; scroll: number; tasks: boolean; completedArticleId?: string }
 type ActiveGeneration = GenerationInput & { replacementArticleId?: string; youtubeCookies?: YoutubeCookieOptions }
 type PendingConfirm = {
   title: string
@@ -339,7 +339,6 @@ function App() {
   const [detailsArticle, setDetailsArticle] = useState<Article>()
   const [exportArticle, setExportArticle] = useState<Article>()
   const [detailsRevisions, setDetailsRevisions] = useState<Record<string, number>>({})
-  const [previewTaskId, setPreviewTaskId] = useState<string>()
   const [standaloneDownload, setStandaloneDownload] = useState<DownloadedSubtitles>()
   const [completionNotice, setCompletionNotice] = useState<Article[]>([])
   const [jobs, setJobs] = useState<TaskJob[]>([])
@@ -943,7 +942,6 @@ function App() {
     taskInputs.current = inputs
     taskTimes.current = times
     changeJobs(next)
-    if (replaceId) setPreviewTaskId(current => current === replaceId ? id : current)
     let releaseSettings: (() => void) | undefined
     taskQueue.current.enqueue({
       id,
@@ -1134,7 +1132,6 @@ function App() {
     taskInputs.current.delete(id)
     taskTimes.current.delete(id)
     changeJobs(current => current.filter(task => task.id !== id))
-    setPreviewTaskId(current => current === id ? undefined : current)
     setReviewedTasks(current => current.includes(id) ? saveReviewedTasks(current.filter(value => value !== id)) : current)
   }
 
@@ -1153,7 +1150,6 @@ function App() {
     const removed = new Set([...selected].filter(id => stillEligible.has(id)))
     for (const id of removed) { taskInputs.current.delete(id); taskTimes.current.delete(id) }
     changeJobs(current => current.filter(task => !removed.has(task.id)))
-    setPreviewTaskId(current => current && removed.has(current) ? undefined : current)
     setReviewedTasks(current => saveReviewedTasks(current.filter(id => !removed.has(id))))
   }
 
@@ -1285,10 +1281,10 @@ function App() {
     } finally { submitting.current = false }
   }
 
-  function rememberReadingOrigin(completedArticleId?: string, taskId?: string) {
+  function rememberReadingOrigin(completedArticleId?: string) {
     if (screen === "reader") return
     const scroll = workspace.current?.scrollTop ?? 0
-    readingOrigin.current = { screen, scroll, tasks: taskCenterOpen, completedArticleId, taskId }
+    readingOrigin.current = { screen, scroll, tasks: taskCenterOpen, completedArticleId }
     if (screen === "library") shelfScroll.current = scroll
   }
 
@@ -1299,7 +1295,7 @@ function App() {
     if (origin.screen === "settings") setSettingsTarget(undefined)
     setScreen(origin.screen)
     if (origin.tasks) {
-      setTaskCenterFocusId(origin.taskId)
+      setTaskCenterFocusId(undefined)
       setTaskCenterCompletedId(origin.completedArticleId)
       setTaskCenterOpen(true)
     }
@@ -1324,40 +1320,10 @@ function App() {
         setTaskCenterOpen(false)
         setOpenedCompletion(latestCompletion(selected.id)?.id)
         if (screen === "reader" && article?.id === selected.id) setReaderSession(current => current + 1)
-        setPreviewTaskId(undefined)
         setStandaloneDownload(undefined)
         setCompletionNotice(current => current.filter(item => item.id !== selected.id))
         setArticle(articleStateChanges.current.reconcile([selected], 0)[0])
         setRecentArticles(current => rememberArticle(current, selected.id))
-        setDragging(false)
-        setScreen("reader")
-      })()
-    })
-  }
-
-  async function readPreview(id: string) {
-    const completed = jobsRef.current.find(task => task.id === id)
-    if (completed?.job.status === "done") { void read(completed.job.article); return }
-    runWithLeaveGuard(() => {
-      void (async () => {
-        const isCurrent = beginNavigation()
-        if (screen === "reader") await flushReadingPositions()
-        if (!isCurrent()) return
-        const task = jobsRef.current.find(t => t.id === id)
-        if (!task) return
-        if (task.job.status === "done") { void read(task.job.article, true); return }
-        const previewId = task.job.previewId
-        if (!previewId) return
-        rememberReadingOrigin(undefined, taskCenterOpen ? id : undefined)
-        setTaskCenterOpen(false)
-        const identity = { ...taskInputs.current.get(id)?.identity, ...task.job }
-        setPreviewTaskId(id)
-        setStandaloneDownload(undefined)
-        setArticle({ id: "preview-" + previewId, previewId, title: identity.title || tr("Transcript preview"),
-          hasAnalysis: false, category: "", platform: identity.platform || "local", updatedAt: Date.now(),
-          sourceUrl: identity.sourceUrl ?? null, author: identity.author ?? null, publishedAt: identity.publishedAt ?? null,
-          durationMs: identity.durationMs ?? null, thumbnailUrl: identity.thumbnailUrl ?? null,
-        })
         setDragging(false)
         setScreen("reader")
       })()
@@ -1372,7 +1338,6 @@ function App() {
         if (!isCurrent()) return
         rememberReadingOrigin()
         setTaskCenterOpen(false)
-        setPreviewTaskId(undefined)
         setStandaloneDownload(downloaded)
         setArticle({
           id: "preview-" + downloaded.previewId,
@@ -1458,20 +1423,12 @@ function App() {
     onEdit: (selected: Article) => { void showArticleDialog(selected, "details") },
     onExportMarkdown: (selected: Article) => { void showArticleDialog(selected, "export") },
   }
-  const previewJob = previewTaskId ? jobs.find(task => task.id === previewTaskId)?.job : undefined
-  const preview = article?.previewId && previewJob ? {
-    id: article.previewId, status: previewJob.status,
-    message: previewJob.status === "done" ? undefined : previewJob.message,
-    activity: previewJob.status === "done" ? undefined : previewJob.activity,
-    article: previewJob.status === "done" ? previewJob.article : undefined,
-    onOpenComplete: () => { if (previewJob.status === "done") void read(previewJob.article, true) },
-  } : undefined
   const readerTask = screen === "reader" && article && !article.previewId
     ? jobs.find(task => taskInputs.current.get(task.id)?.replacementArticleId === article.id
       && ["queued", "running", "cancelling"].includes(task.job.status)) : undefined
   const completion = screen === "reader" && article && !article.previewId ? latestCompletion(article.id) : undefined
   const readerUpdate = completion && completion.id !== openedCompletion ? completion.article : undefined
-  const suppressedId = screen === "reader" ? (preview?.article ?? readerUpdate)?.id : undefined
+  const suppressedId = screen === "reader" ? readerUpdate?.id : undefined
   const visibleCompletions = completionNotice.filter(item => item.id !== suppressedId)
   const readyArticle = visibleCompletions[0]
   const origin = readingOrigin.current
@@ -1530,7 +1487,7 @@ function App() {
             reviewedTaskIds={reviewedTasks} onDismissTaskFailure={id => markReviewed([id])}
             onCancel={cancel} onRetry={retry} onRemove={removeJob} toolWarning={toolWarning}
             preferencesReady={preferencesReady} inputError={inputError}
-            onPreview={readPreview} journalLoading={journalLoading} journalError={journalError} onRetryJournal={retryJournal}
+            journalLoading={journalLoading} journalError={journalError} onRetryJournal={retryJournal}
             onTasks={showTasks} taskSummary={{ queued: groupedTasks.queued.length, attention: groupedTasks.attention.length, unread: unreadTaskIds.length }} resume={resume}
             existingArticle={existingArticle} existingTask={Boolean(existingTask)}
             onViewExistingTask={() => openTasks(existingTask?.id)}
@@ -1563,7 +1520,7 @@ function App() {
             onBack={() => navigateTo(previousScreen)} />
         )}
         {screen === "reader" && article && <Reader key={`${article.id}:${readerSession}`} article={article} onBack={returnFromReader} backLabel={backLabel}
-          onRegenerate={regenerate} onDelete={removeArticle} onStateChange={changeArticleState} preview={preview}
+          onRegenerate={regenerate} onDelete={removeArticle} onStateChange={changeArticleState}
           standalonePreview={standaloneDownload && article.previewId === standaloneDownload.previewId
             ? { onGenerate: () => { void start(standaloneDownload) } } : undefined}
           onNavigationStart={beginNavigation}
@@ -1596,7 +1553,6 @@ function App() {
         youtubeCookiesConfigured={youtubeCookiesConfigured}
         asrEnabled={preferences.asr.enabled}
         onClose={() => setTaskCenterOpen(false)} onCancel={cancel} onRetry={retry} onRemove={removeJob}
-        onPreview={id => void readPreview(id)}
         onOpenArticle={selected => void read(selected)}
         onSettings={target => { setTaskCenterOpen(false); void showSettings(target) }} onClearReviewed={clearReviewed}
         journalError={journalError} onRetryJournal={retryJournal} />}
