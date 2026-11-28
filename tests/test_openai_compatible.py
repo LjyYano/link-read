@@ -277,6 +277,7 @@ def test_subprocess_providers_and_ffmpeg_never_inherit_linkread_secret_tokens(mo
     monkeypatch.setenv("LINKREAD_API_TOKEN", "chat-secret")
     monkeypatch.setenv("LINKREAD_ASR_TOKEN", "asr-secret")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "claude-secret")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "claude-auth-secret")
 
     seen_envs = {}
 
@@ -296,6 +297,7 @@ def test_subprocess_providers_and_ffmpeg_never_inherit_linkread_secret_tokens(mo
     assert "LINKREAD_API_TOKEN" not in seen_envs["codex"]
     assert "LINKREAD_ASR_TOKEN" not in seen_envs["codex"]
     assert "ANTHROPIC_API_KEY" not in seen_envs["codex"]
+    assert "ANTHROPIC_AUTH_TOKEN" not in seen_envs["codex"]
 
     monkeypatch.setattr("linkread_desktop.ai.provider.subprocess.run", fake_claude_run)
     assert ClaudeProvider().generate("hi", {"type": "object"}, timeout_seconds=10) == {"ok": True}
@@ -316,3 +318,39 @@ def test_subprocess_providers_and_ffmpeg_never_inherit_linkread_secret_tokens(mo
     assert "LINKREAD_API_TOKEN" not in seen_envs["ffmpeg"]
     assert "LINKREAD_ASR_TOKEN" not in seen_envs["ffmpeg"]
     assert "ANTHROPIC_API_KEY" not in seen_envs["ffmpeg"]
+    assert "ANTHROPIC_AUTH_TOKEN" not in seen_envs["ffmpeg"]
+
+
+def test_claude_provider_inherits_cc_switch_settings_env_in_bare_mode(monkeypatch, tmp_path):
+    import json
+    import subprocess
+    from linkread_desktop.ai.provider import ClaudeProvider
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "settings.json").write_text(json.dumps({
+        "env": {
+            "ANTHROPIC_AUTH_TOKEN": "cc-switch-token",
+            "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+            "ANTHROPIC_MODEL": "glm-5.4[1m]",
+            "UNRELATED_SECRET": "must-not-be-copied",
+        }
+    }), encoding="utf-8")
+
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["cmd"] = cmd
+        seen["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"structured_output": {"ok": true}}', stderr="")
+
+    monkeypatch.setattr("linkread_desktop.ai.provider.shutil.which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr("linkread_desktop.ai.provider.subprocess.run", fake_run)
+    assert ClaudeProvider().generate("hi", {"type": "object"}, timeout_seconds=10) == {"ok": True}
+    assert seen["cmd"][:3] == ["claude", "--bare", "-p"]
+    assert seen["env"]["ANTHROPIC_AUTH_TOKEN"] == "cc-switch-token"
+    assert seen["env"]["ANTHROPIC_BASE_URL"] == "https://open.bigmodel.cn/api/anthropic"
+    assert seen["env"]["ANTHROPIC_MODEL"] == "glm-5.4[1m]"
+    assert "UNRELATED_SECRET" not in seen["env"]

@@ -764,6 +764,7 @@ pub fn configure_generation(
         executable,
         base_url,
         model,
+        None,
         replace,
         local_file,
         asr,
@@ -781,6 +782,7 @@ pub fn configure_generation_with_resume(
     executable: &str,
     base_url: Option<&str>,
     model: Option<&str>,
+    reasoning_effort: Option<&str>,
     replace: bool,
     local_file: bool,
     asr: Option<&AsrOptions>,
@@ -860,6 +862,19 @@ pub fn configure_generation_with_resume(
         if !resolved_token.is_empty() {
             command.env("LINKREAD_API_TOKEN", resolved_token);
         }
+    } else {
+        if let Some(model) = model.map(str::trim).filter(|m| !m.is_empty()) {
+            if !crate::cli_models::valid_cli_model(model) {
+                return Err("请在设置中填写有效的模型名称".into());
+            }
+            command.args(["--model", model]);
+        }
+        if let Some(effort) = reasoning_effort.map(str::trim).filter(|e| !e.is_empty()) {
+            if !crate::cli_models::valid_reasoning_effort(provider, effort) {
+                return Err("不支持的思考深度设置，请在设置中重新选择".into());
+            }
+            command.args(["--reasoning-effort", effort]);
+        }
     }
     if let Some(path) = tool {
         paths.insert(
@@ -883,6 +898,7 @@ pub fn generation_command(
     executable: &str,
     base_url: Option<&str>,
     model: Option<&str>,
+    reasoning_effort: Option<&str>,
     replace: bool,
     local_file: bool,
     asr: Option<&AsrOptions>,
@@ -916,6 +932,7 @@ pub fn generation_command(
         executable,
         base_url,
         model,
+        reasoning_effort,
         replace,
         local_file,
         asr,

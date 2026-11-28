@@ -332,3 +332,54 @@ def test_codex_uses_low_reasoning_effort_only_for_mechanical_stages(monkeypatch)
     assert 'model_reasoning_effort="low"' not in seen_cmds[0]
     assert ["-c", 'model_reasoning_effort="low"'] == seen_cmds[1][-3:-1]
     assert ["-c", 'model_reasoning_effort="low"'] == seen_cmds[2][-3:-1]
+
+
+def test_explicit_codex_and_claude_model_and_reasoning_effort(monkeypatch):
+    from linkread_desktop.ai.checkpoints import provider_identity
+    from linkread_desktop.ai.provider import ClaudeProvider, CodexProvider, make_provider
+    import subprocess
+    from pathlib import Path
+
+    seen_cmds = []
+    monkeypatch.setattr("linkread_desktop.ai.provider.shutil.which", lambda name: "/mock/" + name)
+
+    def fake_run(cmd, **kwargs):
+        seen_cmds.append(cmd)
+        if cmd[0] == "codex":
+            Path(cmd[cmd.index("--output-last-message") + 1]).write_text('{"ok": true}', encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({"structured_output": {"ok": True}}), "")
+
+    monkeypatch.setattr("linkread_desktop.ai.provider.subprocess.run", fake_run)
+
+    codex = make_provider("codex", model="gpt-6.2-sol", reasoning_effort="xhigh")
+    assert provider_identity(codex)["model"] == "gpt-6.2-sol"
+    assert provider_identity(codex)["reasoning_effort"] == "xhigh"
+    assert "reasoning_effort" not in provider_identity(CodexProvider())
+    bounded_codex = RunProvider(codex, 2)
+    bounded_codex.execute("p1", {}, lambda v: v, timeout_seconds=30, stage="analysis")
+    bounded_codex.execute("p2", {}, lambda v: v, timeout_seconds=30, stage="polish")
+    for cmd in seen_cmds[:2]:
+        assert ["--model", "gpt-6.2-sol"] == cmd[cmd.index("--model"):cmd.index("--model") + 2]
+        assert ["-c", 'model_reasoning_effort="xhigh"'] == cmd[-3:-1]
+
+    claude = make_provider("claude", model="opus", reasoning_effort="high")
+    assert provider_identity(claude)["model"] == "opus"
+    assert provider_identity(claude)["reasoning_effort"] == "high"
+    bounded_claude = RunProvider(claude, 2)
+    bounded_claude.execute("p3", {}, lambda v: v, timeout_seconds=30, stage="analysis")
+    claude_cmd = seen_cmds[2]
+    assert claude_cmd[:3] == ["claude", "--bare", "-p"]
+    assert ["--model", "opus"] == claude_cmd[claude_cmd.index("--model"):claude_cmd.index("--model") + 2]
+    assert ["--effort", "high"] == claude_cmd[claude_cmd.index("--effort"):claude_cmd.index("--effort") + 2]
+
+    default_claude = ClaudeProvider()
+    default_claude.generate("p4", {}, timeout_seconds=30)
+    assert "--effort" not in seen_cmds[3]
+
+    with pytest.raises(ProviderError) as bad_model:
+        CodexProvider(model="--bad-flag")
+    assert bad_model.value.code == "configuration_invalid"
+    with pytest.raises(ProviderError) as bad_effort:
+        ClaudeProvider(reasoning_effort="ultra")
+    assert bad_effort.value.code == "configuration_invalid"

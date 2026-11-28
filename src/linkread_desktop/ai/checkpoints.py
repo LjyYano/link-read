@@ -12,10 +12,14 @@ from ..storage import write_text
 
 
 def provider_identity(provider):
-    return {"provider": getattr(provider, "name", "codex"),
-            "model": getattr(provider, "model", None),
-            "endpoint": getattr(provider, "base_url", None),
-            "executable": getattr(provider, "executable", None)}
+    identity = {"provider": getattr(provider, "name", "codex"),
+                "model": getattr(provider, "model", None),
+                "endpoint": getattr(provider, "base_url", None),
+                "executable": getattr(provider, "executable", None)}
+    effort = getattr(provider, "reasoning_effort", None)
+    if effort:
+        identity["reasoning_effort"] = effort
+    return identity
 
 
 class RunProvider:
@@ -90,7 +94,10 @@ class RunProvider:
                 raise LinkReadError("生成已取消", code="cancelled")
             with error_context(stage):
                 extra = {}
-                if stage in {"polish", "translation"} and getattr(self.provider, "supports_reasoning_effort", False):
+                configured_effort = getattr(self.provider, "reasoning_effort", None)
+                if (stage in {"polish", "translation"}
+                        and not configured_effort
+                        and getattr(self.provider, "supports_reasoning_effort", False)):
                     extra["reasoning_effort"] = "low"
                 if cancel is not None and getattr(self.provider, "supports_cancel", False):
                     extra["cancel"] = cancel

@@ -193,3 +193,30 @@ test("dormant invalid API or ASR settings do not poison task journal creation or
   const release = await gate.admit(spec)
   release()
 })
+
+test("Codex and Claude model and reasoning effort flow into task settings and gate admission", async () => {
+  const { saved, gate } = setup()
+  saved.preferences.provider = "codex"
+  saved.preferences.cli = {
+    codex: { model: "gpt-6.2-sol", reasoningEffort: "xhigh" },
+    claude: { model: "opus", reasoningEffort: "high" },
+  }
+  const settings = taskSettingsForGeneration(saved.preferences, { isYoutube: false, pageLanguage: "original" })
+  assert.equal(settings.model, "gpt-6.2-sol")
+  assert.equal(settings.reasoningEffort, "xhigh")
+  const spec = {
+    ...settings,
+    input: "https://www.bilibili.com/video/BV1rxqmBhE91?p=1",
+    localFile: false,
+    sourceKey: "bilibili-BV1rxqmBhE91-p1",
+    replace: false,
+    identity: {},
+  }
+  const snap = taskSnapshot("task_codex_effort", spec, { status: "queued", message: "waiting" }, 1000, 1000)
+  assert.equal(parseTaskJournal({ version: 1, tasks: [snap] }).tasks[0].settings.reasoningEffort, "xhigh")
+  const release = await gate.admit(spec)
+  release()
+
+  saved.preferences.cli.codex.reasoningEffort = "low"
+  await assert.rejects(gate.admit(spec), { code: "settings_changed" })
+})

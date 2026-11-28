@@ -7,7 +7,7 @@ import { normalizeVideoLink } from "./videoLinks.ts"
 import { defaultYoutubeCookies, type YoutubeCookieOptions } from "./youtubeCookies.ts"
 import { effectiveAsrForSource, hasYoutubeCookiesConfigured } from "./youtubeGuidance.ts"
 
-type SettingsSnapshot = Pick<GenerationInput, "provider" | "baseUrl" | "model" | "asr"> & {
+type SettingsSnapshot = Pick<GenerationInput, "provider" | "baseUrl" | "model" | "reasoningEffort" | "asr"> & {
   input?: string
   localFile?: boolean
   youtubeCookies?: YoutubeCookieOptions
@@ -52,11 +52,13 @@ export function taskSettingsForGeneration(
   const provider = preferences.provider
   const hasCookies = hasYoutubeCookiesConfigured(preferences.youtubeCookies)
   const effectiveAsr = effectiveAsrForSource(preferences.asr, Boolean(options.isYoutube), hasCookies)
+  const cli = provider === "api" ? undefined : preferences.cli?.[provider]
   return {
     provider,
     executable: provider === "api" ? "" : preferences.paths[provider],
     baseUrl: provider === "api" ? preferences.api.baseUrl : "",
-    model: provider === "api" ? preferences.api.model : "",
+    model: provider === "api" ? preferences.api.model : (cli?.model ?? ""),
+    ...(cli?.reasoningEffort ? { reasoningEffort: cli.reasoningEffort } : {}),
     asr: sanitizeDormantAsr(effectiveAsr),
     ...(options.pageLanguage !== undefined ? { pageLanguage: options.pageLanguage } : {}),
   }
@@ -64,8 +66,12 @@ export function taskSettingsForGeneration(
 
 function matchesSavedSettings(input: SettingsSnapshot, saved: Preferences): boolean {
   if (input.provider !== saved.provider) return false
-  if (saved.provider === "api" && (input.baseUrl !== saved.api.baseUrl || input.model !== saved.api.model)) {
-    return false
+  if (saved.provider === "api") {
+    if (input.baseUrl !== saved.api.baseUrl || input.model !== saved.api.model) return false
+  } else {
+    const cli = saved.cli?.[saved.provider]
+    if (input.model !== (cli?.model ?? "")) return false
+    if ((input.reasoningEffort ?? "") !== (cli?.reasoningEffort ?? "")) return false
   }
   const youtube = isYoutubeSource(input.input, input.localFile)
   if (youtube && input.youtubeCookies !== undefined && !sameYoutubeCookies(input.youtubeCookies, saved.youtubeCookies)) {

@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from "react"
 import { ArrowLeft, FolderOpen, LoaderCircle } from "lucide-react"
 import {
-  checkTool, deleteApiToken, deleteAsrToken, loadApiToken, loadAsrToken, pickExecutable, providerNames,
+  checkTool, deleteApiToken, deleteAsrToken, listCliModels, loadApiToken, loadAsrToken, pickExecutable, providerNames,
   saveApiToken, saveAsrToken, testApiConnection, type Provider, type ToolStatus,
 } from "./api"
 import { AsrSettingsPanel } from "./AsrSettingsPanel"
+import { CliModelPicker } from "./CliModelPicker"
+import { builtinCliCatalog, defaultCliPreferences, type CliModelCatalog } from "./cliModels"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { ConnectionRevision } from "./connectionState"
 import { tr, type LanguageSettings } from "./language.ts"
@@ -58,6 +60,10 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string }>()
   const [toolInfo, setToolInfo] = useState<ToolStatus>()
   const [toolError, setToolError] = useState("")
+  const [cliCatalogs, setCliCatalogs] = useState<{ codex: CliModelCatalog; claude: CliModelCatalog }>(() => ({
+    codex: builtinCliCatalog("codex"),
+    claude: builtinCliCatalog("claude"),
+  }))
   const [error, setError] = useState("")
   const [savedNotice, setSavedNotice] = useState(false)
   const [confirmClearKind, setConfirmClearKind] = useState<"apiToken" | "asrToken">()
@@ -77,6 +83,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   const latest = useRef({ dirty, saving, asrTesting, onBack })
   latest.current = { dirty, saving, asrTesting, onBack }
   const { provider, paths, api, asr } = draft.preferences
+  const cliSettings = draft.preferences.cli ?? defaultCliPreferences()
   const youtubeCookies = draft.preferences.youtubeCookies ?? defaultYoutubeCookies
   const disabled = loading || saving || Boolean(loadError)
   const pendingTarget = useRef(target)
@@ -179,6 +186,19 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
     }, 200)
     return () => { active = false; window.clearTimeout(timer) }
   }, [provider, paths.codex, paths.claude])
+
+  useEffect(() => {
+    if (provider === "api") return
+    let active = true
+    listCliModels(provider).then(
+      catalog => {
+        if (!active || !catalog?.models?.length) return
+        setCliCatalogs(current => ({ ...current, [provider]: catalog }))
+      },
+      () => { /* Keep builtin fallback catalog when native cache lookup is unavailable. */ },
+    )
+    return () => { active = false }
+  }, [provider])
 
   async function readKeys(preserveDraft: boolean) {
     const revision = ++keyLoadRevision.current
@@ -421,6 +441,28 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
             <span className="sr-only" role="status">{currentTestResult?.ok ? tr("已连接") : ""}</span>
             {currentTestResult && !currentTestResult.ok && <p className="settings-test-error" role="alert">{currentTestResult.message}</p>}
           </> : <>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor={`${provider}-model`}>{tr("模型")}</label>
+              <div className="settings-field-control">
+                <CliModelPicker
+                  id={`${provider}-model`}
+                  provider={provider}
+                  catalog={cliCatalogs[provider]}
+                  value={cliSettings[provider]}
+                  disabled={disabled}
+                  onChange={next => update(current => {
+                    const existingCli = current.preferences.cli ?? defaultCliPreferences()
+                    return {
+                      ...current,
+                      preferences: {
+                        ...current.preferences,
+                        cli: { ...existingCli, [provider]: next },
+                      },
+                    }
+                  })}
+                />
+              </div>
+            </div>
             <div className="settings-field">
               <label className="settings-label" htmlFor={`${provider}-path`}>{tr("程序路径")}</label>
               <div className="settings-field-control">

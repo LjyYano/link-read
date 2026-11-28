@@ -1,6 +1,7 @@
 import { tr, locale, localizedDetail, translateDetail, type PageLanguage, type Locale } from "./language.ts"
 import { Channel, invoke as invokeNative, type InvokeArgs } from "@tauri-apps/api/core"
 import type { AsrOptions } from "./asrSettings"
+import type { CliModelCatalog, CliProvider, CliReasoningEffort } from "./cliModels"
 import type { TaskJournal } from "./taskJournal"
 import type { YoutubeCookieOptions } from "./youtubeCookies"
 
@@ -115,11 +116,13 @@ export function generateArticle(
   resumePreview?: string,
   pageLanguage: PageLanguage = "original",
   youtubeCookies?: YoutubeCookieOptions,
+  reasoningEffort?: CliReasoningEffort,
 ) {
   const progress = new Channel<Progress>(onProgress)
   const credentialsRead = new Channel<null>(onCredentialsRead)
   return invoke<Article>("generate", { source, provider, executable, progress, requestId, localFile, replace, baseUrl, model, asr,
     resumePreview, pageLanguage, uiLanguage: locale(), credentialsRead,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(youtubeCookies && youtubeCookies.mode !== "none" ? { youtubeCookies } : {}) })
 }
 
@@ -127,6 +130,8 @@ export const cancelGeneration = (requestId: string) => invoke("cancel_generation
 export const listArticles = () => invoke<Library>("list_articles")
 export const checkTool = (provider: Provider, executable: string) =>
   invoke<ToolStatus>("check_tool", { provider, executable })
+export const listCliModels = (provider: CliProvider) =>
+  invoke<CliModelCatalog>("list_cli_models", { provider })
 export const exportArticle = (id: string, format: ExportFormat, options?: MarkdownExportOptions) =>
   invoke<boolean>("export_article", { id, format, uiLanguage: locale(), ...(options ? { options } : {}) })
 export const exportSubtitles = (id: string, format: SubtitleExportFormat, preview = false) =>

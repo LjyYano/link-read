@@ -15,6 +15,7 @@ import {
 import { AppUpdateDialog } from "./AppUpdateDialog"
 import { ArticleDetailsDialog } from "./ArticleDetailsDialog"
 import { defaultAsr, loadAsrOptions } from "./asrSettings"
+import { defaultCliPreferences, loadCliPreferences } from "./cliModels"
 import { Bookshelf } from "./BookshelfSection"
 import { ConfirmDialog } from "./ConfirmDialog"
 import { mergeArticleMetadata } from "./coverSource"
@@ -83,6 +84,7 @@ function defaultPreferences(): Preferences {
   return {
     provider: "codex",
     paths: { codex: "", claude: "" },
+    cli: defaultCliPreferences(),
     api: { baseUrl: "", model: "" },
     asr: { ...defaultAsr },
     youtubeCookies: { ...defaultYoutubeCookies },
@@ -102,6 +104,7 @@ function normalizePreferencesObject(raw: unknown): Preferences {
       codex: typeof paths?.codex === "string" ? paths.codex : "",
       claude: typeof paths?.claude === "string" ? paths.claude : "",
     },
+    cli: loadCliPreferences(saved.cli),
     api: {
       baseUrl: typeof api?.baseUrl === "string" ? api.baseUrl : "",
       model: typeof api?.model === "string" ? api.model : "",
@@ -911,7 +914,7 @@ function App() {
           spec.identity = mergeArticleMetadata(spec.identity, event.metadata)
           if (event.previewId) spec.previewId = event.previewId
           updateTask(id, job => updateJob(job, event) ?? job)
-        }, () => releaseSettings?.(), id, spec.localFile, spec.replace, spec.baseUrl, spec.model, spec.asr, spec.previewId, spec.pageLanguage, spec.youtubeCookies),
+        }, () => releaseSettings?.(), id, spec.localFile, spec.replace, spec.baseUrl, spec.model, spec.asr, spec.previewId, spec.pageLanguage, spec.youtubeCookies, spec.reasoningEffort),
       onSuccess: generated => {
         if (!spec.localFile) forgetSourceReadiness(spec.input)
         updateTask(id, () => ({ status: "done", article: generated }))

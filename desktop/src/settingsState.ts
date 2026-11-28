@@ -1,11 +1,16 @@
 import { tr } from "./language.ts"
 import type { Provider } from "./api"
 import type { AsrOptions } from "./asrSettings"
+import {
+  defaultCliPreferences, isValidCliModel, isValidReasoningEffort,
+  type CliModelSettings, type CliPreferences, type CliProvider, type CliReasoningEffort,
+} from "./cliModels.ts"
 import { isSupportedYoutubeBrowser, type YoutubeCookieOptions } from "./youtubeCookies.ts"
 
 export type Preferences = {
   provider: Provider
   paths: { codex: string; claude: string }
+  cli?: CliPreferences
   api: { baseUrl: string; model: string }
   asr: AsrOptions
   youtubeCookies?: YoutubeCookieOptions
@@ -13,6 +18,7 @@ export type Preferences = {
 
 export type SettingsDraft = { preferences: Preferences; apiToken: string; asrToken: string }
 export type SettingsField = "provider" | "codex-path" | "claude-path"
+  | "codex-model" | "claude-model" | "codex-effort" | "claude-effort"
   | "api-url" | "api-model" | "api-token" | "asr-token" | "asr-url" | "asr-model"
   | "asr-max-minutes" | "asr-chunk-minutes" | "ffmpeg-path"
   | "youtube-cookie-mode" | "youtube-cookie-browser" | "youtube-cookie-file"
@@ -63,11 +69,32 @@ function normalizedYoutubeCookies(value: YoutubeCookieOptions): YoutubeCookieOpt
   }
 }
 
+function normalizedCliEntry(value?: Partial<CliModelSettings>): CliModelSettings {
+  return {
+    model: clean(value?.model ?? ""),
+    reasoningEffort: clean(value?.reasoningEffort ?? "").toLowerCase() as CliReasoningEffort,
+  }
+}
+
+function normalizedCli(value?: Partial<CliPreferences>): CliPreferences {
+  const fallback = defaultCliPreferences()
+  return {
+    codex: normalizedCliEntry(value?.codex ?? fallback.codex),
+    claude: normalizedCliEntry(value?.claude ?? fallback.claude),
+  }
+}
+
+function hasCliValues(value: CliPreferences): boolean {
+  return Boolean(value.codex.model || value.codex.reasoningEffort || value.claude.model || value.claude.reasoningEffort)
+}
+
 export function normalizeSettingsDraft(value: SettingsDraft): SettingsDraft {
+  const cli = normalizedCli(value.preferences.cli)
   return {
     preferences: {
       provider: value.preferences.provider,
       paths: { codex: clean(value.preferences.paths.codex), claude: clean(value.preferences.paths.claude) },
+      ...(value.preferences.cli !== undefined || hasCliValues(cli) ? { cli } : {}),
       api: { baseUrl: cleanUrl(value.preferences.api.baseUrl), model: clean(value.preferences.api.model) },
       asr: normalizedAsr(value.preferences.asr),
       ...(value.preferences.youtubeCookies !== undefined
@@ -78,8 +105,25 @@ export function normalizeSettingsDraft(value: SettingsDraft): SettingsDraft {
   }
 }
 
+function canonicalDraftForComparison(value: SettingsDraft): SettingsDraft {
+  const normalized = normalizeSettingsDraft(value)
+  const prefs = normalized.preferences
+  return {
+    preferences: {
+      provider: prefs.provider,
+      paths: prefs.paths,
+      cli: normalizedCli(prefs.cli),
+      api: prefs.api,
+      asr: prefs.asr,
+      ...(prefs.youtubeCookies !== undefined ? { youtubeCookies: prefs.youtubeCookies } : {}),
+    },
+    apiToken: normalized.apiToken,
+    asrToken: normalized.asrToken,
+  }
+}
+
 export function settingsDraftEqual(a: SettingsDraft, b: SettingsDraft): boolean {
-  return JSON.stringify(normalizeSettingsDraft(a)) === JSON.stringify(normalizeSettingsDraft(b))
+  return JSON.stringify(canonicalDraftForComparison(a)) === JSON.stringify(canonicalDraftForComparison(b))
 }
 
 function validateToken(value: string, field: "api-token" | "asr-token", required: boolean) {
@@ -154,6 +198,15 @@ export function validateAsrConfiguration(value: AsrOptions, token: string): AsrO
   return asr
 }
 
+function validateCliConfiguration(provider: CliProvider, entry: CliModelSettings) {
+  if (entry.model && !isValidCliModel(entry.model)) {
+    throw new SettingsValidationError(`${provider}-model`, tr("请填写有效的模型名称（最多 256 字节）"))
+  }
+  if (!isValidReasoningEffort(provider, entry.reasoningEffort)) {
+    throw new SettingsValidationError(`${provider}-effort`, tr("请选择有效的思考深度"))
+  }
+}
+
 /** Validate the complete draft before any credential or preference is written. */
 export function validateSettingsDraft(value: SettingsDraft): SettingsDraft {
   const next = normalizeSettingsDraft(value)
@@ -163,6 +216,8 @@ export function validateSettingsDraft(value: SettingsDraft): SettingsDraft {
   }
   if (preferences.provider !== "api") {
     validatePath(preferences.paths[preferences.provider], `${preferences.provider}-path`)
+    const cli = normalizedCli(preferences.cli)
+    validateCliConfiguration(preferences.provider, cli[preferences.provider])
   }
   validatePath(preferences.asr.ffmpegPath, "ffmpeg-path")
   // Even dormant credentials are written when explicitly changed, so validate

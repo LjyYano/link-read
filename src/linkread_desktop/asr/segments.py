@@ -105,7 +105,7 @@ def split_audio(audio: Path, folder: Path, *, minutes: int, duration_ms: int, pr
         stage = Path(tmp)
         ffmpeg_env = {
             key: value for key, value in os.environ.items()
-            if key not in {"LINKREAD_API_TOKEN", "LINKREAD_ASR_TOKEN", "ANTHROPIC_API_KEY"}
+            if key not in {"LINKREAD_API_TOKEN", "LINKREAD_ASR_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
         }
         try:
             subprocess.run([

@@ -187,10 +187,15 @@ pub fn validate_journal(value: &Value) -> Result<()> {
         let settings = &task["settings"];
         if !fields(
             settings,
-            &["provider", "executable", "baseUrl", "model", "asr", "pageLanguage"],
+            &["provider", "executable", "baseUrl", "model", "reasoningEffort", "asr", "pageLanguage"],
             &["provider", "executable", "baseUrl", "model", "asr"],
         ) || (settings.get("pageLanguage").is_some()
             && !choice(&settings["pageLanguage"], &["original", "zh-CN", "en"]))
+            || (settings.get("reasoningEffort").is_some()
+                && !choice(
+                    &settings["reasoningEffort"],
+                    &["", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+                ))
             || !choice(&settings["provider"], &["codex", "claude", "api"])
             || settings["executable"]
                 .as_str()
@@ -364,7 +369,7 @@ pub fn validate_preferences(value: &Value) -> Result<()> {
         if !prefs.is_null() {
             if !fields(
                 prefs,
-                &["provider", "paths", "api", "asr", "youtubeCookies"],
+                &["provider", "paths", "cli", "api", "asr", "youtubeCookies"],
                 &["provider", "paths", "api", "asr"],
             ) || !choice(&prefs["provider"], &["codex", "claude", "api"])
             {
@@ -376,6 +381,23 @@ pub fn validate_preferences(value: &Value) -> Result<()> {
                 || !text(&paths["claude"], 4096)
             {
                 return Err(invalid());
+            }
+            if let Some(cli) = prefs.get("cli") {
+                if !fields(cli, &["codex", "claude"], &["codex", "claude"]) {
+                    return Err(invalid());
+                }
+                for key in ["codex", "claude"] {
+                    let entry = &cli[key];
+                    if !fields(entry, &["model", "reasoningEffort"], &["model", "reasoningEffort"])
+                        || !text(&entry["model"], 256)
+                        || !choice(
+                            &entry["reasoningEffort"],
+                            &["", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+                        )
+                    {
+                        return Err(invalid());
+                    }
+                }
             }
             let api = &prefs["api"];
             if !fields(api, &["baseUrl", "model"], &["baseUrl", "model"])
@@ -745,5 +767,33 @@ mod tests {
         save_preferences(dir.path(), &prefs).unwrap();
         assert_eq!(load_preferences(dir.path()).unwrap(), prefs);
         assert!(save_preferences(dir.path(), &json!({"version": 1, "apiToken": "secret"})).is_err());
+
+        let mut with_cli = prefs.clone();
+        with_cli["preferences"]["cli"] = json!({
+            "codex": {"model": "gpt-6.2-sol", "reasoningEffort": "xhigh"},
+            "claude": {"model": "opus", "reasoningEffort": "high"}
+        });
+        save_preferences(dir.path(), &with_cli).unwrap();
+        assert_eq!(load_preferences(dir.path()).unwrap(), with_cli);
+
+        let mut bad_cli = with_cli.clone();
+        bad_cli["preferences"]["cli"]["codex"]["reasoningEffort"] = json!("extreme");
+        assert!(save_preferences(dir.path(), &bad_cli).is_err());
+    }
+    #[test]
+    fn journal_round_trips_cli_reasoning_effort_and_rejects_invalid_values() {
+        let mut value: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/task-journal.json")).unwrap();
+        value["tasks"][0]["settings"]["provider"] = json!("codex");
+        value["tasks"][0]["settings"]["baseUrl"] = json!("");
+        value["tasks"][0]["settings"]["model"] = json!("gpt-6.2-sol");
+        value["tasks"][0]["settings"]["reasoningEffort"] = json!("xhigh");
+        let dir = tempfile::tempdir().unwrap();
+        save_journal(dir.path(), &value).unwrap();
+        assert_eq!(load_journal(dir.path()).unwrap(), value);
+
+        let mut bad = value.clone();
+        bad["tasks"][0]["settings"]["reasoningEffort"] = json!("invalid");
+        assert!(save_journal(dir.path(), &bad).is_err());
     }
 }

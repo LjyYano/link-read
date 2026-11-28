@@ -2,6 +2,7 @@
 
 mod app_updates;
 mod archive;
+mod cli_models;
 mod credentials;
 #[cfg(target_os = "macos")]
 mod desktop_menu;
@@ -64,12 +65,19 @@ async fn check_tool(
         executable: tool_path(provider, &executable),
         key_available: match provider {
             Provider::Codex => true,
-            Provider::Claude => env::var_os("ANTHROPIC_API_KEY").is_some_and(|key| !key.is_empty()),
+            Provider::Claude => cli_models::claude_auth_available(),
             Provider::Api => credentials::load(&data).ok().flatten().is_some(),
         },
     })
     .await
     .map_err(|error| details("无法检查 AI 工具状态", error))
+}
+
+#[tauri::command]
+async fn list_cli_models(provider: Provider) -> AppResult<cli_models::CliModelCatalog> {
+    tokio::task::spawn_blocking(move || cli_models::list_models(provider))
+        .await
+        .map_err(|error| details("无法读取可用模型列表", error))
 }
 
 #[tauri::command]
@@ -609,6 +617,7 @@ async fn generate(
     local_file: Option<bool>,
     base_url: Option<String>,
     model: Option<String>,
+    reasoning_effort: Option<String>,
     replace: Option<bool>,
     asr: Option<AsrOptions>,
     resume_preview: Option<String>,
@@ -637,6 +646,7 @@ async fn generate(
         &executable,
         base_url.as_deref(),
         model.as_deref(),
+        reasoning_effort.as_deref(),
         replace.unwrap_or(false),
         local_file.unwrap_or(false),
         asr.as_ref(),
@@ -1226,6 +1236,7 @@ fn main() {
             refresh_shownotes,
             open_external,
             check_tool,
+            list_cli_models,
             pick_executable,
             preview_video,
             check_source,
@@ -2414,5 +2425,106 @@ mod tests {
         assert!(err.contains("暂存目录正在处理中"));
         assert!(active_stage.exists());
         drop(held_stage_lock);
+    }
+
+    #[test]
+    fn cli_generation_forwards_validated_model_and_reasoning_effort() {
+        let root = tempfile::tempdir().unwrap();
+        let locations = Locations {
+            data: root.path().to_path_buf(),
+            library: root.path().join("library"),
+            english: AtomicBool::new(false),
+        };
+        let codex_cmd = super::configure_generation_with_resume(
+            Command::new("python3"),
+            &locations,
+            "https://www.youtube.com/watch?v=1-Fo8McCD9w",
+            Provider::Codex,
+            "",
+            None,
+            Some("gpt-6.2-sol"),
+            Some("xhigh"),
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let codex_args: Vec<_> = codex_cmd
+            .as_std()
+            .get_args()
+            .map(|v| v.to_string_lossy().into_owned())
+            .collect();
+        assert!(codex_args.windows(2).any(|w| w == ["--provider", "codex"]));
+        assert!(codex_args.windows(2).any(|w| w == ["--model", "gpt-6.2-sol"]));
+        assert!(codex_args
+            .windows(2)
+            .any(|w| w == ["--reasoning-effort", "xhigh"]));
+
+        let claude_cmd = super::configure_generation_with_resume(
+            Command::new("python3"),
+            &locations,
+            "https://www.youtube.com/watch?v=1-Fo8McCD9w",
+            Provider::Claude,
+            "",
+            None,
+            Some("opus"),
+            Some("high"),
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let claude_args: Vec<_> = claude_cmd
+            .as_std()
+            .get_args()
+            .map(|v| v.to_string_lossy().into_owned())
+            .collect();
+        assert!(claude_args.windows(2).any(|w| w == ["--provider", "claude"]));
+        assert!(claude_args.windows(2).any(|w| w == ["--model", "opus"]));
+        assert!(claude_args
+            .windows(2)
+            .any(|w| w == ["--reasoning-effort", "high"]));
+
+        assert!(super::configure_generation_with_resume(
+            Command::new("python3"),
+            &locations,
+            "https://www.youtube.com/watch?v=1-Fo8McCD9w",
+            Provider::Claude,
+            "",
+            None,
+            Some("opus"),
+            Some("ultra"),
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+        )
+        .is_err());
+
+        assert!(super::configure_generation_with_resume(
+            Command::new("python3"),
+            &locations,
+            "https://www.youtube.com/watch?v=1-Fo8McCD9w",
+            Provider::Codex,
+            "",
+            None,
+            Some("--injected"),
+            None,
+            false,
+            false,
+            None,
+            None,
+            None,
+            None,
+        )
+        .is_err());
     }
 }

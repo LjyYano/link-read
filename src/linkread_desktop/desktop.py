@@ -811,6 +811,7 @@ def main() -> int:
     generate.add_argument("--provider", choices=("codex", "claude", "api"), default="codex")
     generate.add_argument("--base-url")
     generate.add_argument("--model")
+    generate.add_argument("--reasoning-effort", choices=("minimal", "low", "medium", "high", "xhigh", "max", "ultra"))
     generate.add_argument("--replace", action="store_true")
     generate.add_argument("--executable")
     generate.add_argument("--local-file", action="store_true")
@@ -907,6 +908,8 @@ def main() -> int:
                 raise LinkReadError("找不到字幕文件，请重新选择", code="source_missing", stage="extract", action="source")
             with error_context("setup"):
                 provider_kwargs = {"executable": args.executable, "model": args.model, "base_url": args.base_url}
+                if args.reasoning_effort:
+                    provider_kwargs["reasoning_effort"] = args.reasoning_effort
                 if args.provider == "api" and api_token is not None:
                     provider_kwargs["token"] = api_token
                 provider = make_provider(args.provider, **provider_kwargs)

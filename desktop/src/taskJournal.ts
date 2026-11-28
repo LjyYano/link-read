@@ -2,6 +2,7 @@ import { tr } from "./language.ts"
 import type { PageLanguage } from "./language.ts"
 import type { ArticleMetadata, GenerationFailure, Provider } from "./api"
 import type { AsrOptions } from "./asrSettings"
+import { isAnyReasoningEffort, type CliReasoningEffort } from "./cliModels.ts"
 import type { Lane, TaskActivity } from "./taskProgress"
 
 export const taskJournalLimit = 50
@@ -12,6 +13,7 @@ export type TaskSettings = {
   executable: string
   baseUrl: string
   model: string
+  reasoningEffort?: CliReasoningEffort
   asr: AsrOptions
   pageLanguage?: PageLanguage
 }
@@ -93,6 +95,10 @@ function settings(value: unknown): TaskSettings {
   if (language !== undefined && language !== "original" && language !== "zh-CN" && language !== "en") {
     throw new Error(tr("任务记录中的网页语言无效"))
   }
+  const effort = source.reasoningEffort
+  if (effort !== undefined && (typeof effort !== "string" || !isAnyReasoningEffort(effort))) {
+    throw new Error(tr("任务记录中的思考深度无效"))
+  }
   if (!["codex", "claude", "api"].includes(String(source.provider))) throw new Error(tr("任务记录中的 AI 服务无效"))
   const chunkMinutes = number(asr.chunkMinutes, 0, 15, tr("ASR 分片长度"))
   if (![0, 5, 10, 15].includes(chunkMinutes)) throw new Error(tr("任务记录中的 ASR 分片长度无效"))
@@ -104,6 +110,7 @@ function settings(value: unknown): TaskSettings {
     provider: source.provider as Provider, executable: text(source.executable, 4096, tr("可执行文件路径")),
     ...(language !== undefined ? { pageLanguage: language } : {}),
     baseUrl: endpoint(source.baseUrl), model: text(source.model, 256, tr("模型名称")),
+    ...(effort ? { reasoningEffort: effort } : {}),
     asr: { enabled: boolean(asr.enabled, tr("ASR 开关")), reuseToken: boolean(asr.reuseToken, tr("ASR Token 设置")),
       baseUrl: endpoint(asr.baseUrl), model: text(asr.model, 256, tr("ASR 模型名称")),
       maxMinutes: number(asr.maxMinutes, 1, 720, tr("ASR 时长限制")), chunkMinutes,

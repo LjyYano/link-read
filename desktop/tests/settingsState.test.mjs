@@ -277,6 +277,33 @@ test("youtube cookie settings validate browser and absolute file paths explicitl
   assert.equal(validateSettingsDraft(value).preferences.youtubeCookies.filePath, "/Users/yano/cookies.txt")
 })
 
+test("CLI model and reasoning effort settings normalize, detect dirtiness, and validate cleanly", () => {
+  const base = draft()
+  const withDefaultCli = draft()
+  withDefaultCli.preferences.cli = {
+    codex: { model: "", reasoningEffort: "" },
+    claude: { model: "", reasoningEffort: "" },
+  }
+  assert.equal(settingsDraftEqual(base, withDefaultCli), true)
+
+  const changed = draft()
+  changed.preferences.provider = "codex"
+  changed.preferences.cli = {
+    codex: { model: " gpt-6.2-sol ", reasoningEffort: "XHigh" },
+    claude: { model: "opus", reasoningEffort: "high" },
+  }
+  assert.equal(settingsDraftEqual(base, changed), false)
+  const validated = validateSettingsDraft(changed)
+  assert.deepEqual(validated.preferences.cli.codex, { model: "gpt-6.2-sol", reasoningEffort: "xhigh" })
+
+  changed.preferences.cli.codex.model = "--bad-flag"
+  assert.throws(() => validateSettingsDraft(changed), fieldError("codex-model"))
+
+  changed.preferences.provider = "claude"
+  changed.preferences.cli.claude.reasoningEffort = "ultra"
+  assert.throws(() => validateSettingsDraft(changed), fieldError("claude-effort"))
+})
+
 test("settings save failure message localizes cleanly in English without mixed Chinese text", async () => {
   const previous = draft(), next = draft()
   next.apiToken = "new-chat-key"
