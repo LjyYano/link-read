@@ -1,9 +1,9 @@
 .home-page {
-  width: min(100%, 1040px);
+  width: min(100%, 1000px);
   margin: 0 auto;
   padding: clamp(28px, 4.5vh, 48px) clamp(24px, 4vw, 44px) 48px;
 }
-.home-form { width: 100%; margin: 0 auto; }
+.home-form { width: 100%; max-width: 840px; margin: 0 auto; }
 
 .home-dropzone {
   position: relative;

@@ -205,6 +205,7 @@ function App() {
   const [previousScreen, setPreviousScreen] = useState<Exclude<Screen, "settings">>("create")
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>()
   const [source, setSource] = useState("")
+  const [focusComposerNonce, setFocusComposerNonce] = useState(0)
   const [localPath, setLocalPath] = useState<string | null>(null)
   const [pasting, setPasting] = useState(false)
   const nativePaste = isTauri() && navigator.platform.startsWith("Mac")
@@ -403,9 +404,52 @@ function App() {
   )
 
   const handleMenu = useEffectEvent((action: string) => {
-    if (action === "check-updates") update.check()
-    if (action === "open-settings" && !quickOpen && !taskCenterOpen
-      && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) void showSettings()
+    const modalOpen = Boolean(document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]'))
+    if (action === "check-updates") { update.check(); return }
+    if (action === "quick-open") {
+      if (quickOpen) { setQuickOpen(false); return }
+      if (!taskCenterOpen && !modalOpen) showQuickOpen()
+      return
+    }
+    if (action === "toggle-tasks") {
+      if (taskCenterOpen) { setTaskCenterOpen(false); return }
+      if (!quickOpen && !modalOpen) showTasks()
+      return
+    }
+    if (quickOpen || taskCenterOpen || modalOpen) return
+    if (action === "open-settings") { void showSettings(); return }
+    if (action === "nav-home") { navigateTo("create"); return }
+    if (action === "nav-library") { goToLibrary(); return }
+    if (action === "new-article") {
+      runWithLeaveGuard(() => {
+        const isCurrent = beginNavigation()
+        void (async () => {
+          if (screen === "reader") await flushReadingPositions()
+          if (!isCurrent()) return
+          setDragging(false)
+          setScreen("create")
+          setFocusComposerNonce(n => n + 1)
+        })()
+      })
+      return
+    }
+    if (action === "import-subtitle" && screen !== "settings") {
+      const isCurrent = beginNavigation()
+      void (async () => {
+        if (screen === "reader") await flushReadingPositions()
+        if (!isCurrent()) return
+        setScreen("create")
+        void pick()
+      })()
+      return
+    }
+    if (action === "print-article" && screen === "reader") {
+      window.dispatchEvent(new CustomEvent("linkread-reader-print"))
+      return
+    }
+    if (action === "toggle-sidebar" && screen === "reader") {
+      window.dispatchEvent(new CustomEvent("linkread-reader-toggle-sidebar"))
+    }
   })
 
   useEffect(() => {
@@ -1358,20 +1402,39 @@ function App() {
       if (event.key === "Escape") {
         // Settings and Reader own Escape.
       } else if (event.metaKey || event.ctrlKey) {
-        if (event.key.toLowerCase() === "k") {
+        const key = event.key.toLowerCase()
+        if (key === "k") {
+          if (nativePaste && event.metaKey) return
           event.preventDefault()
           showQuickOpen()
         } else if (event.key === ",") {
           if (nativePaste && event.metaKey) return
           event.preventDefault()
           showSettings()
-        } else if (event.key.toLowerCase() === "o" && screen !== "settings") {
+        } else if (key === "o" && screen !== "settings") {
+          if (nativePaste && event.metaKey) return
           event.preventDefault()
           const isCurrent = beginNavigation()
           if (screen === "reader") await flushReadingPositions()
           if (!isCurrent()) return
           setScreen("create")
           void pick()
+        } else if (key === "n" && !event.shiftKey) {
+          if (nativePaste && event.metaKey) return
+          event.preventDefault()
+          handleMenu("new-article")
+        } else if (event.key === "1" && !event.shiftKey) {
+          if (nativePaste && event.metaKey) return
+          event.preventDefault()
+          navigateTo("create")
+        } else if (event.key === "2" && !event.shiftKey) {
+          if (nativePaste && event.metaKey) return
+          event.preventDefault()
+          goToLibrary()
+        } else if (key === "t" && event.shiftKey) {
+          if (nativePaste && event.metaKey) return
+          event.preventDefault()
+          showTasks()
         }
       }
     }
@@ -1476,14 +1539,15 @@ function App() {
             sourceNeedsAsr={sourceNeedsAsr}
             youtubeCookiesConfigured={youtubeCookiesConfigured}
             asrEnabled={preferences.asr.enabled}
-            sourceReadiness={<SourceReadinessPanel state={sourceReadiness}
+            focusComposerNonce={focusComposerNonce}
+            sourceReadiness={sourceReadiness.eligible ? <SourceReadinessPanel state={sourceReadiness}
               subtitleDownload={subtitleDownload} isYoutube={isYoutubeLink}
               youtubeCookiesConfigured={youtubeCookiesConfigured}
               onPreviewDownloaded={downloaded => { void openDownloadedPreview(downloaded) }}
               onExportDownloaded={async (previewId, format: SubtitleExportFormat) => { await exportSubtitles(previewId, format, true) }}
               onYoutubeSettings={() => void showSettings("youtube")}
               onImport={pick} onOpenSource={() => { void openVideo(sourceReadiness.source).catch(error => setInputError(String(error))) }}
-              onSettings={() => void showSettings("asr")} asrEnabled={preferences.asr.enabled} />}
+              onSettings={() => void showSettings("asr")} asrEnabled={preferences.asr.enabled} /> : undefined}
             onSettings={target => void showSettings(target ?? "ai")} onLibrary={goToLibrary} dragging={dragging} />
         )}
         {screen === "library" && (

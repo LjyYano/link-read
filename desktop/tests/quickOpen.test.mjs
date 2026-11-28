@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { loadRecentArticles, rememberArticle, quickOpenArticles } from '../src/quickOpenState.ts'
+import { highlightQueryParts, loadRecentArticles, rememberArticle, quickOpenArticles } from '../src/quickOpenState.ts'
 
 const articles = [
   { id: 'new', title: 'New article', platform: 'youtube', category: 'Technology', author: 'Yano' },
@@ -31,4 +31,19 @@ test('optional history is bounded, deduplicated and safe against malformed stora
   globalThis.localStorage = { getItem: () => { throw Error('blocked') }, setItem: () => { throw Error('blocked') } }
   assert.deepEqual(loadRecentArticles(), [])
   assert.deepEqual(rememberArticle(['old'], 'new'), ['new', 'old'])
+})
+
+test('highlightQueryParts splits case-insensitive overlapping matches safely without HTML', () => {
+  assert.deepEqual(highlightQueryParts('LinkRead Desktop', ''), [{ text: 'LinkRead Desktop', match: false }])
+  assert.deepEqual(highlightQueryParts('LinkRead Desktop', 'read desk'), [
+    { text: 'Link', match: false },
+    { text: 'Read', match: true },
+    { text: ' ', match: false },
+    { text: 'Desk', match: true },
+    { text: 'top', match: false },
+  ])
+  assert.deepEqual(highlightQueryParts('蛋白质的世界', '蛋白 白质'), [
+    { text: '蛋白质', match: true },
+    { text: '的世界', match: false },
+  ])
 })

@@ -67,14 +67,23 @@
   cursor: pointer;
 }
 .quick-open-results li[aria-selected="true"] { background: var(--tint); }
-.quick-open-document {
+.quick-open-thumb {
   display: grid;
   place-items: center;
-  width: 30px;
+  width: 50px;
   height: 30px;
-  color: var(--muted);
   flex-shrink: 0;
 }
+.quick-open-thumb > .shelf-cover {
+  width: 50px;
+  height: 30px;
+  aspect-ratio: auto;
+  border-radius: var(--radius-xs);
+}
+.quick-open-thumb[data-platform="apple_podcasts"] { width: 50px; }
+.quick-open-thumb[data-platform="apple_podcasts"] > .shelf-cover { width: 32px; height: 32px; aspect-ratio: 1; }
+.quick-open-thumb .cover-typography { padding: 3px 5px; gap: 0; }
+.quick-open-thumb .cover-title { font-size: 9px; line-height: 1.2; -webkit-line-clamp: 2; }
 .quick-open-text { display: grid; gap: 3px; min-width: 0; flex: 1; }
 .quick-open-text strong {
   overflow: hidden;
@@ -84,11 +93,27 @@
   font-weight: 600;
 }
 .quick-open-text small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.quick-open-text small > svg,
+.quick-open-text small > img { flex-shrink: 0; width: 13px; height: 13px; }
+.quick-open-text small > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted);
-  font-size: 12px;
+  min-width: 0;
+}
+.quick-open-mark {
+  background: var(--tint-strong);
+  color: var(--accent-dark);
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 600;
 }
 .quick-open-flags { display: flex; gap: 7px; color: var(--muted); }
 .quick-open-enter { color: var(--accent); }
@@ -114,9 +139,34 @@
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 12px;
   border-top: 1px solid var(--line);
   padding: 9px 16px;
+}
+.quick-open-hints {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.quick-open-hints > span { display: inline-flex; align-items: center; gap: 4px; }
+.quick-open-hints kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
 }
 .quick-open-footer .text-button { font-size: 12px; }
 

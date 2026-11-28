@@ -1,3 +1,10 @@
+.source-card {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  box-shadow: var(--shadow-card);
+}
 .source-preview {
   display: flex;
   align-items: center;
@@ -9,6 +16,16 @@
   background: var(--paper);
   box-shadow: var(--shadow-card);
   min-height: 112px;
+}
+.source-card > .source-preview {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.source-card > .preview-unavailable {
+  padding: 11px 16px;
 }
 .source-preview .shelf-cover, .preview-cover { flex: 0 0 auto; width: 156px; height: 88px; border-radius: var(--radius-sm); }
 .source-preview .shelf-cover[data-platform="apple_podcasts"], .preview-cover[data-platform="apple_podcasts"] { width: 84px; height: 84px; aspect-ratio: 1; }

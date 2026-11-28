@@ -1,7 +1,8 @@
 import { locale, localizedDetail, tr } from "./language.ts"
-import { useState } from "react"
-import { BookOpen, CircleAlert, CircleCheck, Download, ExternalLink, FileUp, Info, KeyRound, LoaderCircle, LockKeyhole, RefreshCw } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { BookOpen, ChevronDown, CircleAlert, CircleCheck, Download, ExternalLink, FileUp, Info, KeyRound, LoaderCircle, LockKeyhole, RefreshCw } from "lucide-react"
 import type { DownloadedSubtitles, SubtitleExportFormat } from "./api"
+import { menuNavigation } from "./menu"
 import type { SourceReadiness } from "./useSourceReadiness"
 import type { SubtitleDownloadState } from "./useSubtitleDownload"
 import { resolveYoutubeSubtitlePrompt } from "./youtubeGuidance"
@@ -25,6 +26,31 @@ export function SourceReadinessPanel({
 }) {
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState("")
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !exportMenuRef.current?.contains(event.target)) {
+        setExportMenuOpen(false)
+      }
+    }
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        event.stopPropagation()
+        setExportMenuOpen(false)
+      }
+    }
+    document.addEventListener("pointerdown", outside)
+    document.addEventListener("keydown", onEscape, true)
+    return () => {
+      document.removeEventListener("pointerdown", outside)
+      document.removeEventListener("keydown", onEscape, true)
+    }
+  }, [exportMenuOpen])
+
   if (!state.eligible) return null
   const result = state.result
   const checking = state.phase === "checking"
@@ -96,14 +122,30 @@ export function SourceReadinessPanel({
         {onPreviewDownloaded && <button className="text-button" type="button" onClick={() => onPreviewDownloaded(downloaded)}>
           <BookOpen size={14} aria-hidden="true" />{tr("预览原文")}
         </button>}
-        {onExportDownloaded && <>
-          <button className="text-button" type="button" disabled={exporting} onClick={() => void handleExport("srt")}>
-            <Download size={14} aria-hidden="true" />{tr("导出 SRT")}
-          </button>
-          <button className="text-button" type="button" disabled={exporting} onClick={() => void handleExport("vtt")}>
-            <Download size={14} aria-hidden="true" />{tr("导出 VTT")}
-          </button>
-        </>}
+        {onExportDownloaded && (
+          <div className="source-export-popover" ref={exportMenuRef} onKeyDown={menuNavigation}
+            onBlur={event => {
+              if (event.relatedTarget && !exportMenuRef.current?.contains(event.relatedTarget)) setExportMenuOpen(false)
+            }}>
+            <button className="text-button" type="button" disabled={exporting}
+              aria-haspopup="menu" aria-expanded={exportMenuOpen}
+              onClick={() => setExportMenuOpen(open => !open)}>
+              <Download size={14} aria-hidden="true" />{tr("导出字幕")}<ChevronDown size={13} aria-hidden="true" />
+            </button>
+            {exportMenuOpen && (
+              <div className="source-export-menu" role="menu" aria-label={tr("导出字幕")}>
+                <button type="button" role="menuitem" disabled={exporting} onClick={() => {
+                  setExportMenuOpen(false)
+                  void handleExport("srt")
+                }}><Download size={13} aria-hidden="true" />{tr("导出 SRT")}</button>
+                <button type="button" role="menuitem" disabled={exporting} onClick={() => {
+                  setExportMenuOpen(false)
+                  void handleExport("vtt")
+                }}><Download size={13} aria-hidden="true" />{tr("导出 VTT")}</button>
+              </div>
+            )}
+          </div>
+        )}
         {subtitleDownload && <button className="text-button" type="button" onClick={subtitleDownload.download}
           title={tr("重新下载该来源的字幕，不调用 AI 或下载音视频")}>
           <RefreshCw size={13} aria-hidden="true" />{tr("重新下载")}

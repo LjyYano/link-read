@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from "react"
-import { ChevronLeft, FolderOpen, LoaderCircle } from "lucide-react"
+import { AudioLines, ChevronLeft, FolderOpen, KeyRound, LoaderCircle, SlidersHorizontal, Sparkles } from "lucide-react"
 import {
   checkTool, deleteApiToken, deleteAsrToken, listCliModels, loadApiToken, loadAsrToken, pickExecutable, providerNames,
   saveApiToken, saveAsrToken, testApiConnection, type Provider, type ToolStatus,
@@ -23,10 +23,17 @@ import { YoutubeCookiesPanel } from "./YoutubeCookiesPanel"
 import { defaultYoutubeCookies } from "./youtubeCookies"
 import "./settings.css"
 
-export type SettingsTarget = "ai" | "asr" | "youtube"
+export type SettingsTarget = "general" | "ai" | "asr" | "youtube"
 export type SettingsLeaveGuard = {
   confirm: (proceed: () => void) => boolean
   isDirty: () => boolean
+}
+
+function tabForField(field: string): SettingsTarget {
+  if (field.startsWith("asr-") || field.startsWith("ffmpeg-")) return "asr"
+  if (field.startsWith("youtube-")) return "youtube"
+  if (field.startsWith("settings-theme") || field.startsWith("settings-language")) return "general"
+  return "ai"
 }
 
 export function Settings({ preferences, onSave, onBack, onTokenChanged, settingsGate, settingsRecovery,
@@ -48,10 +55,8 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
 }) {
   const [draft, setDraft] = useState<SettingsDraft>(() => ({ preferences, apiToken: "", asrToken: "" }))
   const [baseline, setBaseline] = useState(draft)
-  const [draftLanguage, setDraftLanguage] = useState<LanguageSettings>(language)
-  const [baselineLanguage, setBaselineLanguage] = useState<LanguageSettings>(language)
-  const [draftTheme, setDraftTheme] = useState<ThemeMode>(theme)
-  const [baselineTheme, setBaselineTheme] = useState<ThemeMode>(theme)
+  const [activeTab, setActiveTab] = useState<SettingsTarget>(() => target ?? (settingsRecovery ? "ai" : "general"))
+  const [preferenceError, setPreferenceError] = useState("")
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState("")
   const [saving, setSaving] = useState(false)
@@ -78,9 +83,6 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   const savingNow = useRef(false)
   const testingNow = useRef(false)
   const dirty = !settingsDraftEqual(draft, baseline)
-    || draftLanguage.interfaceLanguage !== baselineLanguage.interfaceLanguage
-    || draftLanguage.pageLanguage !== baselineLanguage.pageLanguage
-    || draftTheme !== baselineTheme
   const latest = useRef({ dirty, saving, asrTesting, onBack })
   latest.current = { dirty, saving, asrTesting, onBack }
   const { provider, paths, api, asr } = draft.preferences
@@ -93,9 +95,23 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   const currentDisabled = useRef(disabled)
   currentDisabled.current = disabled
 
+  useEffect(() => {
+    if (!target) return
+    pendingTarget.current = target
+    setActiveTab(target)
+  }, [target])
+
   useLayoutEffect(() => {
     const destination = pendingTarget.current
     if (disabled || !destination) return
+    if (destination === "general") {
+      pendingTarget.current = undefined
+      return
+    }
+    if (activeTab !== destination) {
+      setActiveTab(destination)
+      return
+    }
     let field = destination === "youtube" ? "youtube-cookie-mode" : "asr-enabled"
     if (destination === "ai") {
       if (provider === "api") {
@@ -115,7 +131,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
       element.focus({ preventScroll: true })
       element.scrollIntoView({ block: "nearest" })
     }
-  }, [disabled, provider, api, draft.apiToken, toolInfo, toolError])
+  }, [activeTab, disabled, provider, api, draft.apiToken, toolInfo, toolError])
 
   // Bind results to the exact configuration at render time as well as at edit
   // time. A late native response must never certify a different draft.
@@ -235,6 +251,9 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   function showFailure(failure: unknown) {
     setError(failure instanceof Error ? failure.message : String(failure))
     if (failure instanceof SettingsValidationError) {
+      const targetTab = failure.field === "api-token" && draft.preferences.provider !== "api" && draft.preferences.asr.enabled && draft.preferences.asr.reuseToken
+        ? "asr" : tabForField(failure.field)
+      setActiveTab(targetTab)
       requestAnimationFrame(() => {
         const field = document.getElementById(failure.field)
           || document.getElementById(`${failure.field}-change`)
@@ -335,18 +354,8 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
         saveApiToken, deleteApiToken, saveAsrToken, deleteAsrToken, savePreferences: onSave,
       }))
       if (!mounted.current) return
-      if (draftLanguage.interfaceLanguage !== baselineLanguage.interfaceLanguage
-        || draftLanguage.pageLanguage !== baselineLanguage.pageLanguage) {
-        await onLanguageChange(draftLanguage)
-      }
-      if (draftTheme !== baselineTheme) {
-        await onThemeChange(draftTheme)
-      }
-      if (!mounted.current) return
       setDraft(saved)
       setBaseline(saved)
-      setBaselineLanguage(draftLanguage)
-      setBaselineTheme(draftTheme)
       setSavedNotice(true)
       onTokenChanged()
     } catch (failure) {
@@ -369,6 +378,31 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   ]
   const clearLabel = confirmClearKind === "apiToken" ? tr("AI API 密钥") : tr("语音 API 密钥")
 
+  const tabs: ReadonlyArray<{ id: SettingsTarget; label: string; icon: typeof SlidersHorizontal }> = [
+    { id: "general", label: tr("通用"), icon: SlidersHorizontal },
+    { id: "ai", label: tr("AI 生成"), icon: Sparkles },
+    { id: "asr", label: tr("语音转写"), icon: AudioLines },
+    { id: "youtube", label: tr("YouTube 认证"), icon: KeyRound },
+  ]
+
+  async function applyLanguage(next: LanguageSettings) {
+    setPreferenceError("")
+    try {
+      await onLanguageChange(next)
+    } catch (failure) {
+      if (mounted.current) setPreferenceError(failure instanceof Error ? failure.message : String(failure))
+    }
+  }
+
+  async function applyTheme(next: ThemeMode) {
+    setPreferenceError("")
+    try {
+      await onThemeChange(next)
+    } catch (failure) {
+      if (mounted.current) setPreferenceError(failure instanceof Error ? failure.message : String(failure))
+    }
+  }
+
   return <section className={`settings-page${unifiedHeader ? " settings-page-unified" : ""}`} aria-labelledby="settings-heading">
     {unifiedHeader ? (
       <h1 id="settings-heading" className="sr-only">{tr("设置")}</h1>
@@ -380,20 +414,56 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
         <h1 id="settings-heading">{tr("设置")}</h1>
       </header>
     )}
+    <div className="settings-tabs" role="tablist" aria-label={tr("设置分类")} onKeyDown={event => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") return
+      const index = tabs.findIndex(item => item.id === activeTab)
+      if (index < 0) return
+      event.preventDefault()
+      const nextIndex = event.key === "Home" ? 0
+        : event.key === "End" ? tabs.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length
+      const nextTab = tabs[nextIndex].id
+      setActiveTab(nextTab)
+      document.getElementById(`settings-tab-${nextTab}`)?.focus()
+    }}>
+      {tabs.map(tab => {
+        const Icon = tab.icon
+        const selected = activeTab === tab.id
+        return (
+          <button
+            key={tab.id}
+            id={`settings-tab-${tab.id}`}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-controls={`settings-panel-${tab.id}`}
+            tabIndex={selected ? 0 : -1}
+            className={`settings-tab${selected ? " is-active" : ""}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            <Icon size={15} aria-hidden="true" />
+            <span>{tab.label}</span>
+          </button>
+        )
+      })}
+    </div>
     <form className="settings-form" onSubmit={event => { void save(event) }} noValidate aria-busy={saving || loading}>
       {loadError && <div className="settings-load-error" role="alert">
         <p>{loadError}</p>
         <button type="button" className="text-button" disabled={loading || saving}
           onClick={() => void readKeys(preserveLoadDraft.current)}>{tr("重新读取")}</button>
       </div>}
-      <LanguageSettingsCard
-        value={draftLanguage}
-        onChange={next => { setSavedNotice(false); setError(""); setDraftLanguage(next) }}
-        theme={draftTheme}
-        onThemeChange={next => { setSavedNotice(false); setError(""); setDraftTheme(next) }}
-        disabled={disabled}
-        error={languageError}
-      />
+      <div id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" hidden={activeTab !== "general"}>
+        <LanguageSettingsCard
+          value={language}
+          onChange={next => { void applyLanguage(next) }}
+          theme={theme}
+          onThemeChange={next => { void applyTheme(next) }}
+          disabled={saving}
+          error={preferenceError || languageError}
+        />
+      </div>
+      <div id="settings-panel-ai" role="tabpanel" aria-labelledby="settings-tab-ai" hidden={activeTab !== "ai"}>
       <section className="settings-card" aria-labelledby="settings-ai-heading">
         <header className="settings-card-header settings-card-header-provider">
           <div className="settings-card-title">
@@ -494,14 +564,19 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
           </>}
         </div>
       </section>
-      <AsrSettingsPanel value={asr} onChange={asr => update(current => ({ ...current, preferences: { ...current.preferences, asr } }))}
-        token={draft.asrToken} apiToken={draft.apiToken} savedToken={baseline.asrToken}
-        onToken={asrToken => update(current => ({ ...current, asrToken }))}
-        onClearToken={testing || asrTesting ? undefined : () => setConfirmClearKind("asrToken")}
-        disabled={disabled} onTestingChange={setAsrTesting} />
-      <YoutubeCookiesPanel value={youtubeCookies}
-        onChange={next => update(current => ({ ...current, preferences: { ...current.preferences, youtubeCookies: next } }))}
-        disabled={disabled} />
+      </div>
+      <div id="settings-panel-asr" role="tabpanel" aria-labelledby="settings-tab-asr" hidden={activeTab !== "asr"}>
+        <AsrSettingsPanel value={asr} onChange={asr => update(current => ({ ...current, preferences: { ...current.preferences, asr } }))}
+          token={draft.asrToken} apiToken={draft.apiToken} savedToken={baseline.asrToken}
+          onToken={asrToken => update(current => ({ ...current, asrToken }))}
+          onClearToken={testing || asrTesting ? undefined : () => setConfirmClearKind("asrToken")}
+          disabled={disabled} onTestingChange={setAsrTesting} />
+      </div>
+      <div id="settings-panel-youtube" role="tabpanel" aria-labelledby="settings-tab-youtube" hidden={activeTab !== "youtube"}>
+        <YoutubeCookiesPanel value={youtubeCookies}
+          onChange={next => update(current => ({ ...current, preferences: { ...current.preferences, youtubeCookies: next } }))}
+          disabled={disabled} />
+      </div>
       {error && <p id="settings-error" className="settings-error" role="alert" tabIndex={-1}>{error}</p>}
       {settingsRecovery && !saving && <p className="settings-error" role="alert">
         {tr("上次未能完成设置保存。请核对服务地址和密钥，然后重新保存设置。")}
@@ -512,7 +587,9 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
             : dirty ? tr("有未保存的修改") : savedNotice ? tr("设置已保存") : ""}
         </span>
         <div className="settings-action-buttons">
-          <button className="plain" type="button" disabled={saving} onClick={onBack}>{tr("取消")}</button>
+          <button className="plain" type="button" disabled={saving} onClick={onBack}>
+            {dirty || settingsRecovery ? tr("取消") : tr("完成")}
+          </button>
           <button className="primary" type="submit" disabled={disabled || testing || asrTesting || (!dirty && !settingsRecovery)}
             aria-label={tr("保存设置")} title={tr("保存设置")}>
             {saving && <LoaderCircle size={15} className="spin" aria-hidden="true" />}{saving ? tr("保存中…") : tr("保存设置")}

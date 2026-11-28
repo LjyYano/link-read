@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react"
-import { LoaderCircle, X } from "lucide-react"
+import { LoaderCircle } from "lucide-react"
 import { tr } from "./language.ts"
 import "./article-dialog.css"
 
@@ -73,10 +73,10 @@ export function ConfirmDialog({
         if (!pending) onCancel()
       }}
       onKeyDown={event => {
-        if (event.key === "Escape") {
+        if (event.key === "Escape" || (event.metaKey && event.key === ".")) {
           event.stopPropagation()
           if (event.repeat || event.nativeEvent.isComposing || pending) event.preventDefault()
-          else onCancel()
+          else { event.preventDefault(); onCancel() }
         }
       }}
       onClick={event => {
@@ -90,15 +90,6 @@ export function ConfirmDialog({
     >
       <header>
         <h2 id={`${id}-title`}>{title}</h2>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={tr("关闭")}
-          disabled={pending}
-          onClick={onCancel}
-        >
-          <X size={18} aria-hidden="true" />
-        </button>
       </header>
       <div id={`${id}-message`} className="article-dialog-body confirm-dialog-body">
         {paragraphs.map((line, index) => (

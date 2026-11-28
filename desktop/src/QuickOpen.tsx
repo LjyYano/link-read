@@ -1,9 +1,17 @@
 import { tr } from "./language.ts"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
-import { BookOpen, CircleCheck, CornerDownLeft, LoaderCircle, Search, Star, X } from "lucide-react"
+import { CircleCheck, CornerDownLeft, LoaderCircle, Search, Star, X } from "lucide-react"
 import { platformNames, type Article, type Library } from "./api"
-import { quickOpenArticles } from "./quickOpenState"
+import { Cover, PlatformIcon } from "./JobCard"
+import { highlightQueryParts, quickOpenArticles } from "./quickOpenState"
 import "./quick-open.css"
+
+function Highlighted({ text, query }: { text: string; query: string }) {
+  const parts = highlightQueryParts(text, query)
+  return <>{parts.map((part, index) => (
+    part.match ? <mark key={index} className="quick-open-mark">{part.text}</mark> : <span key={index}>{part.text}</span>
+  ))}</>
+}
 
 export function QuickOpen({ library, error, recent, onClose, onRead, onLibrary, onRefresh }: {
   library?: Library; error: string; recent: string[]; onClose: () => void
@@ -70,19 +78,28 @@ export function QuickOpen({ library, error, recent, onClose, onRead, onLibrary, 
       {query.trim() ? tr("{0} 篇匹配文章", matches.length) : tr("最近文章")}
     </div>
     <ul className="quick-open-results" id={`${id}-results`} role="listbox" aria-label={tr("文章")}>
-      {visible.map((article, index) => <li key={article.id} id={`${id}-option-${index}`} role="option"
-        aria-selected={index === selected} onPointerMove={() => setSelectedId(article.id)}
-        onClick={() => onRead(article)}>
-        <span className="quick-open-document"><BookOpen size={18} aria-hidden="true" /></span>
-        <span className="quick-open-text"><strong>{article.title}</strong>
-          <small>{[article.author, platformNames[article.platform]].filter(Boolean).join(" · ")}</small>
-        </span>
-        <span className="quick-open-flags">
-          {article.isStarred && <Star size={14} aria-label={tr("已收藏")} />}
-          {article.isRead && <CircleCheck size={14} aria-label={tr("已读")} />}
-        </span>
-        {index === selected && <CornerDownLeft className="quick-open-enter" size={15} aria-hidden="true" />}
-      </li>)}
+      {visible.map((article, index) => {
+        const meta = [article.author, article.category, platformNames[article.platform]].filter(Boolean).join(" · ")
+        return <li key={article.id} id={`${id}-option-${index}`} role="option"
+          aria-selected={index === selected} onPointerMove={() => setSelectedId(article.id)}
+          onClick={() => onRead(article)}>
+          <span className="quick-open-thumb" data-platform={article.platform} aria-hidden="true">
+            <Cover {...article} />
+          </span>
+          <span className="quick-open-text">
+            <strong><Highlighted text={article.title} query={query} /></strong>
+            <small>
+              <PlatformIcon platform={article.platform} />
+              <span><Highlighted text={meta} query={query} /></span>
+            </small>
+          </span>
+          <span className="quick-open-flags">
+            {article.isStarred && <Star size={14} aria-label={tr("已收藏")} />}
+            {article.isRead && <CircleCheck size={14} aria-label={tr("已读")} />}
+          </span>
+          {index === selected && <CornerDownLeft className="quick-open-enter" size={15} aria-hidden="true" />}
+        </li>
+      })}
     </ul>
     {!visible.length && !error && <div className="quick-open-empty" role="status">
       {!library ? <><LoaderCircle className="spin" size={18} />{tr("正在读取书架…")}</>
@@ -94,6 +111,11 @@ export function QuickOpen({ library, error, recent, onClose, onRead, onLibrary, 
       <button type="button" className="text-button" onClick={onRefresh}>{tr("重新加载")}</button>
     </div>}
     <footer className="quick-open-footer">
+      <div className="quick-open-hints" aria-label={tr("快捷键提示")}>
+        <span><kbd>↑↓</kbd> {tr("选择")}</span>
+        <span><kbd>↵</kbd> {tr("打开")}</span>
+        <span><kbd>Esc</kbd> {tr("关闭")}</span>
+      </div>
       <button type="button" className="text-button" onClick={() => onLibrary(query)}>
         {matches.length > visible.length ? tr("查看全部 {0} 篇", matches.length) : tr("查看书架")}
       </button>

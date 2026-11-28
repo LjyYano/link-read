@@ -549,19 +549,25 @@ def test_quote_punctuation_falls_back_on_word_changes():
     assert any(event.stage == 'quote_warning' for event in events)
 
 
-def test_publication_accepts_english_lengths_and_retries_once_on_validation_error(tmp_path):
+def test_publication_accepts_english_lengths_and_retries_only_failed_fields(tmp_path):
+    from linkread_desktop.ai.checkpoints import RunProvider
+
     class FlakyPublication(FakeProvider):
         def __init__(self):
             super().__init__()
             self.pub_prompts = []
+            self.pub_schemas = []
 
         def generate(self, prompt, schema, *, timeout_seconds):
             result = super().generate(prompt, schema, timeout_seconds=timeout_seconds)
             if 'reading' in result:
                 self.pub_prompts.append(prompt)
+                self.pub_schemas.append(list(schema['required']))
                 if len(self.pub_prompts) == 1:
-                    # First response forgets index 0 on the opening section.
+                    # First response forgets index 0 on reading, while quotes/mindmap/catalog are valid.
                     result['reading']['sections'][0]['index'] = 99
+                    result['quotes'][0].pop('bold', None)
+                    result['quotes'][0].pop('red', None)
                     return result
                 result['reading']['lead'] = (
                     "Lauren Tan shares how her team at SpaceXSI turned AI-generated code from "
@@ -573,20 +579,68 @@ def test_publication_accepts_english_lengths_and_retries_once_on_validation_erro
                     "Explains why code volume alone is not the bottleneck once automated review proofs, "
                     "deterministic test suites, and isolated agent sandboxes replace slow manual line-by-line inspection."
                 )
-                result['quotes'][0].pop('bold', None)
-                result['quotes'][0].pop('red', None)
             return result
 
     note = enrich(make_transcript(), FakeProvider())
     provider = FlakyPublication()
-    extras = complete_extras(note, ArticleExtras(), provider, timeout_seconds=30, cache_dir=tmp_path)
+    events = []
+    extras = complete_extras(note, ArticleExtras(), provider, timeout_seconds=30, cache_dir=tmp_path, progress=events.append)
     assert len(provider.pub_prompts) == 2
+    # Retry only regenerates the failed field, preserving valid mindmap/quotes/catalog from attempt 1.
+    assert provider.pub_schemas[1] == ['reading']
     assert '【格式修正重试】' in provider.pub_prompts[1]
-    assert '目录索引必须从选项 0 开始' in provider.pub_prompts[1]
+    assert '目录索引超出候选范围' in provider.pub_prompts[1]
+    assert any(event.stage == 'article_ai' and '目录索引超出候选范围' in event.message for event in events)
     assert len(extras.reading.lead) > 180
     assert len(extras.reading.sections[0].summary) > 160
     assert len(extras.reading.sections[0].label) > 30
-    assert len(list(tmp_path.glob('*.json'))) == 1  # Only the valid retry was cached.
+    assert extras.mindmap is not None and extras.quotes is not None and extras.catalog is not None
+    assert len(list(tmp_path.glob('*.json'))) == 1  # Merged validated result is saved as one checkpoint.
+
+    # Subsequent resume hits the merged checkpoint without calling the model again.
+    resumed = RunProvider(FakeProvider(), 1)
+    extras2 = complete_extras(note, ArticleExtras(), resumed, timeout_seconds=30, cache_dir=tmp_path)
+    assert resumed.cache_hits == 1
+    assert resumed.calls == 0
+    assert extras2.reading == extras.reading
+
+
+def test_publication_accepts_grounded_sections_skipping_intro_candidate():
+    class SkipIntroProvider(FakeProvider):
+        def generate(self, prompt, schema, *, timeout_seconds):
+            result = super().generate(prompt, schema, timeout_seconds=timeout_seconds)
+            if 'reading' in result and len(result['reading']['sections']) > 1:
+                result['reading']['sections'] = [result['reading']['sections'][-1]]
+            return result
+
+    raw = make_transcript(num=60, text="播客内容测试文本" * 5)
+    note = enrich(raw, FakeProvider(), max_chars=1500)
+    extras = complete_extras(note, ArticleExtras(), SkipIntroProvider(), timeout_seconds=30)
+    assert extras.reading is not None
+    assert extras.reading.sections[0].start_segment_index > 0
+    html = render_html(note, extras=extras)
+    assert 'id="opening"' in html
+    assert raw.segments[0].text in html
+    assert raw.segments[-1].text in html
+
+
+def test_publication_persistent_schema_error_reports_exact_safe_field_reason():
+    class LongLeadProvider(FakeProvider):
+        def generate(self, prompt, schema, *, timeout_seconds):
+            result = super().generate(prompt, schema, timeout_seconds=timeout_seconds)
+            if 'reading' in result:
+                result['reading']['lead'] = '秘密长摘要' * 120
+            return result
+
+    note = enrich(make_transcript(text='秘密原文内容'), FakeProvider())
+    with pytest.raises(ProviderError) as caught:
+        complete_extras(note, ArticleExtras(), LongLeadProvider(), timeout_seconds=30)
+    assert caught.value.code == 'model_output_invalid'
+    assert caught.value.stage == 'publication'
+    assert 'reading.lead' in str(caught.value)
+    assert 'string_too_long' in str(caught.value)
+    assert '秘密长摘要' not in str(caught.value)
+    assert '秘密原文内容' not in str(caught.value)
 
 
 def test_run_recovers_after_bookshelf_write_failure(tmp_path, monkeypatch):

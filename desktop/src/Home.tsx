@@ -59,6 +59,7 @@ type HomeProps = ArticleListProps & {
   existingArticle?: Article
   existingTask?: boolean
   onViewExistingTask?: () => void
+  focusComposerNonce?: number
 }
 
 function fileName(path: string) {
@@ -75,7 +76,7 @@ export function Home({
   onPreview, journalLoading, journalError, onRetryJournal,
   onTasks, taskSummary, resume, sourceReadiness, sourceBlocked, sourceNeedsAsr, sourceNeedsYoutubeCookies,
   youtubeCookiesConfigured = false, asrEnabled = false,
-  existingArticle, existingTask, onViewExistingTask, onEdit, onExportMarkdown,
+  existingArticle, existingTask, onViewExistingTask, onEdit, onExportMarkdown, focusComposerNonce = 0,
 }: HomeProps) {
   // Keep newly completed articles visible while the library refreshes.
   const finished = jobs.flatMap(task => task.job.status === "done" ? [task.job.article] : []).reverse()
@@ -107,6 +108,12 @@ export function Home({
   function hideImportHint() {
     setHint(current => current === "import" ? undefined : current)
   }
+
+  useEffect(() => {
+    if (!focusComposerNonce) return
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [focusComposerNonce])
 
   useEffect(() => {
     if (!hint) return
@@ -214,29 +221,33 @@ export function Home({
           }}>{tr("查看任务")}</button>}
           <ArticleActions article={existingArticle} onDelete={onDelete} onRegenerate={onRegenerate} onEdit={onEdit} onExportMarkdown={onExportMarkdown} />
         </div>}
-        {!existingArticle && !selectedFile && linkPreview.status === "loading" && <div className="source-preview preview-loading" role="status" aria-label={tr("正在识别链接")}>
-          <span className="preview-cover preview-pending-cover" data-platform={podcastPreview ? "apple_podcasts" : undefined} aria-hidden="true">
-            {podcastPreview ? <Podcast size={28} strokeWidth={1.5} /> : <Link2 size={25} strokeWidth={1.6} />}
-          </span>
-          <div className="source-preview-info preview-loading-info">
-            <strong>{podcastPreview ? tr("Apple 播客单集") : tr("正在识别来源")}</strong>
-            <span className="preview-status"><LoaderCircle className="spin" size={13} aria-hidden="true" />
-              {linkPreview.slow ? tr("获取信息较慢，仍在等待标题与封面") : tr("正在获取标题与封面…")}
-            </span>
+        {!existingArticle && !selectedFile && (linkPreview.status !== "idle" || (!existing && Boolean(sourceReadiness))) && (
+          <div className="source-card" aria-label={tr("来源预览与状态")}>
+            {linkPreview.status === "loading" && <div className="source-preview preview-loading" role="status" aria-label={tr("正在识别链接")}>
+              <span className="preview-cover preview-pending-cover" data-platform={podcastPreview ? "apple_podcasts" : undefined} aria-hidden="true">
+                {podcastPreview ? <Podcast size={28} strokeWidth={1.5} /> : <Link2 size={25} strokeWidth={1.6} />}
+              </span>
+              <div className="source-preview-info preview-loading-info">
+                <strong>{podcastPreview ? tr("Apple 播客单集") : tr("正在识别来源")}</strong>
+                <span className="preview-status"><LoaderCircle className="spin" size={13} aria-hidden="true" />
+                  {linkPreview.slow ? tr("获取信息较慢，仍在等待标题与封面") : tr("正在获取标题与封面…")}
+                </span>
+              </div>
+            </div>}
+            {linkPreview.status === "ready" && <div className="source-preview" aria-label={tr("来源预览")}>
+              <Cover {...linkPreview.metadata} />
+              <div className="source-preview-info">
+                <strong>{linkPreview.metadata.title}</strong>
+                <SourceDetails {...linkPreview.metadata} />
+              </div>
+            </div>}
+            {linkPreview.status === "error" && <div className="preview-unavailable" role="status">
+              <span>{linkPreview.timedOut ? tr("来源预览等待超时") : tr("暂未获取到标题与封面")}</span>
+              <button className="text-button" type="button" onClick={linkPreview.retry}><RotateCw size={12} aria-hidden="true" />{tr("重试预览")}</button>
+            </div>}
+            {!existing && sourceReadiness}
           </div>
-        </div>}
-        {!existingArticle && !selectedFile && linkPreview.status === "ready" && <div className="source-preview" aria-label={tr("来源预览")}>
-          <Cover {...linkPreview.metadata} />
-          <div className="source-preview-info">
-            <strong>{linkPreview.metadata.title}</strong>
-            <SourceDetails {...linkPreview.metadata} />
-          </div>
-        </div>}
-        {!existingArticle && !selectedFile && linkPreview.status === "error" && <div className="preview-unavailable" role="status">
-          <span>{linkPreview.timedOut ? tr("来源预览等待超时") : tr("暂未获取到标题与封面")}</span>
-          <button className="text-button" type="button" onClick={linkPreview.retry}><RotateCw size={12} aria-hidden="true" />{tr("重试预览")}</button>
-        </div>}
-        {!existing && !selectedFile && sourceReadiness}
+        )}
         {inputError && <p className="home-tool-warning" role="alert"><CircleAlert size={15} /><span>{inputError}</span></p>}
         {showSetupBanner && <div className="home-setup-banner" role="status">
           <CircleAlert size={15} aria-hidden="true" />

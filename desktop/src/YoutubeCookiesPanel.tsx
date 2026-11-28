@@ -137,20 +137,27 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
     </header>
     <div className="settings-card-body">
       <div className="settings-field">
-        <label className="settings-label" htmlFor="youtube-cookie-mode">{tr("认证方式")}</label>
+        <span className="settings-label" id="youtube-cookie-mode-label">{tr("认证方式")}</span>
         <div className="settings-field-control">
-          <span className="settings-select">
-            <select id="youtube-cookie-mode" value={value.mode} disabled={disabled}
-              onChange={event => {
-                setPickError("")
-                onChange({ ...value, mode: event.target.value as YoutubeCookieMode })
-              }}>
-              <option value="none">{tr("不使用（默认）")}</option>
-              <option value="browser">{tr("从本机浏览器读取")}</option>
-              <option value="file">{tr("使用 cookies.txt 文件")}</option>
-            </select>
-            <ChevronDown size={15} aria-hidden="true" />
-          </span>
+          <div className="settings-segmented" role="radiogroup" aria-labelledby="youtube-cookie-mode-label" id="youtube-cookie-mode" tabIndex={-1}>
+            {([
+              { id: "none", label: tr("不使用") },
+              { id: "browser", label: tr("本机浏览器") },
+              { id: "file", label: "cookies.txt" },
+            ] as ReadonlyArray<{ id: YoutubeCookieMode; label: string }>).map(option => {
+              const selected = value.mode === option.id
+              return (
+                <label key={option.id} className={[selected ? "is-selected" : "", disabled ? "is-disabled" : ""].filter(Boolean).join(" ")}>
+                  <input type="radio" name="youtube-cookie-mode" value={option.id} checked={selected} disabled={disabled}
+                    onChange={() => {
+                      setPickError("")
+                      onChange({ ...value, mode: option.id })
+                    }} />
+                  <span>{option.label}</span>
+                </label>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -178,19 +185,20 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
         <div className="settings-field">
           <label className="settings-label" htmlFor="youtube-cookie-file">{tr("Cookie 文件")}</label>
           <div className="settings-field-control">
-            <input id="youtube-cookie-file" type="text" value={value.filePath} disabled={disabled}
-              placeholder={tr("选择 Netscape 格式的 cookies.txt 文件")} autoComplete="off" spellCheck={false}
-              onChange={event => {
-                setPickError("")
-                onChange({ ...value, filePath: event.target.value })
-              }} />
-            <div className="environment-actions" style={{ marginTop: 8 }}>
+            <div className="settings-path-row">
+              <input id="youtube-cookie-file" type="text" value={value.filePath} disabled={disabled}
+                placeholder={tr("选择 Netscape 格式的 cookies.txt 文件")} autoComplete="off" spellCheck={false}
+                onChange={event => {
+                  setPickError("")
+                  onChange({ ...value, filePath: event.target.value })
+                }} />
               <button type="button" className="secondary" disabled={disabled || picking} onClick={() => void chooseFile()}>
-                <FolderOpen size={15} aria-hidden="true" /> {tr("选择 cookies.txt…")}
+                <FolderOpen size={15} aria-hidden="true" /> {tr("选择…")}
               </button>
-              {value.filePath && <button type="button" className="text-button" disabled={disabled || picking}
+              {value.filePath && <button type="button" className="icon-button" disabled={disabled || picking}
+                aria-label={tr("清除")} title={tr("清除")}
                 onClick={() => onChange({ ...value, filePath: "" })}>
-                <X size={14} aria-hidden="true" /> {tr("清除")}
+                <X size={15} aria-hidden="true" />
               </button>}
             </div>
             <p className="settings-field-hint">

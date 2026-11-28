@@ -27,3 +27,39 @@ export function quickOpenArticles(articles: Article[], query: string, recent: st
   // becomes an invented article or an arbitrary path passed to the native layer.
   return [...matching].sort((a, b) => (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity))
 }
+
+export type HighlightPart = { text: string; match: boolean }
+
+export function highlightQueryParts(text: string, query: string): HighlightPart[] {
+  const tokens = [...new Set(query.trim().toLowerCase().split(/\s+/).filter(Boolean))]
+    .sort((a, b) => b.length - a.length)
+  if (!text || !tokens.length) return [{ text, match: false }]
+  const lower = text.toLowerCase()
+  const ranges: Array<[number, number]> = []
+  for (const token of tokens) {
+    let from = 0
+    while (from < lower.length) {
+      const index = lower.indexOf(token, from)
+      if (index < 0) break
+      ranges.push([index, index + token.length])
+      from = index + token.length
+    }
+  }
+  if (!ranges.length) return [{ text, match: false }]
+  ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1])
+  const merged: Array<[number, number]> = []
+  for (const [start, end] of ranges) {
+    const previous = merged.at(-1)
+    if (previous && start <= previous[1]) previous[1] = Math.max(previous[1], end)
+    else merged.push([start, end])
+  }
+  const parts: HighlightPart[] = []
+  let cursor = 0
+  for (const [start, end] of merged) {
+    if (start > cursor) parts.push({ text: text.slice(cursor, start), match: false })
+    parts.push({ text: text.slice(start, end), match: true })
+    cursor = end
+  }
+  if (cursor < text.length) parts.push({ text: text.slice(cursor), match: false })
+  return parts
+}

@@ -100,6 +100,12 @@
 .export-transcript-option { padding-top: 10px; }
 
 .cookie-permission-dialog { width: min(500px, calc(100vw - 28px)); }
+.confirm-dialog { width: min(376px, calc(100vw - 28px)); }
+.confirm-dialog header { padding: 20px 20px 8px; }
+.confirm-dialog h2 { font-size: 16px; }
+.confirm-dialog-body { gap: 8px; padding: 0 20px 18px; }
+.confirm-dialog-lead { font-size: 13px; line-height: 1.55; color: var(--ink); }
+.confirm-dialog footer { padding: 12px 20px; }
 .cookie-permission-heading { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
 .cookie-permission-badge {
   width: 34px;

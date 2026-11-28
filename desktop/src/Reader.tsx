@@ -176,6 +176,19 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
         frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-sidebar" }, "*")
         return
       }
+      if (!event.altKey && (event.metaKey || event.ctrlKey)
+        && event.key.toLowerCase() === "p" && prepared.status === "ready") {
+        event.preventDefault()
+        setMenu(undefined)
+        frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")
+        return
+      }
+      if (!event.altKey && (event.metaKey || event.ctrlKey) && event.key === "[") {
+        event.preventDefault()
+        setMenu(undefined)
+        void leave(onBack)
+        return
+      }
       if (event.key !== "Escape" || event.repeat) return
       event.preventDefault()
       event.stopImmediatePropagation()
@@ -188,7 +201,22 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
       })
     }
     window.addEventListener("keydown", back, true)
-    return () => window.removeEventListener("keydown", back, true)
+    const onMenuPrint = () => {
+      if (prepared.status !== "ready" || readerShortcutsBlocked()) return
+      setMenu(undefined)
+      frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")
+    }
+    const onMenuSidebar = () => {
+      if (prepared.status !== "ready" || readerShortcutsBlocked()) return
+      frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-sidebar" }, "*")
+    }
+    window.addEventListener("linkread-reader-print", onMenuPrint)
+    window.addEventListener("linkread-reader-toggle-sidebar", onMenuSidebar)
+    return () => {
+      window.removeEventListener("keydown", back, true)
+      window.removeEventListener("linkread-reader-print", onMenuPrint)
+      window.removeEventListener("linkread-reader-toggle-sidebar", onMenuSidebar)
+    }
   }, [onBack, menu, onNavigationStart, prepared.status])
 
   useLayoutEffect(() => {
@@ -216,6 +244,12 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
       const key = event.data?.linkReadShortcut
       if (key === "\\") {
         frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-sidebar" }, "*")
+      } else if (key === "[") {
+        if (!readerShortcutsBlocked()) void leave(onBack)
+      } else if (key === "p") {
+        if (prepared.status === "ready" && !readerShortcutsBlocked()) {
+          frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")
+        }
       } else if (key === "Escape" || key === "o" || key === "," || key === "k") {
         document.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: key !== "Escape", bubbles: true, cancelable: true }))
       }
