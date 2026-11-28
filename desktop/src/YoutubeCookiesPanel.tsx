@@ -1,5 +1,5 @@
 import { tr } from "./language.ts"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDown, ExternalLink, FolderOpen, LoaderCircle, ShieldAlert, X } from "lucide-react"
 import { openPrivacySettings, pickCookiesFile, testYoutubeCookies, type YoutubeCookieTestResult } from "./api"
 import { ConnectionRevision } from "./connectionState"
@@ -8,10 +8,11 @@ import { YoutubeCookiePermissionDialog } from "./YoutubeCookiePermissionDialog"
 import { youtubeBrowsers, type YoutubeBrowser, type YoutubeCookieMode, type YoutubeCookieOptions } from "./youtubeCookies"
 import { resolveYoutubeCookiePermissionKind } from "./youtubeGuidance"
 
-export function YoutubeCookiesPanel({ value, onChange, disabled }: {
+export function YoutubeCookiesPanel({ value, onChange, disabled, footer }: {
   value: YoutubeCookieOptions
   onChange: (value: YoutubeCookieOptions) => void
   disabled: boolean
+  footer?: ReactNode
 }) {
   const [picking, setPicking] = useState(false)
   const [pickError, setPickError] = useState("")
@@ -244,6 +245,7 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
         )}
       </>}
     </div>
+    {footer}
     {permissionDialogOpen && permissionKind && (
       <YoutubeCookiePermissionDialog
         kind={permissionKind}

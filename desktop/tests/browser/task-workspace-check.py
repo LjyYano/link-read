@@ -250,6 +250,7 @@ async def verify_tasks(browser):
     for index in (1, 2, 3):
         await queue_video(page, index)
     await expect(page.locator('.home-tasks .task-card')).to_have_count(1)
+    await expect(page.locator('.task-read-transcript')).to_have_count(0)
     await expect(page.locator('.home-task-summary')).to_contain_text('2 个任务排队中')
     await expect(page.locator('.home-task-summary')).to_contain_text('20 条已保留记录')
     assert await page.evaluate("window.taskWorkspaceFixture.calls.filter(call=>call.command==='generate').length") == 1

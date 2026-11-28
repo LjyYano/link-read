@@ -61,12 +61,12 @@ def _unavailable() -> LinkReadError:
     return LinkReadError("找不到可读取的原文快照，请重新导入来源", code="preview_unavailable", action="source")
 
 
-def _render_preview(library: Path, document: TranscriptDocument) -> str:
+def _render_preview(library: Path, document: TranscriptDocument, *, reading: dict | None = None) -> str:
     # An explicitly refreshed publisher description can be shown without
     # changing the immutable transcript or any model checkpoint identity.
     archive = find_workspace(library, _source_key(document))
     visible = with_source_notes(document, archive) if archive is not None else document
-    return render_html(visible, language=page_locale(document, "original"))
+    return render_html(visible, language=page_locale(document, "original"), reading_preferences=reading)
 
 
 def preview_folder(library: Path, preview_id: str, *, create: bool = False) -> Path:
@@ -127,8 +127,8 @@ def load_preview(library: Path, preview_id: str) -> tuple[Path, TranscriptDocume
 
 
 def save_preview(library: Path, document: TranscriptDocument, *, source: str,
-                 local_file: bool) -> str:
-    """Publish a complete snapshot before reporting that a transcript is readable."""
+                 local_file: bool, render_preview: bool = True) -> str:
+    """Publish a complete immutable transcript snapshot for resume or preview."""
     preview_id = snapshot_id(document)
     binding = _binding(source, local_file)
     if library.is_symlink():
@@ -151,18 +151,18 @@ def save_preview(library: Path, document: TranscriptDocument, *, source: str,
             manifest["requests"].append(binding)
             manifest["requests"] = manifest["requests"][-64:]
             write_text(folder / "request.json", json.dumps(manifest, ensure_ascii=False))
-        if not (folder / "preview.html").is_file():
+        if render_preview and not (folder / "preview.html").is_file():
             write_text(folder / "preview.html", _render_preview(library, document))
     return preview_id
 
 
-def prepare_preview(library: Path, preview_id: str) -> tuple[TranscriptDocument, str]:
+def prepare_preview(library: Path, preview_id: str, *, reading: dict | None = None) -> tuple[TranscriptDocument, str]:
     preview_folder(library, preview_id)  # Validate before even opening the lock.
     with archive_mutation(library):
         folder, document = load_preview(library, preview_id)
         # Re-render through the current deterministic renderer. Never trust
         # arbitrary HTML placed next to an otherwise valid snapshot.
-        html = _render_preview(library, document)
+        html = _render_preview(library, document, reading=reading)
         write_text(folder / "preview.html", html)
     return document, sha256(html.encode("utf-8")).hexdigest()[:20]
 

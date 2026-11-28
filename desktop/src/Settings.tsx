@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from "react"
-import { AudioLines, ChevronLeft, FolderOpen, KeyRound, LoaderCircle, SlidersHorizontal, Sparkles } from "lucide-react"
+import { AudioLines, BookOpenText, ChevronLeft, FolderOpen, KeyRound, LoaderCircle, SlidersHorizontal, Sparkles } from "lucide-react"
 import {
   checkTool, deleteApiToken, deleteAsrToken, listCliModels, loadApiToken, loadAsrToken, pickExecutable, providerNames,
   saveApiToken, saveAsrToken, testApiConnection, type Provider, type ToolStatus,
@@ -11,19 +11,22 @@ import { ConfirmDialog } from "./ConfirmDialog"
 import { ConnectionRevision } from "./connectionState"
 import { tr, type LanguageSettings } from "./language.ts"
 import { LanguageSettingsCard } from "./LanguageSettingsCard"
+import { ReadingSettingsCard } from "./ReadingSettingsCard"
+import type { ReadingPreferences } from "./readingPreferences"
 import { SettingsHelp } from "./SettingsHelp"
 import { SettingsSecretField } from "./SettingsSecretField"
 import type { GenerationSettingsGate } from "./generationSettings"
 import {
-  isLoopbackBaseUrl, saveSettingsDraft, settingsDraftEqual, SettingsSaveError, SettingsValidationError,
-  validateApiConfiguration, type Preferences, type SettingsDraft,
+  dirtySettingsTabs, formSaveBarState, instantSaveStatus, isLoopbackBaseUrl, saveSettingsDraft,
+  settingsDraftEqual, SettingsSaveError, SettingsValidationError, validateApiConfiguration,
+  type FormSettingsTabId, type InstantSaveState, type Preferences, type SettingsDraft, type SettingsTabId,
 } from "./settingsState"
-import type { ThemeMode } from "./themeState"
+import type { ResolvedTheme, ThemeMode } from "./themeState"
 import { YoutubeCookiesPanel } from "./YoutubeCookiesPanel"
 import { defaultYoutubeCookies } from "./youtubeCookies"
 import "./settings.css"
 
-export type SettingsTarget = "general" | "ai" | "asr" | "youtube"
+export type SettingsTarget = SettingsTabId
 export type SettingsLeaveGuard = {
   confirm: (proceed: () => void) => boolean
   isDirty: () => boolean
@@ -32,12 +35,14 @@ export type SettingsLeaveGuard = {
 function tabForField(field: string): SettingsTarget {
   if (field.startsWith("asr-") || field.startsWith("ffmpeg-")) return "asr"
   if (field.startsWith("youtube-")) return "youtube"
+  if (field.startsWith("reading-")) return "reading"
   if (field.startsWith("settings-theme") || field.startsWith("settings-language")) return "general"
   return "ai"
 }
 
 export function Settings({ preferences, onSave, onBack, onTokenChanged, settingsGate, settingsRecovery,
-  leaveGuard, target, language, onLanguageChange, languageError, theme, onThemeChange, unifiedHeader = false }: {
+  leaveGuard, target, language, onLanguageChange, languageError, theme, onThemeChange, resolvedAppTheme,
+  reading, onReadingChange, unifiedHeader = false }: {
   preferences: Preferences
   onSave: (preferences: Preferences) => Promise<void> | void
   onBack: () => void
@@ -51,6 +56,9 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   languageError: string
   theme: ThemeMode
   onThemeChange: (theme: ThemeMode) => void | Promise<void>
+  resolvedAppTheme: ResolvedTheme
+  reading: ReadingPreferences
+  onReadingChange: (reading: ReadingPreferences) => void | Promise<void>
   unifiedHeader?: boolean
 }) {
   const [draft, setDraft] = useState<SettingsDraft>(() => ({ preferences, apiToken: "", asrToken: "" }))
@@ -72,10 +80,12 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   }))
   const [error, setError] = useState("")
   const [savedNotice, setSavedNotice] = useState(false)
+  const [instantSaveState, setInstantSaveState] = useState<InstantSaveState>("idle")
   const [confirmClearKind, setConfirmClearKind] = useState<"apiToken" | "asrToken">()
   const [pendingLeaveAction, setPendingLeaveAction] = useState<() => void>()
   const keyLoadRevision = useRef(0)
   const toolPickRevision = useRef(0)
+  const instantSaveRevision = useRef(0)
   const preserveLoadDraft = useRef(false)
   const connectionRevision = useRef(new ConnectionRevision())
   const connectionIdentity = useRef("")
@@ -95,16 +105,21 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   const currentDisabled = useRef(disabled)
   currentDisabled.current = disabled
 
+  function selectTab(nextTab: SettingsTarget) {
+    setActiveTab(nextTab)
+    setInstantSaveState(current => current === "saved" ? "idle" : current)
+  }
+
   useEffect(() => {
     if (!target) return
     pendingTarget.current = target
-    setActiveTab(target)
+    selectTab(target)
   }, [target])
 
   useLayoutEffect(() => {
     const destination = pendingTarget.current
     if (disabled || !destination) return
-    if (destination === "general") {
+    if (destination === "general" || destination === "reading") {
       pendingTarget.current = undefined
       return
     }
@@ -165,6 +180,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
       mounted.current = false
       keyLoadRevision.current++
       toolPickRevision.current++
+      instantSaveRevision.current++
       connectionRevision.current.invalidate()
     }
   }, [])
@@ -380,27 +396,80 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
 
   const tabs: ReadonlyArray<{ id: SettingsTarget; label: string; icon: typeof SlidersHorizontal }> = [
     { id: "general", label: tr("通用"), icon: SlidersHorizontal },
+    { id: "reading", label: tr("阅读"), icon: BookOpenText },
     { id: "ai", label: tr("AI 生成"), icon: Sparkles },
     { id: "asr", label: tr("语音转写"), icon: AudioLines },
     { id: "youtube", label: tr("YouTube 认证"), icon: KeyRound },
   ]
 
-  async function applyLanguage(next: LanguageSettings) {
+  async function applyInstantPreference(work: () => void | Promise<void>) {
+    const revision = ++instantSaveRevision.current
     setPreferenceError("")
+    setInstantSaveState("saving")
     try {
-      await onLanguageChange(next)
+      await work()
+      if (mounted.current && instantSaveRevision.current === revision) {
+        setInstantSaveState("saved")
+      }
     } catch (failure) {
-      if (mounted.current) setPreferenceError(failure instanceof Error ? failure.message : String(failure))
+      if (mounted.current && instantSaveRevision.current === revision) {
+        setInstantSaveState("idle")
+        setPreferenceError(failure instanceof Error ? failure.message : String(failure))
+      }
     }
   }
 
-  async function applyTheme(next: ThemeMode) {
-    setPreferenceError("")
-    try {
-      await onThemeChange(next)
-    } catch (failure) {
-      if (mounted.current) setPreferenceError(failure instanceof Error ? failure.message : String(failure))
-    }
+  function applyLanguage(next: LanguageSettings) {
+    return applyInstantPreference(() => onLanguageChange(next))
+  }
+
+  function applyTheme(next: ThemeMode) {
+    return applyInstantPreference(() => onThemeChange(next))
+  }
+
+  function applyReading(next: ReadingPreferences) {
+    return applyInstantPreference(() => onReadingChange(next))
+  }
+
+  const dirtyTabs = dirtySettingsTabs(draft, baseline)
+  const generalSaveStatus = instantSaveStatus({
+    instantSaveState: activeTab === "general" ? instantSaveState : "idle",
+    hasInstantError: Boolean(preferenceError || languageError),
+  })
+  const readingSaveStatus = instantSaveStatus({
+    instantSaveState: activeTab === "reading" ? instantSaveState : "idle",
+    hasInstantError: Boolean(preferenceError),
+  })
+
+  function renderFormCardFooter(tab: FormSettingsTabId) {
+    const bar = formSaveBarState({
+      tab,
+      dirty,
+      tabDirty: dirtyTabs[tab],
+      loading,
+      saving,
+      testing,
+      asrTesting,
+      savedNotice,
+    })
+    return (
+      <footer className="settings-card-save">
+        {error && activeTab === tab && (
+          <p id="settings-error" className="settings-error" role="alert" tabIndex={-1}>{error}</p>
+        )}
+        <div className="settings-card-save-row">
+          <span className="settings-save-status" role="status" data-state={bar.statusSaved ? "saved" : undefined}>
+            {bar.statusText}
+          </span>
+          <div className="settings-action-buttons">
+            <button className="primary" type="submit" disabled={disabled || testing || asrTesting || (!dirty && !settingsRecovery)}
+              aria-label={tr("保存设置")} title={tr("保存设置")}>
+              {saving && <LoaderCircle size={15} className="spin" aria-hidden="true" />}{saving ? tr("保存中…") : tr("保存设置")}
+            </button>
+          </div>
+        </div>
+      </footer>
+    )
   }
 
   return <section className={`settings-page${unifiedHeader ? " settings-page-unified" : ""}`} aria-labelledby="settings-heading">
@@ -423,12 +492,13 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
         : event.key === "End" ? tabs.length - 1
         : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length
       const nextTab = tabs[nextIndex].id
-      setActiveTab(nextTab)
+      selectTab(nextTab)
       document.getElementById(`settings-tab-${nextTab}`)?.focus()
     }}>
       {tabs.map(tab => {
         const Icon = tab.icon
         const selected = activeTab === tab.id
+        const tabDirty = (tab.id === "ai" || tab.id === "asr" || tab.id === "youtube") && dirtyTabs[tab.id]
         return (
           <button
             key={tab.id}
@@ -439,10 +509,11 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
             aria-controls={`settings-panel-${tab.id}`}
             tabIndex={selected ? 0 : -1}
             className={`settings-tab${selected ? " is-active" : ""}`}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => selectTab(tab.id)}
           >
             <Icon size={15} aria-hidden="true" />
             <span>{tab.label}</span>
+            {tabDirty && <span className="settings-tab-dot" aria-hidden="true" />}
           </button>
         )
       })}
@@ -453,6 +524,9 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
         <button type="button" className="text-button" disabled={loading || saving}
           onClick={() => void readKeys(preserveLoadDraft.current)}>{tr("重新读取")}</button>
       </div>}
+      {settingsRecovery && !saving && <p className="settings-error" role="alert">
+        {tr("上次未能完成设置保存。请核对服务地址和密钥，然后重新保存设置。")}
+      </p>}
       <div id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" hidden={activeTab !== "general"}>
         <LanguageSettingsCard
           value={language}
@@ -461,6 +535,17 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
           onThemeChange={next => { void applyTheme(next) }}
           disabled={saving}
           error={preferenceError || languageError}
+          saveStatus={generalSaveStatus}
+        />
+      </div>
+      <div id="settings-panel-reading" role="tabpanel" aria-labelledby="settings-tab-reading" hidden={activeTab !== "reading"}>
+        <ReadingSettingsCard
+          value={reading}
+          onChange={next => { void applyReading(next) }}
+          appResolvedTheme={resolvedAppTheme}
+          disabled={saving}
+          error={preferenceError}
+          saveStatus={readingSaveStatus}
         />
       </div>
       <div id="settings-panel-ai" role="tabpanel" aria-labelledby="settings-tab-ai" hidden={activeTab !== "ai"}>
@@ -563,6 +648,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
             </div>
           </>}
         </div>
+        {renderFormCardFooter("ai")}
       </section>
       </div>
       <div id="settings-panel-asr" role="tabpanel" aria-labelledby="settings-tab-asr" hidden={activeTab !== "asr"}>
@@ -570,32 +656,15 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
           token={draft.asrToken} apiToken={draft.apiToken} savedToken={baseline.asrToken}
           onToken={asrToken => update(current => ({ ...current, asrToken }))}
           onClearToken={testing || asrTesting ? undefined : () => setConfirmClearKind("asrToken")}
-          disabled={disabled} onTestingChange={setAsrTesting} />
+          disabled={disabled} onTestingChange={setAsrTesting}
+          footer={renderFormCardFooter("asr")} />
       </div>
       <div id="settings-panel-youtube" role="tabpanel" aria-labelledby="settings-tab-youtube" hidden={activeTab !== "youtube"}>
         <YoutubeCookiesPanel value={youtubeCookies}
           onChange={next => update(current => ({ ...current, preferences: { ...current.preferences, youtubeCookies: next } }))}
-          disabled={disabled} />
+          disabled={disabled}
+          footer={renderFormCardFooter("youtube")} />
       </div>
-      {error && <p id="settings-error" className="settings-error" role="alert" tabIndex={-1}>{error}</p>}
-      {settingsRecovery && !saving && <p className="settings-error" role="alert">
-        {tr("上次未能完成设置保存。请核对服务地址和密钥，然后重新保存设置。")}
-      </p>}
-      <footer className="settings-actions">
-        <span className="settings-save-status" role="status" data-state={savedNotice && !dirty ? "saved" : undefined}>
-          {loading ? tr("正在读取配置…") : saving ? tr("正在保存…") : asrTesting ? tr("正在测试转写…") : testing ? tr("正在测试连接…")
-            : dirty ? tr("有未保存的修改") : savedNotice ? tr("设置已保存") : ""}
-        </span>
-        <div className="settings-action-buttons">
-          <button className="plain" type="button" disabled={saving} onClick={onBack}>
-            {dirty || settingsRecovery ? tr("取消") : tr("完成")}
-          </button>
-          <button className="primary" type="submit" disabled={disabled || testing || asrTesting || (!dirty && !settingsRecovery)}
-            aria-label={tr("保存设置")} title={tr("保存设置")}>
-            {saving && <LoaderCircle size={15} className="spin" aria-hidden="true" />}{saving ? tr("保存中…") : tr("保存设置")}
-          </button>
-        </div>
-      </footer>
     </form>
     {confirmClearKind && (
       <ConfirmDialog

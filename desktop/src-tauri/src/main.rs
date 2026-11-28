@@ -13,6 +13,7 @@ mod protocol;
 mod reader;
 mod sidecar;
 mod subtitle_clipboard;
+mod system_fonts;
 mod types;
 mod video_links;
 
@@ -790,6 +791,25 @@ async fn update_article_state(
     .await
 }
 
+async fn reading_preferences_args(locations: &Locations) -> Vec<String> {
+    let data = locations.data.clone();
+    let json = tokio::task::spawn_blocking(move || durable_state::load_reading_preferences_json(&data))
+        .await
+        .ok()
+        .flatten();
+    match json {
+        Some(value) => vec!["--reading-preferences".into(), value],
+        None => Vec::new(),
+    }
+}
+
+#[tauri::command]
+async fn list_system_fonts() -> AppResult<Vec<String>> {
+    tokio::task::spawn_blocking(system_fonts::installed_font_families)
+        .await
+        .map_err(|error| details("无法读取系统字体列表", error))
+}
+
 #[tauri::command]
 async fn prepare_article(
     locations: State<'_, Locations>,
@@ -797,9 +817,14 @@ async fn prepare_article(
     id: String,
 ) -> AppResult<PreparedReader> {
     article_file(&locations.library, &id)?;
+    let mut owned = vec!["reader".to_owned()];
+    owned.extend(reading_preferences_args(&locations).await);
+    owned.push("--".into());
+    owned.push(id);
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
     query_tracked(
         &locations,
-        &["reader", "--", &id],
+        &args,
         Duration::from_secs(60),
         "读取资料库超时，请重试",
         Some(&queries),
@@ -814,9 +839,14 @@ async fn prepare_preview(
     id: String,
 ) -> AppResult<PreparedPreview> {
     preview_id(&id)?;
+    let mut owned = vec!["preview-reader".to_owned()];
+    owned.extend(reading_preferences_args(&locations).await);
+    owned.push("--".into());
+    owned.push(id);
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
     query_tracked(
         &locations,
-        &["preview-reader", "--", &id],
+        &args,
         Duration::from_secs(60),
         "读取资料库超时，请重试",
         Some(&queries),
@@ -917,6 +947,7 @@ async fn refresh_shownotes(
     };
     let mut owned: Vec<String> = vec!["refresh-shownotes".into()];
     owned.extend(cookies);
+    owned.extend(reading_preferences_args(&locations).await);
     owned.push("--".into());
     owned.push(id);
     let args: Vec<&str> = owned.iter().map(String::as_str).collect();
@@ -998,9 +1029,14 @@ async fn export_article(
         .map_err(|error| details("无法访问所选保存位置", error))?;
     let (source, markdown) = match format {
         ExportFormat::Html => {
+            let mut owned = vec!["reader".to_owned()];
+            owned.extend(reading_preferences_args(&locations).await);
+            owned.push("--".into());
+            owned.push(id.clone());
+            let args: Vec<&str> = owned.iter().map(String::as_str).collect();
             let _: PreparedReader = query_tracked(
                 &locations,
-                &["reader", "--", &id],
+                &args,
                 Duration::from_secs(60),
                 "读取资料库超时，请重试",
                 Some(&queries),
@@ -1149,9 +1185,14 @@ async fn open_article(
     id: String,
 ) -> AppResult<()> {
     article_file(&locations.library, &id)?;
+    let mut owned = vec!["reader".to_owned()];
+    owned.extend(reading_preferences_args(&locations).await);
+    owned.push("--".into());
+    owned.push(id.clone());
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
     let _: PreparedReader = query_tracked(
         &locations,
-        &["reader", "--", &id],
+        &args,
         Duration::from_secs(60),
         "读取资料库超时，请重试",
         Some(&queries),
@@ -1247,6 +1288,7 @@ fn main() {
             update_article_state,
             prepare_article,
             prepare_preview,
+            list_system_fonts,
             load_task_journal,
             save_task_journal,
             load_preferences,
@@ -2082,6 +2124,26 @@ mod tests {
         let preview = preview_document(original.to_owned());
         assert!(preview.starts_with("<body><script>const template = '</body>';</script>"));
         assert!(preview.ends_with("</script>\n</body>"));
+    }
+
+    #[test]
+    fn pure_json_manifest_archive_is_recognized_and_never_served_as_html() {
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().join("pure-json-article");
+        fs::create_dir_all(&folder).unwrap();
+        let manifest = folder.join("manifest.json");
+        let cached = folder.join(".reader.html");
+        fs::write(&manifest, r#"{"version":1,"document_type":"linkread_manifest"}"#).unwrap();
+
+        assert_eq!(article_file(directory.path(), "pure-json-article").unwrap(), manifest);
+        // Without a materialized .reader.html cache, manifest.json must never be served as HTML.
+        assert!(super::rendered_article_file(directory.path(), "pure-json-article").is_err());
+
+        fs::write(&cached, "<!doctype html><p>rendered</p>").unwrap();
+        assert_eq!(
+            super::rendered_article_file(directory.path(), "pure-json-article").unwrap(),
+            cached
+        );
     }
 
     #[test]

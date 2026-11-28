@@ -14,7 +14,7 @@ from test_ai_notes import FakeProvider, make_transcript
 from test_desktop import invoke
 
 
-def test_original_is_readable_before_any_model_call_and_survives_failure(tmp_path, monkeypatch, capsys):
+def test_transcript_snapshot_is_saved_without_eager_preview_html_and_survives_failure(tmp_path, monkeypatch, capsys):
     raw = make_transcript(text="全部原文必须保留。")
     monkeypatch.setattr("linkread_desktop.generation.extract_document", lambda *args, **kwargs: raw)
 
@@ -23,10 +23,13 @@ def test_original_is_readable_before_any_model_call_and_survives_failure(tmp_pat
         def generate(self, *args, **kwargs):
             folders = list((tmp_path / ".transcript-previews").iterdir())
             assert len(folders) == 1
-            assert (folders[0] / "preview.html").is_file()
-            # Preparing a reader while AI is active must not wait for the run
-            # to release an archive-wide generation lock.
+            assert (folders[0] / "transcript.json").is_file()
+            assert (folders[0] / "request.json").is_file()
+            assert not (folders[0] / "preview.html").exists()
+            # Preparing a reader on demand (e.g. standalone downloaded subtitles)
+            # renders preview.html without waiting for an archive-wide generation lock.
             assert prepare_preview(tmp_path, folders[0].name)[0] == raw
+            assert (folders[0] / "preview.html").is_file()
             assert not list(tmp_path.glob("*/article.html"))
             raise ProviderError("failed", code="model_timeout")
 
@@ -176,7 +179,7 @@ def test_failed_regeneration_keeps_old_article_and_only_retries_missing_stage(tm
     monkeypatch.setattr(desktop, "make_provider", lambda *_a, **_k: provider)
     status, events = invoke(monkeypatch, capsys, tmp_path, "generate", raw.source.url)
     assert status == 0
-    article = tmp_path / events[-1]["article"]["id"] / "article.html"
+    article = tmp_path / events[-1]["article"]["id"] / "manifest.json"
     original = article.read_bytes()
 
     class FailedProof(FakeProvider):

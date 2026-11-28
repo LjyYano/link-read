@@ -202,7 +202,7 @@ def test_podcast_http_ssrf_and_apple_podcasts_dtd_cdata_and_empty_cues():
 
 
 def test_renderers_and_reader_cache_regressions():
-    assert reader_cache.CACHE_VERSION == 17
+    assert reader_cache.CACHE_VERSION == 18
 
     zh_html = render_html(_sample_doc(), language="zh-CN")
     assert 'data-theme-choice="sepia"' in zh_html

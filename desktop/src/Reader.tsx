@@ -6,10 +6,9 @@ import { exportArticle, exportSubtitles, openArticle, openExternal, openVideo, p
 import { ConfirmDialog } from "./ConfirmDialog"
 import { menuNavigation } from "./menu"
 import { ReadingActions, type ChangeArticleState } from "./ReadingActions"
+import type { ReadingPreferences } from "./readingPreferences"
 import { ReadingPositionBridge } from "./readingPositionBridge"
 import { ReaderEscapeBridge, readerShortcutsBlocked } from "./readerEscape"
-import type { TaskActivity } from "./taskProgress"
-import type { Job } from "./JobCard"
 import type { YoutubeCookieOptions } from "./youtubeCookies"
 import "./reader.css"
 
@@ -23,7 +22,6 @@ type PreparedReader = { status: "loading" } | { status: "ready"; revision: strin
 type ShownotesRefresh = { status: "idle" | "loading" | "empty" } | { status: "error"; message: string }
 
 export type ReaderTheme = "light" | "sepia" | "dark"
-export type PreviewTask = { id: string; status: Job["status"]; message?: string; activity?: TaskActivity; article?: Article; onOpenComplete: () => void }
 export type StandaloneSubtitlePreview = { onGenerate: () => void }
 export type ReaderToolbarSlots = {
   leading: HTMLDivElement | null
@@ -31,11 +29,10 @@ export type ReaderToolbarSlots = {
   actions: HTMLDivElement | null
 }
 
-export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onDelete, onStateChange, preview, standalonePreview,
+export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onDelete, onStateChange, standalonePreview,
   onNavigationStart, onEdit, onExportMarkdown, detailsRevision = 0, onThemeChange, onViewRegeneration, onOpenUpdated,
-  youtubeCookies, forcedTheme, toolbarSlots }: {
+  youtubeCookies, reading, effectiveTheme, onReadingChange, onOpenReadingSettings, toolbarSlots }: {
   article: Article; onBack: () => void; onRegenerate: (article: Article) => Promise<void>; onDelete?: (id: string) => Promise<void>; onStateChange: ChangeArticleState
-  preview?: PreviewTask
   standalonePreview?: StandaloneSubtitlePreview
   backLabel?: string
   onThemeChange?: (theme: ReaderTheme) => void
@@ -46,7 +43,10 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
   onExportMarkdown?: (article: Article) => void
   detailsRevision?: number
   youtubeCookies?: YoutubeCookieOptions
-  forcedTheme?: "light" | "dark"
+  reading?: ReadingPreferences
+  effectiveTheme?: ReaderTheme
+  onReadingChange?: (patch: Partial<ReadingPreferences>) => void
+  onOpenReadingSettings?: () => void
   toolbarSlots?: ReaderToolbarSlots
 }) {
   const frame = useRef<HTMLIFrameElement>(null)
@@ -71,6 +71,7 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
   const isPreview = Boolean(article.previewId)
   const readingKey = prepared.status === "ready" ? prepared.readingKey : null
   const lastDetailsRevision = useRef(detailsRevision)
+  const lastShowCover = useRef(reading?.showCover)
 
   useEffect(() => () => escapeBridge.current.cancel(),
     [article.id, article.previewId, prepared.status === "ready" ? prepared.revision : null, menu])
@@ -140,6 +141,26 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
     })()
     return () => { current = false }
   }, [detailsRevision, prepare])
+
+  useEffect(() => {
+    if (lastShowCover.current === reading?.showCover) return
+    lastShowCover.current = reading?.showCover
+    let current = true
+    void (async () => {
+      await positionBridge.current?.flush()
+      if (current) {
+        prepareVersion.current++
+        preparing.current = false
+        await prepare()
+      }
+    })()
+    return () => { current = false }
+  }, [reading?.showCover, prepare])
+
+  useEffect(() => {
+    if (prepared.status !== "ready" || !reading) return
+    frame.current?.contentWindow?.postMessage({ linkReadCommand: "set-reading", reading, effectiveTheme }, "*")
+  }, [prepared.status, reading, effectiveTheme])
 
   useLayoutEffect(() => {
     if (!readingKey) return
@@ -225,6 +246,12 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
       escapeBridge.current.receive(event.data)
       const theme = event.data?.linkReadTheme
       if (theme === "light" || theme === "sepia" || theme === "dark") onThemeChange?.(theme)
+      if (event.data?.linkReadReadingUpdate && typeof event.data.linkReadReadingUpdate === "object") {
+        onReadingChange?.(event.data.linkReadReadingUpdate as Partial<ReadingPreferences>)
+      }
+      if (event.data?.linkReadOpenSettings === "reading" && onOpenReadingSettings && !readerShortcutsBlocked()) {
+        void leave(onOpenReadingSettings)
+      }
       if (event.data?.linkReadSidebar && typeof event.data.linkReadSidebar === "object") {
         const next = event.data.linkReadSidebar as { available?: unknown; open?: unknown }
         if (typeof next.available === "boolean" && typeof next.open === "boolean") {
@@ -256,7 +283,7 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
     }
     window.addEventListener("message", handleFrameMessage)
     return () => window.removeEventListener("message", handleFrameMessage)
-  }, [onBack, prepare, isPreview, onNavigationStart, onThemeChange])
+  }, [onBack, prepare, isPreview, onNavigationStart, onThemeChange, onReadingChange, onOpenReadingSettings])
 
   useEffect(() => {
     if (!menu) return
@@ -446,17 +473,9 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
           onViewRegeneration()
         }}>{tr("View task")}</button>
       </div>}
-      {isPreview && <div className="reader-preview-notice" role="status" data-status={preview?.status ?? (standalonePreview ? "done" : "interrupted")}>
-        {preview?.status === "running" && <LoaderCircle size={14} className="spin" aria-hidden="true" />}
-        <span>{preview?.status === "done" ? tr("Finished article ready")
-          : preview?.status === "running" ? tr("Original transcript · AI in progress")
-          : preview?.status === "queued" ? tr("Original transcript · AI queued")
-          : standalonePreview ? tr("Original transcript · Downloaded subtitles")
-          : tr("Original transcript · AI stopped")}</span>
-        {preview?.status === "done" && preview.article && <button className="text-button" type="button" onClick={() => void leave(preview.onOpenComplete)}>
-          {tr("View finished article")}<ArrowUpRight size={13} aria-hidden="true" />
-        </button>}
-        {standalonePreview && !preview && <>
+      {isPreview && <div className="reader-preview-notice" role="status" data-status="done">
+        <span>{tr("Original transcript · Downloaded subtitles")}</span>
+        {standalonePreview && <>
           <button className="text-button" type="button" onClick={() => void leave(standalonePreview.onGenerate)}>
             <Sparkles size={13} aria-hidden="true" />{tr("Generate article")}
           </button>
@@ -495,7 +514,8 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
       </div>}
       {prepared.status === "ready" ? <iframe ref={frame} className="desktop-reader-frame" sandbox="allow-scripts allow-same-origin allow-modals" title={article.title}
         onLoad={() => {
-          if (forcedTheme) frame.current?.contentWindow?.postMessage({ linkReadCommand: "set-theme", theme: forcedTheme }, "*")
+          if (reading) frame.current?.contentWindow?.postMessage({ linkReadCommand: "set-reading", reading, effectiveTheme }, "*")
+          else if (effectiveTheme) frame.current?.contentWindow?.postMessage({ linkReadCommand: "set-theme", theme: effectiveTheme }, "*")
         }}
         src={`linkread-reader://localhost/${article.previewId ? `preview/${encodeURIComponent(article.previewId)}` : encodeURIComponent(article.id)}?v=${encodeURIComponent(prepared.revision)}&platform=${article.platform}${prepared.shownotes ? "#shownotes" : ""}`} />
         : <div className="desktop-reader-loading" role={prepared.status === "error" ? "alert" : "status"}>

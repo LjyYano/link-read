@@ -8,7 +8,7 @@ const isDesktopEmbedded=()=>window.parent!==window&&(window.__linkreadDesktop===
 const tabNames=$$('.tab').map(b=>b.dataset.tab);
 const tabList=$('.tabs-scroll'),tabStrip=$('.reader-tab-strip');
 const tabsLeft=$('#reader-tabs-left'),tabsRight=$('#reader-tabs-right');
-let activeTab='transcript', readingPosition=null,navigationVersion=0;
+let activeTab=$('.tab.active')?.dataset.tab||'transcript', readingPosition=null,navigationVersion=0;
 function revealSelectedTab(){
   const selected=$('.tab.active',tabList);
   if(!selected)return;
@@ -96,11 +96,16 @@ function setReaderTheme(next){
   if(!validTheme(next))return;
   document.documentElement.dataset.theme=next;
   syncThemeButtons();
-  try{localStorage.setItem(isDesktopEmbedded()?'linkread-desktop-theme':'yano-library-theme',next)}catch(e){}
-  if(isDesktopEmbedded())window.parent.postMessage({linkReadTheme:next},'*');
+  if(isDesktopEmbedded()){
+    window.parent.postMessage({linkReadTheme:next,linkReadReadingUpdate:{theme:next}},'*');
+    return;
+  }
+  try{localStorage.setItem('yano-library-theme',next)}catch(e){}
 }
 window.linkreadSyncThemeButtons=syncThemeButtons;
-try{const t=localStorage.getItem('yano-library-theme');if(validTheme(t))document.documentElement.dataset.theme=t}catch(e){}
+if(!isDesktopEmbedded()){
+  try{const t=localStorage.getItem('yano-library-theme');if(validTheme(t))document.documentElement.dataset.theme=t}catch(e){}
+}
 syncThemeButtons();
 $$('.theme-btn').forEach(b=>b.addEventListener('click',()=>setReaderTheme(currentTheme()==='dark'?'light':'dark')));
 $$('button[data-theme-choice]').forEach(b=>b.addEventListener('click',()=>setReaderTheme(b.dataset.themeChoice)));
@@ -411,15 +416,40 @@ $('[data-refresh-shownotes]')?.addEventListener('click',()=>{
 });
 const article=$('.article-body');
 const preferencesKey='linkread-reading-preferences-v1',readingText=$$('.article-body,.shownotes-copy');
+const forbiddenFontChars=/[\x00-\x1f\x7f-\x9f<>{};:"'\\/()*]/;
+function cleanCustomFont(value){
+  if(typeof value!=='string')return '';
+  const trimmed=value.trim();
+  return trimmed&&trimmed.length<=128&&!forbiddenFontChars.test(trimmed)?trimmed:'';
+}
+function parseReadingDefaults(){
+  const base={fontSize:16,lineWidth:'standard',lineSpacing:'relaxed',fontFamily:'sans',customFont:'',showHighlights:true,showCover:true};
+  try{
+    const saved=JSON.parse($('#linkread-reading-defaults')?.textContent||'null');
+    if(!saved||typeof saved!=='object'||Array.isArray(saved))return base;
+    if(Number.isInteger(saved.fontSize)&&saved.fontSize>=14&&saved.fontSize<=26)base.fontSize=saved.fontSize;
+    if(saved.lineWidth==='narrow'||saved.lineWidth==='standard'||saved.lineWidth==='wide')base.lineWidth=saved.lineWidth;
+    if(saved.lineSpacing==='compact'||saved.lineSpacing==='standard'||saved.lineSpacing==='relaxed')base.lineSpacing=saved.lineSpacing;
+    base.customFont=cleanCustomFont(saved.customFont);
+    if(saved.fontFamily==='serif'||saved.fontFamily==='sans'||(saved.fontFamily==='custom'&&base.customFont))base.fontFamily=saved.fontFamily;
+    if(typeof saved.showHighlights==='boolean')base.showHighlights=saved.showHighlights;
+    if(typeof saved.showCover==='boolean')base.showCover=saved.showCover;
+  }catch{}
+  return base;
+}
+const bakedDefaults=parseReadingDefaults();
 function parseAppearance(raw){
-  const defaults={version:1,fontSize:null,lineWidth:'standard',lineSpacing:'relaxed',fontFamily:'sans'};
+  const defaults={version:1,...bakedDefaults};
   try{
     const saved=JSON.parse(raw||'null');
     if(!saved||typeof saved!=='object'||Array.isArray(saved)||saved.version!==1)return defaults;
     if(Number.isInteger(saved.fontSize)&&saved.fontSize>=14&&saved.fontSize<=26)defaults.fontSize=saved.fontSize;
-    if(saved.lineWidth==='wide')defaults.lineWidth='wide';
-    if(saved.lineSpacing==='compact')defaults.lineSpacing='compact';
-    if(saved.fontFamily==='serif')defaults.fontFamily='serif';
+    if(saved.lineWidth==='narrow'||saved.lineWidth==='standard'||saved.lineWidth==='wide')defaults.lineWidth=saved.lineWidth;
+    if(saved.lineSpacing==='compact'||saved.lineSpacing==='standard'||saved.lineSpacing==='relaxed')defaults.lineSpacing=saved.lineSpacing;
+    if(saved.customFont!==undefined)defaults.customFont=cleanCustomFont(saved.customFont);
+    if(saved.fontFamily==='serif'||saved.fontFamily==='sans'||(saved.fontFamily==='custom'&&defaults.customFont))defaults.fontFamily=saved.fontFamily;
+    if(typeof saved.showHighlights==='boolean')defaults.showHighlights=saved.showHighlights;
+    if(typeof saved.showCover==='boolean')defaults.showCover=saved.showCover;
   }catch{}
   return defaults;
 }
@@ -429,44 +459,104 @@ function appearanceStatus(saved){
   status.textContent=t(saved?'Transcript & Shownotes · Saved across articles':'Applies here; preferences could not be saved.');
   if(saved)delete status.dataset.error;else status.dataset.error='true';
 }
-try{appearance=parseAppearance(localStorage.getItem(preferencesKey))}catch{appearanceStatus(false)}
+if(!isDesktopEmbedded()){
+  try{appearance=parseAppearance(localStorage.getItem(preferencesKey))}catch{appearanceStatus(false)}
+}
 function paintAppearance(){
-  readingText.forEach(element=>element.style.fontSize=appearance.fontSize===null?'':`${appearance.fontSize}px`);
+  const rootStyle=document.documentElement.style;
+  rootStyle.setProperty('--reading-font-size',`${appearance.fontSize}px`);
+  if(appearance.customFont)rootStyle.setProperty('--font-reading-custom',`"${appearance.customFont}", var(--font)`);
+  else rootStyle.removeProperty('--font-reading-custom');
+  readingText.forEach(element=>element.style.fontSize='');
   document.documentElement.dataset.readingWidth=appearance.lineWidth;
   document.documentElement.dataset.readingSpacing=appearance.lineSpacing;
-  document.documentElement.dataset.readingFont=appearance.fontFamily;
-  const size=parseFloat(getComputedStyle(article).fontSize);
+  document.documentElement.dataset.readingFont=(appearance.fontFamily==='custom'&&!appearance.customFont)?'sans':appearance.fontFamily;
+  document.documentElement.dataset.readingHighlights=appearance.showHighlights?'on':'off';
+  document.documentElement.dataset.readingCover=appearance.showCover?'show':'hide';
+  const size=Math.round(parseFloat(getComputedStyle(article).fontSize))||appearance.fontSize;
   $('#font-status').textContent=`${size} px`;
-  $('#font-decrease').disabled=size<=14;$('#font-increase').disabled=size>=26;
-  $('#font-reset').disabled=appearance.fontSize===null&&appearance.lineWidth==='standard'&&appearance.lineSpacing==='relaxed'&&appearance.fontFamily==='sans';
-  $$('[data-reading-font]').filter(button=>button.tagName==='BUTTON').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.readingFont===appearance.fontFamily)));
+  $('#font-decrease').disabled=appearance.fontSize<=14;$('#font-increase').disabled=appearance.fontSize>=26;
+  const customBtn=$('button[data-reading-font="custom"]');
+  if(customBtn){
+    customBtn.hidden=!appearance.customFont;
+    if(appearance.customFont)customBtn.title=appearance.customFont;
+  }
+  const moreBtn=$('#reader-more-settings');
+  if(moreBtn)moreBtn.hidden=!isDesktopEmbedded();
+  const isDefault=isDesktopEmbedded()
+    ?(appearance.fontSize===16&&appearance.lineWidth==='standard'&&appearance.lineSpacing==='relaxed'&&appearance.fontFamily==='sans'&&!appearance.customFont&&appearance.showHighlights&&appearance.showCover)
+    :(appearance.fontSize===bakedDefaults.fontSize&&appearance.lineWidth===bakedDefaults.lineWidth&&appearance.lineSpacing===bakedDefaults.lineSpacing&&appearance.fontFamily===bakedDefaults.fontFamily);
+  $('#font-reset').disabled=isDefault;
+  $$('[data-reading-font]').filter(button=>button.tagName==='BUTTON').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.readingFont===document.documentElement.dataset.readingFont)));
   $$('[data-reading-width]').filter(button=>button.tagName==='BUTTON').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.readingWidth===appearance.lineWidth)));
   $$('[data-reading-spacing]').filter(button=>button.tagName==='BUTTON').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.readingSpacing===appearance.lineSpacing)));
 }
 function changeAppearance(patch){
   const restore=readingPosition?.preserveLayout();
-  appearance=patch===null?parseAppearance(null):{...appearance,...patch};
+  if(patch===null){
+    if(isDesktopEmbedded()){
+      appearance={version:1,fontSize:16,lineWidth:'standard',lineSpacing:'relaxed',fontFamily:'sans',customFont:'',showHighlights:true,showCover:true};
+      paintAppearance();
+      window.parent.postMessage({linkReadReadingUpdate:{theme:'auto',fontFamily:'sans',customFont:'',fontSize:16,lineWidth:'standard',lineSpacing:'relaxed',showHighlights:true,showCover:true}},'*');
+      restore?.();
+      return;
+    }
+    appearance=parseAppearance(null);
+    paintAppearance();
+    try{localStorage.setItem(preferencesKey,JSON.stringify(appearance));appearanceStatus(true)}catch{appearanceStatus(false)}
+    restore?.();
+    return;
+  }
+  appearance={...appearance,...patch};
   paintAppearance();
-  try{
-    localStorage.setItem(preferencesKey,JSON.stringify(appearance));
+  if(isDesktopEmbedded()){
+    window.parent.postMessage({linkReadReadingUpdate:patch},'*');
     appearanceStatus(true);
-  }catch{
-    appearanceStatus(false);
-    toast(t('Reading appearance could not be saved in this browser.'));
+  }else{
+    try{
+      localStorage.setItem(preferencesKey,JSON.stringify(appearance));
+      appearanceStatus(true);
+    }catch{
+      appearanceStatus(false);
+      toast(t('Reading appearance could not be saved in this browser.'));
+    }
   }
   restore?.();
 }
-function changeFont(step){changeAppearance({fontSize:Math.max(14,Math.min(26,Math.round(parseFloat(getComputedStyle(article).fontSize)+step)))})}
+function applyHostReading(incoming,effectiveTheme){
+  if(!incoming||typeof incoming!=='object')return;
+  const restore=readingPosition?.preserveLayout();
+  const next={...appearance};
+  if(Number.isInteger(incoming.fontSize)&&incoming.fontSize>=14&&incoming.fontSize<=26)next.fontSize=incoming.fontSize;
+  if(incoming.lineWidth==='narrow'||incoming.lineWidth==='standard'||incoming.lineWidth==='wide')next.lineWidth=incoming.lineWidth;
+  if(incoming.lineSpacing==='compact'||incoming.lineSpacing==='standard'||incoming.lineSpacing==='relaxed')next.lineSpacing=incoming.lineSpacing;
+  if(incoming.customFont!==undefined)next.customFont=cleanCustomFont(incoming.customFont);
+  if(incoming.fontFamily==='serif'||incoming.fontFamily==='sans'||(incoming.fontFamily==='custom'&&next.customFont))next.fontFamily=incoming.fontFamily;
+  else if(incoming.fontFamily==='custom')next.fontFamily='sans';
+  if(typeof incoming.showHighlights==='boolean')next.showHighlights=incoming.showHighlights;
+  if(typeof incoming.showCover==='boolean')next.showCover=incoming.showCover;
+  appearance=next;
+  if(validTheme(effectiveTheme)){
+    document.documentElement.dataset.theme=effectiveTheme;
+    syncThemeButtons();
+  }
+  paintAppearance();
+  restore?.();
+}
+window.linkreadApplyReading=applyHostReading;
+window.linkreadEnableDesktopControls=()=>{const moreBtn=$('#reader-more-settings');if(moreBtn)moreBtn.hidden=false;paintAppearance()};
+function changeFont(step){changeAppearance({fontSize:Math.max(14,Math.min(26,appearance.fontSize+step))})}
 paintAppearance();
-window.addEventListener('resize',()=>{if(appearance.fontSize===null)paintAppearance()});
+window.addEventListener('resize',()=>{paintAppearance()});
 window.addEventListener('storage',event=>{
-  if(event.storageArea!==localStorage)return;
+  if(isDesktopEmbedded()||event.storageArea!==localStorage)return;
   if(event.key!==preferencesKey&&event.key!==null)return;
   const restore=readingPosition?.preserveLayout();appearance=parseAppearance(event.newValue);paintAppearance();appearanceStatus(true);restore?.();
 });
 $('#font-decrease').addEventListener('click',()=>changeFont(-1));
 $('#font-increase').addEventListener('click',()=>changeFont(1));
 $('#font-reset').addEventListener('click',()=>changeAppearance(null));
+$('#reader-more-settings')?.addEventListener('click',()=>{closePopovers();if(isDesktopEmbedded())window.parent.postMessage({linkReadOpenSettings:'reading'},'*')});
 $$('button[data-reading-font]').forEach(button=>button.addEventListener('click',()=>changeAppearance({fontFamily:button.dataset.readingFont})));
 $$('button[data-reading-width]').forEach(button=>button.addEventListener('click',()=>changeAppearance({lineWidth:button.dataset.readingWidth})));
 $$('button[data-reading-spacing]').forEach(button=>button.addEventListener('click',()=>changeAppearance({lineSpacing:button.dataset.readingSpacing})));

@@ -52,10 +52,13 @@ def test_desktop_generation_steps_reuse_and_exports(tmp_path, monkeypatch, capsy
         assert [event["completed"] for event in done] == list(range(1, start["total"] + 1))
         assert all(event["total"] == start["total"] for event in done)
     result = events[-1]
-    assert result["type"] == "completed" and result["output"] == "article.html"
+    assert result["type"] == "completed" and result["output"] == "manifest.json"
     article = result["article"]
     path = library / article["id"] / result["output"]
-    assert 'id="tab-summary"' in path.read_text()
+    assert path.is_file() and not path.with_name("article.html").exists()
+    status, prepared = invoke(monkeypatch, capsys, library, "reader", article["id"])
+    assert status == 0 and prepared[0]["type"] == "reader"
+    assert 'id="tab-summary"' in path.with_name(".reader.html").read_text()
     assert article["sourceUrl"] == source and article["title"] == raw.source.title
     assert article["author"] == "字幕作者" and article["publishedAt"] == "2026-11-11"
     assert article["durationMs"] == raw.source.duration_ms
@@ -74,7 +77,7 @@ def test_desktop_generation_steps_reuse_and_exports(tmp_path, monkeypatch, capsy
     status, imported = invoke(monkeypatch, capsys, library, "generate", "--local-file", str(path.with_name("transcript.json")))
     assert status == 1 and "已存在" in imported[-1]["message"]
     assert path.with_name("note.json").read_bytes() == original_note
-    assert 'id="tab-summary"' in path.read_text()
+    assert 'id="tab-summary"' in path.with_name(".reader.html").read_text()
     assert extract_calls == [source] and provider.calls == ai_calls
     status, replaced = invoke(monkeypatch, capsys, library, "generate", "--replace", source)
     assert status == 0 and replaced[-1]["article"]["id"] == article["id"]
@@ -136,7 +139,10 @@ def test_desktop_imports_subtitles_via_ai(tmp_path, monkeypatch, capsys, suffix,
     metadata = next(event for event in events if event.get("stage") == "saved_transcript")["metadata"]
     assert metadata["title"] == article["title"] and metadata["thumbnailUrl"] is None
     folder = library / article["id"]
-    page = (folder / "article.html").read_text()
+    assert (folder / "manifest.json").is_file() and not (folder / "article.html").exists()
+    status, prepared = invoke(monkeypatch, capsys, library, "reader", article["id"])
+    assert status == 0 and prepared[0]["type"] == "reader"
+    page = (folder / ".reader.html").read_text()
     for panel in ("summary", "transcript", "mindmap", "keywords", "highlights"):
         assert f'id="tab-{panel}"' in page
     from linkread_desktop.renderers.site import load_document

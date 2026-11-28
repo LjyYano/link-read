@@ -598,7 +598,6 @@ button.shelf-article-link:focus-visible { outline-offset: 1px; }
 [data-theme="dark"] .shelf-complete { background: rgba(48, 209, 88, 0.16); }
 [data-theme="dark"] .task-meter-motion { background: rgba(10, 132, 255, 0.22); }
 
-.task-read-transcript { display: inline-flex; align-items: center; gap: 5px; margin-top: 4px; min-height: 28px; font-size: 12px; }
 .task-journal-notice { display: flex; align-items: center; gap: 8px; margin: 14px 0; color: var(--muted); font-size: 12px; }
 .task-journal-notice > span { flex: 1; }
 .task-journal-error { color: var(--danger); }

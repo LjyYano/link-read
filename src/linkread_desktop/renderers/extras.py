@@ -138,7 +138,7 @@ def validate_mindmap(markdown: str) -> None:
 
 
 def is_extra_json(path: Path) -> bool:
-    sidecars = ("anki.json", "reading.json", "quotes.json", "catalog.json", "mindmap-links.json")
+    sidecars = ("anki.json", "reading.json", "quotes.json", "catalog.json", "mindmap-links.json", "manifest.json")
     return path.name in sidecars or path.name.endswith(tuple(f".{name}" for name in sidecars))
 
 

@@ -3,8 +3,9 @@ import test from "node:test"
 import { defaultAsr } from "../src/asrSettings.ts"
 import { setLocale } from "../src/language.ts"
 import {
-  SettingsSaveError, SettingsValidationError, normalizeSettingsDraft, settingsDraftEqual,
-  validateApiConfiguration, validateAsrConfiguration, validateSettingsDraft, saveSettingsDraft,
+  SettingsSaveError, SettingsValidationError, dirtySettingsTabs, formSaveBarState, instantSaveStatus,
+  normalizeSettingsDraft, settingsDraftEqual, validateApiConfiguration, validateAsrConfiguration,
+  validateSettingsDraft, saveSettingsDraft,
 } from "../src/settingsState.ts"
 
 function draft() {
@@ -317,6 +318,78 @@ test("settings save failure message localizes cleanly in English without mixed C
       assert.match(error.message, /Could not save/)
       return true
     })
+  } finally {
+    setLocale("zh-CN")
+  }
+})
+
+test("dirtySettingsTabs, instantSaveStatus, and formSaveBarState track per-card save state cleanly", () => {
+  const base = draft()
+  assert.deepEqual(dirtySettingsTabs(base, structuredClone(base)), { ai: false, asr: false, youtube: false })
+
+  const aiEdit = draft()
+  aiEdit.preferences.api.model = "new-model"
+  assert.deepEqual(dirtySettingsTabs(aiEdit, base), { ai: true, asr: false, youtube: false })
+
+  const asrEdit = draft()
+  asrEdit.asrToken = "new-asr-key"
+  assert.deepEqual(dirtySettingsTabs(asrEdit, base), { ai: false, asr: true, youtube: false })
+
+  const ytEdit = draft()
+  ytEdit.preferences.youtubeCookies = { mode: "browser", browser: "chrome", filePath: "" }
+  assert.deepEqual(dirtySettingsTabs(ytEdit, base), { ai: false, asr: false, youtube: true })
+
+  assert.deepEqual(instantSaveStatus({ instantSaveState: "idle", hasInstantError: false }), {
+    text: "自动保存",
+    saved: false,
+  })
+  assert.deepEqual(instantSaveStatus({ instantSaveState: "saving", hasInstantError: false }), {
+    text: "正在保存…",
+    saved: false,
+  })
+  assert.deepEqual(instantSaveStatus({ instantSaveState: "saved", hasInstantError: false }), {
+    text: "已自动保存",
+    saved: true,
+  })
+  assert.deepEqual(instantSaveStatus({ instantSaveState: "idle", hasInstantError: true }), {
+    text: "",
+    saved: false,
+  })
+
+  const formBase = {
+    tab: "ai",
+    dirty: false,
+    tabDirty: false,
+    loading: false,
+    saving: false,
+    testing: false,
+    asrTesting: false,
+    savedNotice: false,
+  }
+  assert.deepEqual(formSaveBarState({ ...formBase, dirty: true, tabDirty: true }), {
+    statusText: "有未保存的修改",
+    statusSaved: false,
+  })
+  assert.deepEqual(formSaveBarState({ ...formBase, tab: "youtube", dirty: true, tabDirty: false }), {
+    statusText: "其他标签页有未保存的修改",
+    statusSaved: false,
+  })
+  assert.deepEqual(formSaveBarState({ ...formBase, savedNotice: true }), {
+    statusText: "设置已保存",
+    statusSaved: true,
+  })
+
+  setLocale("en")
+  try {
+    for (const text of [
+      instantSaveStatus({ instantSaveState: "idle", hasInstantError: false }).text,
+      instantSaveStatus({ instantSaveState: "saved", hasInstantError: false }).text,
+      formSaveBarState({ ...formBase, dirty: true, tabDirty: true }).statusText,
+      formSaveBarState({ ...formBase, tab: "asr", dirty: true, tabDirty: false }).statusText,
+    ]) {
+      assert.doesNotMatch(text, /\p{Script=Han}/u)
+      assert.ok(text.length > 0)
+    }
   } finally {
     setLocale("zh-CN")
   }

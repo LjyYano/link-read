@@ -17,6 +17,9 @@ from .ai.checkpoints import provider_identity
 from .asr.config import AsrConfig
 from .asr.bailian import BailianAsr
 from .metadata import canonical_video_url, video_metadata, shownotes_metadata
+from .archive_manifest import (
+    LEGACY_ARTICLE_FILENAME, MANIFEST_FILENAME, PUBLISHED_MARKER_NAMES, published_article_marker,
+)
 from .article_state import archive_mutation, file_lock, patch_reading_state, reading_state, save_reading_state
 from .article_details import DETAILS_FILENAME, detail_value, linked_source_value, read_article_details, save_article_details
 from .ai.models import NoteDocument
@@ -52,6 +55,9 @@ from .transcript_previews import (
     cleanup_stale_previews, load_preview, save_preview, prepare_preview, resume_preview, preview_folder, snapshot_id,
 )
 from .translation import PageLanguage, load_edition
+from .reading_preferences import (
+    normalize_reading_preferences, parse_reading_preferences_json, reading_preferences_signature,
+)
 from .reader_cache import (CACHE_VERSION, LIBRARY_INDEX, archive_signature, implementation_signature,
                            cached_reader, remember_reader, read_cache, save_cache)
 
@@ -66,12 +72,14 @@ def _video_url(source: str) -> str:
 
 def _article_path(library: Path, article_id: str) -> Path:
     folder = library / article_id
-    article = folder / "article.html"
     if (library.is_symlink() or not library.is_dir()
             or not article_id or article_id.startswith(".") or Path(article_id).name != article_id
-            or folder.is_symlink() or article.is_symlink() or not article.is_file()):
+            or folder.is_symlink() or not folder.is_dir()):
         raise LinkReadError("找不到这篇已生成的文章")
-    return article
+    marker = published_article_marker(folder)
+    if marker is None:
+        raise LinkReadError("找不到这篇已生成的文章")
+    return marker
 
 
 def _article_source(article: Path) -> tuple[Path, TranscriptDocument | NoteDocument, TranscriptDocument]:
@@ -311,9 +319,19 @@ def _library_records(library: Path) -> dict:
         updated = {}
         articles = []
         unavailable = 0
-        for article in library.glob("*/article.html"):
-            article_id = article.parent.name
+        for folder in sorted(library.iterdir(), key=lambda item: item.name):
+            article_id = folder.name
             if article_id.startswith("."):
+                continue
+            if folder.is_symlink():
+                if any((folder / name).exists() or (folder / name).is_symlink()
+                       for name in PUBLISHED_MARKER_NAMES):
+                    unavailable += 1
+                continue
+            if not folder.is_dir():
+                continue
+            if not any((folder / name).exists() or (folder / name).is_symlink()
+                       for name in PUBLISHED_MARKER_NAMES):
                 continue
             try:
                 article = _article_path(library, article_id)
@@ -364,10 +382,12 @@ def _preview_record(library: Path, preview_id: str, raw: TranscriptDocument) -> 
             "isRead": False, "isStarred": False}
 
 
-def _prepared_reader(article: Path) -> dict:
-    """Reuse a verified current reader; original HTML/JSON remain unchanged."""
+def _prepared_reader(article: Path, *, reading: dict | None = None) -> dict:
+    """Reuse a verified current reader; archived JSON remains untouched."""
+    normalized_reading = normalize_reading_preferences(reading)
+    reading_sig = reading_preferences_signature(normalized_reading)
     signature = archive_signature(article.parent)
-    previous = cached_reader(article, signature)
+    previous = cached_reader(article, signature, reading_signature=reading_sig)
     if previous is not None:
         return previous
     source, document, raw = _reader_source(article)
@@ -379,18 +399,20 @@ def _prepared_reader(article: Path) -> dict:
     html = render_html(document, title=metadata["title"], category=metadata["category"],
                        description=metadata["description"], extras=extras,
                        reading_state=reading_state(article.parent), edition=load_edition(article.parent, raw),
-                       cover_url=cover, cover_platform=linked.get("platform") if linked else None)
+                       cover_url=cover, cover_platform=linked.get("platform") if linked else None,
+                       reading_preferences=normalized_reading)
     cached = article.with_name(".reader.html")
     if cached.is_symlink():
         raise LinkReadError("阅读缓存路径不可用")
     if archive_signature(article.parent) != signature:
         raise LinkReadError("文章正在更新，请稍后重新打开")
     write_text(cached, html)
-    return remember_reader(article, signature, html, reading_state_key(document))
+    return remember_reader(article, signature, html, reading_state_key(document), reading_signature=reading_sig)
 
 
 def _refresh_shownotes(
     article: Path, *, cookies_from_browser: str | None = None, cookies_file: Path | None = None,
+    reading: dict | None = None,
 ) -> dict:
     _, _, raw = _article_source(article)
     url = source_info_link(raw.source)
@@ -421,7 +443,7 @@ def _refresh_shownotes(
         if _source_key(load_transcript(article.with_name("transcript.json"))) != key:
             raise LinkReadError("来源简介与当前文章不匹配，未保存", code="shownotes_source_mismatch")
         write_text(overlay, content)
-        return {"status": "updated", **_prepared_reader(article)}
+        return {"status": "updated", **_prepared_reader(article, reading=reading)}
 
 
 
@@ -448,7 +470,7 @@ def _duplicate(source: str, library: Path, *, local_file: bool, session=None) ->
     key, _ = _resolve_duplicate_source(source, local_file=local_file, session=session)
     folder = find_workspace(library, key) if key else None
     article = None
-    if folder is not None and (folder / "article.html").is_file():
+    if folder is not None and published_article_marker(folder) is not None:
         article = _article_record(_article_path(library, folder.name))
     return {"key": key, "article": article}
 
@@ -478,7 +500,7 @@ def _publish_replacement(generated: Path, library: Path) -> Path:
 
 
 def _publish_replacement_locked(generated: Path, library: Path) -> Path:
-    if generated.name != "article.html":
+    if generated.name not in PUBLISHED_MARKER_NAMES:
         raise LinkReadError("生成的文章文件不可用")
     _article_path(generated.parent.parent, generated.parent.name)
     archive_signature(generated.parent)
@@ -499,7 +521,7 @@ def _publish_replacement_locked(generated: Path, library: Path) -> Path:
         # A completed previous swap may only have left a backup if cleanup after
         # rename failed. Remove stale backup only after verifying destination is intact.
         if (destination.is_symlink() or not destination.is_dir()
-                or not (destination / "article.html").is_file()
+                or published_article_marker(destination) is None
                 or not (destination / "transcript.json").is_file()):
             raise LinkReadError("发现未处理的旧版文章备份，请先检查资料库")
         shutil.rmtree(backup)
@@ -512,7 +534,8 @@ def _publish_replacement_locked(generated: Path, library: Path) -> Path:
         if _source_key(old_raw) != key:
             raise LinkReadError("文章归档与原始字幕不匹配，已保留旧文章")
         try:
-            old_source, _, _ = _article_source(destination / "article.html")
+            old_marker = published_article_marker(destination)
+            old_source, _, _ = _article_source(old_marker) if old_marker is not None else (old_transcript_path, old_raw, old_raw)
         except LinkReadError:
             old_source = old_transcript_path
         new_source, _, _ = _article_source(generated)
@@ -571,7 +594,7 @@ def _publish_replacement_locked(generated: Path, library: Path) -> Path:
             shutil.rmtree(backup)
         except OSError:
             pass
-    return destination / "article.html"
+    return destination / generated.name
 
 
 def _youtube_auth_options(
@@ -863,11 +886,16 @@ def main() -> int:
     details = commands.add_parser("update-article-details")
     details.add_argument("--values", required=True)
     details.add_argument("article_id")
-    commands.add_parser("reader").add_argument("article_id")
-    commands.add_parser("preview-reader").add_argument("preview_id")
+    reader_cmd = commands.add_parser("reader")
+    reader_cmd.add_argument("--reading-preferences")
+    reader_cmd.add_argument("article_id")
+    preview_reader_cmd = commands.add_parser("preview-reader")
+    preview_reader_cmd.add_argument("--reading-preferences")
+    preview_reader_cmd.add_argument("preview_id")
     refresh_shownotes = commands.add_parser("refresh-shownotes")
     refresh_shownotes.add_argument("--cookies-from-browser")
     refresh_shownotes.add_argument("--cookies", type=Path)
+    refresh_shownotes.add_argument("--reading-preferences")
     refresh_shownotes.add_argument("article_id")
     state = commands.add_parser("reading-state")
     state.add_argument("--read", choices=("true", "false"))
@@ -895,7 +923,7 @@ def main() -> int:
                         raw = load_transcript(Path(event.work_dir) / "transcript.json")
                         fields["metadata"] = _source_metadata(raw)
                         fields["previewId"] = save_preview(library, raw, source=requested_source,
-                                                           local_file=args.local_file)
+                                                           local_file=args.local_file, render_preview=False)
                     _emit("progress", **fields)
 
             requested_source = args.source if args.local_file else _video_url(args.source.strip())
@@ -920,7 +948,7 @@ def main() -> int:
                 asr=(AsrConfig(base_url=args.asr_base_url, model=args.asr_model,
                                max_minutes=args.asr_max_minutes, chunk_minutes=args.asr_chunk_minutes,
                                token=asr_token, ffmpeg_path=args.ffmpeg_path) if args.asr else None))
-            _emit("completed", output="article.html", article=_article_record(article))
+            _emit("completed", output=article.name, article=_article_record(article))
         elif args.command == "preview":
             _emit("preview", **video_metadata(args.source).public())
         elif args.command == "check-source":
@@ -974,17 +1002,21 @@ def main() -> int:
             _emit("reading_state", **state)
         elif args.command == "reader":
             article = _article_path(library, args.article_id)
+            reading = parse_reading_preferences_json(args.reading_preferences)
             with archive_mutation(library):
-                prepared = _prepared_reader(article)
+                prepared = _prepared_reader(article, reading=reading)
             _emit("reader", **prepared)
         elif args.command == "preview-reader":
-            raw, revision = prepare_preview(library, args.preview_id)
+            reading = parse_reading_preferences_json(args.reading_preferences)
+            raw, revision = prepare_preview(library, args.preview_id, reading=reading)
             _emit("reader", previewId=args.preview_id, revision=revision, readingKey=reading_state_key(raw),
                   sourceKey=_source_key(raw), article=_preview_record(library, args.preview_id, raw))
         elif args.command == "refresh-shownotes":
             article = _article_path(library, args.article_id)
+            reading = parse_reading_preferences_json(args.reading_preferences)
             _emit("shownotes", **_refresh_shownotes(
                 article, cookies_from_browser=args.cookies_from_browser, cookies_file=args.cookies,
+                reading=reading,
             ))
         else:
             _emit("markdown", text=_article_markdown(library, args.article_id, content=args.content,

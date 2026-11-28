@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import {
-  ArrowRight, BookOpen, Captions, Check, CircleAlert, CirclePause, CircleStop,
+  Captions, Check, CircleAlert, CirclePause, CircleStop,
   LoaderCircle, Podcast, Trash2, X,
 } from "lucide-react"
 import bilibiliIcon from "./assets/bilibili.png"
@@ -131,13 +131,12 @@ export function ArticleUpdatedAt({ value }: { value: number }) {
   </time>
 }
 
-export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPreview, onSettings, taskId, youtubeCookiesConfigured = false, asrEnabled = false }: {
+export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onSettings, taskId, youtubeCookiesConfigured = false, asrEnabled = false }: {
   job: Job
   queuePosition?: number
   onCancel: () => void
   onRetry: () => void
   onRemove: () => Promise<void> | void
-  onPreview?: () => void
   onSettings: (target?: SettingsTarget) => void
   taskId?: string
   youtubeCookiesConfigured?: boolean
@@ -277,9 +276,6 @@ export function JobRow({ job, queuePosition, onCancel, onRetry, onRemove, onPrev
         {job.status === "interrupted" && <p className="task-detail-line">{jobMessage}</p>}
         {job.status === "error" && <p className="task-error-summary">{firstErrorLine}</p>}
         {actionError && <p className="task-error-summary" role="alert">{actionError}</p>}
-        {job.previewId && onPreview && <button className="text-button task-read-transcript" type="button" onClick={onPreview}>
-          <BookOpen size={14} aria-hidden="true" />{tr("先读原文")}<ArrowRight size={13} aria-hidden="true" />
-        </button>}
         {(activity || hasExtraErrorDetail) && <details className="task-details" ref={details}>
           <summary>{job.status === "error" ? tr("查看错误详情") : tr("查看处理详情")}</summary>
           {hasExtraErrorDetail && <pre className="task-error-detail">{jobMessage}</pre>}
