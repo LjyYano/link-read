@@ -25,4 +25,4 @@
 - M2 只读取 `TranscriptDocument` 并渲染，不修改字幕。
 - M3 创建独立的 `NoteDocument`（摘要、金句、章节、思维导图），引用原始 `start_ms`，不可编造时间戳。
 - 后续 ASR 可增加 `transcript_source=asr` 作为兼容的下一版本变更。
-- 生成的 HTML 与 Markdown 只是可再生的展示层，JSON 才是数据资产。
+- 生成的 HTML 与 Markdown 只是可再生的展示层，JSON 才是数据资产。桌面端归档以 `manifest.json`（`document_type: "linkread_manifest"`）标记发布完成，HTML 在阅读与导出时按需渲染，同时向后兼容旧归档中的 `article.html`。

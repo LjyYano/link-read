@@ -15,6 +15,7 @@ from .ai.pipeline import enrich
 from .ai.polish import polish_reading
 from .ai.provider import StructuredProvider
 from .ai.publication import complete_extras
+from .archive_manifest import write_manifest
 from .asr.config import AsrConfig
 from .covers import cover_candidates, cover_source, display_thumbnail, download_cover, find_local_cover
 from .errors import LinkReadError, error_context
@@ -25,6 +26,7 @@ from .progress import ProgressCallback, report
 from .renderers.catalog import save_catalog
 from .renderers.extras import load_extras, save_missing_extras
 from .renderers.html import render_html
+from .renderers.overview import note_overview
 from .renderers.site import article_metadata, build_site, load_document
 from .storage import write_text
 from .translation import LANGUAGE_NAMES, PageLanguage, load_edition, needs_translation, page_locale, prepare_edition, source_language
@@ -256,15 +258,7 @@ def generate_article(
     if edition is None:
         edition = translate(jobs)
 
-    article = folder / ("article.html" if output is None else "index.html")
-    home = site / "index.html" if site is not None else None
-    home_href = None
-    if home is not None:
-        try:
-            home_href = quote(Path(relpath(home, folder)).as_posix())
-        except ValueError:  # The files can be on different Windows drives.
-            home_href = home.resolve().as_uri()
-    report(progress, "render", "正在生成独立 HTML 阅读页")
+    report(progress, "render", "正在保存文章归档" if output is None else "正在生成独立 HTML 阅读页")
     # The archived page carries the cover when it arrives within the existing budget.
     if cover_thread is not None:
         cover_thread.join(timeout=12)
@@ -273,12 +267,38 @@ def generate_article(
             cover_thread.join(timeout=0.5)
     render_started = time.monotonic()
     metadata = article_metadata(note, note_path, overview=completed.reading)
-    write_text(article, render_html(note, extras=completed, home_href=home_href,
-                                   category=metadata["category"], description=metadata["description"],
-                                   title=metadata["title"], edition=edition,
-                                   cover_url=cover_source(folder, display_thumbnail(raw.source))))
+    if output is None:
+        # Pure-JSON archive: validate render inputs deterministically and publish
+        # a lightweight manifest; HTML is rendered on demand when opened or exported.
+        if edition:
+            edition.verify(raw)
+        overview = completed.reading or note_overview(note)
+        chapters = overview.sections if overview else []
+        if chapters and chapters[-1].start_segment_index >= len(raw.segments):
+            raise LinkReadError("文章目录的字幕索引超出当前文稿范围")
+        if completed.quotes:
+            try:
+                completed.quotes.verify_source(raw)
+            except ValueError as exc:
+                raise LinkReadError(f"金句文件无效：{exc}") from exc
+        article = write_manifest(folder, has_analysis=True)
+        html_seconds = 0.0
+    else:
+        home = site / "index.html" if site is not None else None
+        home_href = None
+        if home is not None:
+            try:
+                home_href = quote(Path(relpath(home, folder)).as_posix())
+            except ValueError:  # The files can be on different Windows drives.
+                home_href = home.resolve().as_uri()
+        article = folder / "index.html"
+        write_text(article, render_html(note, extras=completed, home_href=home_href,
+                                       category=metadata["category"], description=metadata["description"],
+                                       title=metadata["title"], edition=edition,
+                                       cover_url=cover_source(folder, display_thumbnail(raw.source))))
+        html_seconds = round(time.monotonic() - render_started, 3)
     metrics = {"wall_seconds": round(time.monotonic() - started, 3),
-               "html_seconds": round(time.monotonic() - render_started, 3),
+               "html_seconds": html_seconds,
                "model_calls": agent.calls, "cache_hits": agent.cache_hits,
                "model_seconds_sum": round(agent.model_seconds, 3),
                "model_seconds_max": round(agent.longest_model_seconds, 3),
@@ -287,10 +307,10 @@ def generate_article(
                "prompt_chars_sum": agent.prompt_chars, "prompt_chars_max": agent.max_prompt_chars,
                "output_json_chars_sum": agent.output_chars, "output_json_chars_max": agent.max_output_chars}
     write_text(folder / ".performance.json", json.dumps(metrics, ensure_ascii=False, indent=2))
-    report(progress, "performance", f"本次用时 {metrics['wall_seconds']:.1f} 秒，模型请求 {agent.calls} 次，复用 {agent.cache_hits} 批；HTML 渲染 {metrics['html_seconds']:.2f} 秒")
-    report(progress, "saved_article", f"已生成阅读文件：{article}")
+    report(progress, "performance", f"本次用时 {metrics['wall_seconds']:.1f} 秒，模型请求 {agent.calls} 次，复用 {agent.cache_hits} 批")
+    report(progress, "saved_article", f"已保存文章归档：{article}" if output is None else f"已生成阅读文件：{article}")
     if site is not None:
         report(progress, "site", "正在更新阅读书架")
         count = build_site(root, site, language=page_locale(raw, page_language))
-        report(progress, "saved_site", f"已更新阅读书架：{home}（{count} 篇文章）")
+        report(progress, "saved_site", f"已更新阅读书架：{site / 'index.html'}（{count} 篇文章）")
     return article

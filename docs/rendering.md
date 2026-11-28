@@ -48,7 +48,7 @@ count = build_site(source_path, output_dir)
 
 ## 视频目录
 
-桌面应用默认将归档保存在 `~/Library/Application Support/com.yano.linkread/library`，也可通过 `LINKREAD_DESKTOP_LIBRARY` 指定根目录。`transcript.json` 是原始字幕，`note.json` 保存分析与校对结果，`article.html` 为最终阅读页。读取、重建阅读缓存和导出仅消费已有数据，不重新调用模型；重新生成走独立任务流程并保留失败前的完整归档。
+桌面应用默认将归档保存在 `~/Library/Application Support/com.yano.linkread/library`，也可通过 `LINKREAD_DESKTOP_LIBRARY` 指定根目录。新归档为纯数据目录：`transcript.json` 是原始字幕，`note.json` 保存分析与校对结果，`manifest.json` 作为已发布归档标记（同时兼容旧归档的 `article.html`）。阅读页 HTML 不再在生成阶段静态落盘，而是在打开阅读、浏览器查看或导出 HTML 时按当前阅读设置动态渲染并缓存为可丢弃的 `.reader.html`；读取、重建阅读缓存和导出仅消费已有数据，不重新调用模型；重新生成走独立任务流程并保留失败前的完整归档。
 
 ## 思维导图和金句文件
 

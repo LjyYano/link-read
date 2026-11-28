@@ -8,6 +8,7 @@ from ..ai.polish import group_source_blocks
 from ..errors import LinkReadError
 from ..models import TranscriptDocument
 from ..quotes import QuoteCard, context_bounds
+from ..reading_preferences import normalize_reading_preferences
 from ..translation import ReadingEdition, page_locale, reading_translation, source_language
 from .emphasis import render_emphasis
 from .extras import ArticleExtras, ReadingSection
@@ -122,8 +123,7 @@ def _article(
     return "\n".join(sections), "".join(toc), signature
 
 
-def _tab(name: str, label: str) -> str:
-    active = name == "transcript"
+def _tab(name: str, label: str, *, active: bool = False) -> str:
     css = "tab active" if active else "tab"
     return (f'<button type="button" class="{css}" id="tab-{name}" data-tab="{name}" '
             f'role="tab" aria-controls="panel-{name}" aria-selected="{str(active).lower()}" '
@@ -151,8 +151,10 @@ def render_html(
     category: str | None = None, description: str | None = None, extras: ArticleExtras | None = None,
     title: str | None = None, reading_state: dict | None = None, edition: ReadingEdition | None = None,
     language: str | None = None, cover_url: str | None = None, cover_platform: str | None = None,
+    reading_preferences: dict | None = None,
 ) -> str:
     """Fill the bundled html-library article template for single-file offline use."""
+    reading = normalize_reading_preferences(reading_preferences)
     note = document if isinstance(document, NoteDocument) else None
     transcript = note.transcript if note else document
     if edition:
@@ -178,8 +180,9 @@ def render_html(
         cards = note_quotes(note, language=language) if note else []
     article, toc, signature = _article(transcript, note, chapters, cards, edition, language=language)
     panels = note_fragments(note, language=language) if note else {}
+    initial_tab = "summary" if (reading["defaultTab"] == "summary" and overview is not None) else "transcript"
     if overview:
-        panels["summary"] = overview_panel(overview, language=language)
+        panels["summary"] = overview_panel(overview, language=language, active=(initial_tab == "summary"))
     resources = files(__package__)
     mindmap_style = ""
     mindmap_scripts = ""
@@ -210,7 +213,7 @@ def render_html(
         "summary": "Summary", "mindmap": "Mindmap", "transcript": "Transcript", "keywords": "Keywords",
         "highlights": "Highlights", "shownotes": "Shownotes",
     }
-    tabs_html = "".join(_tab(name, label(text)) for name, text in tabs.items()
+    tabs_html = "".join(_tab(name, label(text), active=(name == initial_tab)) for name, text in tabs.items()
                         if name in panels or name == "transcript")
     home = escape(home_href, quote=True) if home_href is not None else None
     state = reading_state or {}
@@ -225,9 +228,27 @@ def render_html(
         f'<span>{label("Starred" if starred else "Star")}</span></button></div>'
     )
     strings = json_data(ZH if language == "zh-CN" else {})
-    cover = _cover(cover_platform or transcript.source.platform, cover_url)
+    cover = _cover(cover_platform or transcript.source.platform, cover_url) if reading["showCover"] else ""
+    html_attr_parts = []
+    if reading["theme"] != "auto":
+        html_attr_parts.append(f'data-theme="{reading["theme"]}"')
+    html_attr_parts.append(f'data-reading-font="{reading["fontFamily"]}"')
+    html_attr_parts.append(f'data-reading-width="{reading["lineWidth"]}"')
+    html_attr_parts.append(f'data-reading-spacing="{reading["lineSpacing"]}"')
+    html_attr_parts.append(f'data-reading-highlights="{"on" if reading["showHighlights"] else "off"}"')
+    html_attr_parts.append(f'data-reading-cover="{"show" if reading["showCover"] else "hide"}"')
+    html_attrs = " " + " ".join(html_attr_parts)
+    style_vars = [f"--reading-font-size:{reading['fontSize']}px"]
+    if reading["customFont"]:
+        style_vars.append(f'--font-reading-custom:"{reading["customFont"]}",var(--font)')
+    reading_style = f'<style id="linkread-reading-style">:root{{{";".join(style_vars)}}}</style>'
+    transcript_panel_attrs = 'class="panel active"' if initial_tab == "transcript" else 'class="panel" hidden'
     return fill_template("reader.html", {
         "PAGE_LANGUAGE": "zh-CN" if language == "zh-CN" else "en",
+        "HTML_ATTRS": html_attrs,
+        "READING_STYLE": reading_style,
+        "READING_DEFAULTS": json_data(reading),
+        "TRANSCRIPT_PANEL_ATTRS": transcript_panel_attrs,
         "TITLE": escape(title),
         "DESCRIPTION": escape(description or (overview.lead if overview else title)),
         "HOME": f'<a href="{home}">{label("Library")}</a>' if home else f'<span>{label("Library")}</span>',

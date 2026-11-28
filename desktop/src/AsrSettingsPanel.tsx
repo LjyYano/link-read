@@ -1,5 +1,5 @@
 import { localizedDetail, tr } from "./language.ts"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDown, CircleAlert, ExternalLink, FolderOpen, LoaderCircle, RefreshCw } from "lucide-react"
 import { checkFfmpeg, locateFfmpeg, openExternal, testAsrConnection, type FfmpegStatus } from "./api"
 import { ConnectionRevision } from "./connectionState"
@@ -10,10 +10,11 @@ import type { AsrOptions } from "./asrSettings"
 
 type ConnectionResult = { revision: number; ok: boolean; message: string }
 
-export function AsrSettingsPanel({ value, onChange, token, onToken, apiToken, savedToken, disabled, onTestingChange, onClearToken }: {
+export function AsrSettingsPanel({ value, onChange, token, onToken, apiToken, savedToken, disabled, onTestingChange, onClearToken, footer }: {
   value: AsrOptions; onChange: (value: AsrOptions) => void
   token: string; onToken: (token: string) => void; apiToken: string; savedToken: string
   disabled: boolean; onTestingChange?: (busy: boolean) => void; onClearToken?: () => void
+  footer?: ReactNode
 }) {
   const [testing, setTesting] = useState(false)
   const [result, setResult] = useState<ConnectionResult>()
@@ -311,5 +312,6 @@ export function AsrSettingsPanel({ value, onChange, token, onToken, apiToken, sa
       </div>
       {activeResult && !activeResult.ok && <p className="settings-test-error" role="alert">{activeResult.message}</p>}
     </div>}
+    {footer}
   </section>
 }

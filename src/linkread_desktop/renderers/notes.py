@@ -13,13 +13,15 @@ from .labels import page_label
 from .templates import fill_template
 
 
-def _panel(name: str, content: str) -> str:
-    return (f'<section class="panel" id="panel-{name}" data-panel="{name}" '
-            f'role="tabpanel" aria-labelledby="tab-{name}" hidden>'
+def _panel(name: str, content: str, *, active: bool = False) -> str:
+    css = "panel active" if active else "panel"
+    hidden = "" if active else " hidden"
+    return (f'<section class="{css}" id="panel-{name}" data-panel="{name}" '
+            f'role="tabpanel" aria-labelledby="tab-{name}"{hidden}>'
             f'<div class="panel-inner">{content}</div></section>')
 
 
-def overview_panel(overview: ReadingOverview, *, language: str = "en") -> str:
+def overview_panel(overview: ReadingOverview, *, language: str = "en", active: bool = False) -> str:
     summary = [f'<p class="summary-lead">{escape(overview.lead)}</p>']
     summary.extend(
         f'<a class="summary-line" href="#chapter-{section.start_segment_index}" '
@@ -30,7 +32,7 @@ def overview_panel(overview: ReadingOverview, *, language: str = "en") -> str:
     )
     if overview.source_note:
         summary.append(f'<p class="source-caveat">{escape(overview.source_note)}</p>')
-    return _panel("summary", "".join(summary))
+    return _panel("summary", "".join(summary), active=active)
 
 
 def note_fragments(note: NoteDocument, *, language: str = "en") -> dict[str, str]:

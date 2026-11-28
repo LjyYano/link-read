@@ -364,9 +364,12 @@ def test_run_keeps_transcript_for_retry_and_loads_video_sidecars(tmp_path, monke
     monkeypatch.setattr(provider, 'generate', original_generate)
     generate_article(url, provider, library=tmp_path/'library')
     assert source.read_bytes() == before
+    from linkread_desktop import desktop
     note = load_document(folder / 'note.json')
     assert note.transcript == TranscriptDocument.model_validate_json(before)
-    article = (folder / 'article.html').read_text(encoding='utf-8')
+    assert (folder / 'manifest.json').is_file() and not (folder / 'article.html').exists()
+    desktop._prepared_reader(folder / 'manifest.json')
+    article = (folder / '.reader.html').read_text(encoding='utf-8')
     assert 'id="tab-mindmap"' in article
     assert '平台更新的字幕' not in article
     assert extracted == ['https://youtu.be/1-Fo8McCD9w']
@@ -389,14 +392,15 @@ def test_run_publishes_all_files_and_refreshes_bookshelf_without_repeating_ai(tm
     url = 'https://www.youtube.com/watch?v=1-Fo8McCD9w'
     generate_article(url, provider, library=tmp_path/'library', site=tmp_path/'site')
     folder = tmp_path / 'library' / '重要内容 [youtube-1-Fo8McCD9w]'
+    from linkread_desktop import desktop
     assert {path.name for path in folder.iterdir() if not path.name.startswith('.')} == {
-        'transcript.json', 'note.json', 'reading.json', 'mindmap.md', 'quotes.json', 'catalog.json', 'article.html',
+        'transcript.json', 'note.json', 'reading.json', 'mindmap.md', 'quotes.json', 'catalog.json', 'manifest.json',
     }
-    article = (folder / 'article.html').read_text(encoding='utf-8')
+    desktop._prepared_reader(folder / 'manifest.json')
+    article = (folder / '.reader.html').read_text(encoding='utf-8')
     shelf = tmp_path / 'site' / 'index.html'
     home = shelf.read_text(encoding='utf-8')
     assert 'id="article-count">2</span>' in home and '书架已有文章' in home and doc.source.title in home
-    assert 'href="../../site/index.html"' in article
     shelf_articles = [path.read_text(encoding='utf-8') for path in shelf.parent.glob('pages/*/index.html')]
     for marker in ('一段全文导语。', '一、主题开场', '二、后半段主题', 'id="tab-highlights"', 'id="tab-mindmap"'):
         assert marker in article and any(marker in item for item in shelf_articles)
@@ -414,7 +418,7 @@ def test_run_publishes_all_files_and_refreshes_bookshelf_without_repeating_ai(tm
     assert '<strong>用于学习</strong>' in body and '<strong class="red">原始字幕</strong>' in body
     assert provider.calls.count(['reading', 'mindmap', 'quotes', 'catalog']) == 1
     ai_count = len(provider.calls)
-    saved = {path.name: path.stat().st_mtime_ns for path in folder.iterdir() if path.name != 'article.html' and not path.name.startswith('.')}
+    saved = {path.name: path.stat().st_mtime_ns for path in folder.iterdir() if path.name != 'manifest.json' and not path.name.startswith('.')}
 
     def fail_extract(*args, **kwargs):
         pytest.fail('已归档的同一视频不应发起网络请求')
@@ -462,8 +466,9 @@ def test_old_run_only_backfills_catalog_once_and_keeps_all_ai_artifacts(tmp_path
     generate_article(url, provider, library=tmp_path/'library', site=tmp_path/'site')
     folder = tmp_path / 'library' / '重要内容 [youtube-1-Fo8McCD9w]'
     (folder / 'catalog.json').unlink()  # Simulate an existing, fully generated older article.
+    from linkread_desktop import desktop
     originals = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in folder.iterdir()
-                 if path.name != 'article.html' and not path.name.startswith('.')}
+                 if path.name != 'manifest.json' and not path.name.startswith('.')}
     provider.calls.clear()
     generate_article(url, provider, library=tmp_path/'library', site=tmp_path/'site')
     assert provider.calls == [['catalog']]
@@ -474,7 +479,8 @@ def test_old_run_only_backfills_catalog_once_and_keeps_all_ai_artifacts(tmp_path
     assert metadata['date'] and metadata['date_source'] == 'archived'
     home = (tmp_path / 'site/index.html').read_text()
     assert '技术与 AI' in home and metadata['date'] in home
-    assert '技术与 AI' in (folder / 'article.html').read_text()
+    desktop._prepared_reader(folder / 'manifest.json')
+    assert '技术与 AI' in (folder / '.reader.html').read_text()
     generate_article(url, provider, library=tmp_path/'library', site=tmp_path/'site')
     assert provider.calls == [['catalog']]
     assert (folder / 'catalog.json').read_bytes() == catalog
@@ -658,7 +664,7 @@ def test_run_recovers_after_bookshelf_write_failure(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         generate_article(url, provider, library=tmp_path/'library', site=shelf)
     assert (shelf / 'index.html').read_text(encoding='utf-8') == '此前的书架'
-    assert next((tmp_path / 'library').glob('*/article.html')).is_file()
+    assert next((tmp_path / 'library').glob('*/manifest.json')).is_file()
     ai_count = len(provider.calls)
     blocker.unlink()
     generate_article(url, provider, library=tmp_path/'library', site=shelf)

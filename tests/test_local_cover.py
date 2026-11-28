@@ -113,14 +113,16 @@ def test_generation_caches_cover_locally_and_library_index_tracks_it(tmp_path, m
     assert records[0]["localCover"].startswith("linkread-reader://localhost/cover/")
     assert desktop._valid_cached_record(records[0], records[0]["id"])
 
+    # Dynamic on-demand HTML embeds the local cover as offline data URI.
+    desktop._prepared_reader(article)
+    assert "data:image/jpeg;base64," + base64.b64encode(JPEG_BYTES).decode("ascii") in (folder / ".reader.html").read_text(encoding="utf-8")
+
     # Removing cover.jpg invalidates the library index automatically.
     sig_before = reader_cache.archive_signature(folder)
     (folder / "cover.jpg").unlink()
     assert reader_cache.archive_signature(folder) != sig_before
     records_after = desktop._library_records(library)["articles"]
     assert records_after[0]["localCover"] is None
-    # The archived page carries the cover too, so opening the file outside the App shows it.
-    assert "data:image/jpeg;base64," + base64.b64encode(JPEG_BYTES).decode("ascii") in (folder / "article.html").read_text(encoding="utf-8")
 
 
 def test_generation_without_a_local_cover_writes_the_online_thumbnail(tmp_path, monkeypatch):
@@ -128,7 +130,8 @@ def test_generation_without_a_local_cover_writes_the_online_thumbnail(tmp_path, 
     monkeypatch.setattr("linkread_desktop.generation.extract_document", lambda *a, **k: raw)
     monkeypatch.setattr(covers, "fetch_cover_bytes", lambda url, session=None: None)
     article = generate_article(raw.source.url, FakeProvider(), library=tmp_path / "library")
-    html = article.read_text(encoding="utf-8")
+    desktop._prepared_reader(article)
+    html = (article.parent / ".reader.html").read_text(encoding="utf-8")
     assert 'src="https://i.ytimg.com/vi/1-Fo8McCD9w/hqdefault.jpg"' in html
     assert "data:image" not in html and not (article.parent / "cover.jpg").exists()
 
@@ -151,7 +154,8 @@ def test_generation_waits_for_a_late_cover_before_writing_the_article(tmp_path, 
 
     article = generate_article(raw.source.url, FakeProvider(), library=tmp_path / "library", progress=progress)
     assert (article.parent / "cover.jpg").read_bytes() == JPEG_BYTES
-    assert "data:image/jpeg;base64," + base64.b64encode(JPEG_BYTES).decode("ascii") in article.read_text(encoding="utf-8")
+    desktop._prepared_reader(article)
+    assert "data:image/jpeg;base64," + base64.b64encode(JPEG_BYTES).decode("ascii") in (article.parent / ".reader.html").read_text(encoding="utf-8")
 
 
 def test_generation_reports_render_time_without_the_cover_wait(tmp_path, monkeypatch):

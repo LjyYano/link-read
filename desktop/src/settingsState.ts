@@ -16,6 +16,47 @@ export type Preferences = {
   youtubeCookies?: YoutubeCookieOptions
 }
 
+export type SettingsTabId = "general" | "reading" | "ai" | "asr" | "youtube"
+export type FormSettingsTabId = "ai" | "asr" | "youtube"
+export type InstantSaveState = "idle" | "saving" | "saved"
+
+export function isInstantSettingsTab(tab: SettingsTabId): boolean {
+  return tab === "general" || tab === "reading"
+}
+
+export function instantSaveStatus(state: {
+  instantSaveState: InstantSaveState
+  hasInstantError: boolean
+}): { text: string; saved: boolean } {
+  if (state.instantSaveState === "saving") return { text: tr("正在保存…"), saved: false }
+  if (state.hasInstantError) return { text: "", saved: false }
+  if (state.instantSaveState === "saved") return { text: tr("已自动保存"), saved: true }
+  return { text: tr("自动保存"), saved: false }
+}
+
+export function formSaveBarState(state: {
+  tab: FormSettingsTabId
+  dirty: boolean
+  tabDirty: boolean
+  loading: boolean
+  saving: boolean
+  testing: boolean
+  asrTesting: boolean
+  savedNotice: boolean
+}): {
+  statusText: string
+  statusSaved: boolean
+} {
+  const statusText = state.loading ? tr("正在读取配置…")
+    : state.saving ? tr("正在保存…")
+    : state.asrTesting ? tr("正在测试转写…")
+    : state.testing ? tr("正在测试连接…")
+    : state.dirty ? (state.tabDirty ? tr("有未保存的修改") : tr("其他标签页有未保存的修改"))
+    : state.savedNotice ? tr("设置已保存")
+    : ""
+  return { statusText, statusSaved: state.savedNotice && !state.dirty }
+}
+
 export type SettingsDraft = { preferences: Preferences; apiToken: string; asrToken: string }
 export type SettingsField = "provider" | "codex-path" | "claude-path"
   | "codex-model" | "claude-model" | "codex-effort" | "claude-effort"
@@ -124,6 +165,19 @@ function canonicalDraftForComparison(value: SettingsDraft): SettingsDraft {
 
 export function settingsDraftEqual(a: SettingsDraft, b: SettingsDraft): boolean {
   return JSON.stringify(canonicalDraftForComparison(a)) === JSON.stringify(canonicalDraftForComparison(b))
+}
+
+export function dirtySettingsTabs(a: SettingsDraft, b: SettingsDraft): Record<FormSettingsTabId, boolean> {
+  const left = canonicalDraftForComparison(a)
+  const right = canonicalDraftForComparison(b)
+  return {
+    ai: JSON.stringify([left.preferences.provider, left.preferences.paths, left.preferences.cli, left.preferences.api, left.apiToken])
+      !== JSON.stringify([right.preferences.provider, right.preferences.paths, right.preferences.cli, right.preferences.api, right.apiToken]),
+    asr: JSON.stringify([left.preferences.asr, left.asrToken])
+      !== JSON.stringify([right.preferences.asr, right.asrToken]),
+    youtube: JSON.stringify(left.preferences.youtubeCookies ?? null)
+      !== JSON.stringify(right.preferences.youtubeCookies ?? null),
+  }
 }
 
 function validateToken(value: string, field: "api-token" | "asr-token", required: boolean) {

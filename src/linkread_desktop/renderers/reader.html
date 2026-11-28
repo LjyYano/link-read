@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="<!--LR:PAGE_LANGUAGE-->">
+<html lang="<!--LR:PAGE_LANGUAGE-->"<!--LR:HTML_ATTRS-->>
 <head>
 <meta charset="utf-8">
 <script>document.documentElement.classList.add('js')</script>
@@ -137,13 +137,18 @@
 .reader-popover-label{display:block;color:var(--muted);font-size:11px;margin-bottom:9px;line-height:1.5}
 .reader-size-controls{display:flex;align-items:center;justify-content:space-between;gap:10px}.reader-size-controls button{border:1px solid var(--line);padding:5px 9px;min-width:34px}
 #font-status{font-size:13px;color:var(--fg);font-variant-numeric:tabular-nums;min-width:42px;text-align:center}
-.reader-popover .reader-reset{display:block;min-height:26px;margin:9px 0 0 auto;padding:3px 6px;font-size:11px}
-#reader-appearance{width:254px;overflow:auto;overscroll-behavior:contain;padding:13px 14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.14)}
+.reader-appearance-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:9px}
+.reader-popover .reader-reset,.reader-popover .reader-more-settings{display:inline-flex;align-items:center;min-height:26px;margin:0;padding:3px 6px;font-size:11px}
+.reader-popover .reader-more-settings{color:var(--accent)}
+.reader-popover .reader-more-settings[hidden]{display:none}
+.reader-popover .reader-reset{margin-left:auto}
+#reader-appearance{width:264px;overflow:auto;overscroll-behavior:contain;padding:13px 14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.14)}
 [data-theme=dark] #reader-appearance{box-shadow:0 12px 36px rgba(0,0,0,.48)}
 .reader-popover-heading{display:block;font-size:13px;font-weight:600;margin:0 0 11px}
 .reader-appearance-group{margin-top:11px}.reader-appearance-group:first-of-type{margin-top:0}.reader-appearance-group .reader-popover-label{margin-bottom:5px}
 .reader-segmented{display:flex;border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px;background:var(--surface)}
 .reader-segmented button{flex:1;min-width:0;min-height:28px;padding:4px 7px;border-radius:6px;gap:5px}
+.reader-segmented button[hidden]{display:none}
 .reader-segmented button[aria-pressed=true]{color:var(--fg);background:var(--bg);box-shadow:0 1px 2px rgba(0,0,0,.09);font-weight:600}
 .theme-swatch{display:inline-block;width:10px;height:10px;border-radius:999px;border:1px solid rgba(0,0,0,.18);flex:none}
 .theme-swatch-light{background:#ffffff}
@@ -152,11 +157,19 @@
 .reader-appearance-status{display:block;color:var(--muted);font-size:11px;line-height:1.5;border-top:1px solid var(--line);margin-top:9px;padding-top:8px}
 .reader-appearance-status[data-error=true]{color:var(--red)}
 /* Only reading text changes width, spacing and typeface. Map geometry and other views stay stable. */
+.article-body{font-size:var(--reading-font-size,16px)}
 #panel-transcript,#panel-shownotes{max-width:1024px}
 #panel-transcript .panel-inner,#panel-shownotes .panel-inner{max-width:var(--reading-column,760px)}
+:root[data-reading-width=narrow]{--reading-column:660px}
 :root[data-reading-width=wide]{--reading-column:940px}
 :root[data-reading-spacing=compact] .article-body,:root[data-reading-spacing=compact] .reading-paragraph,:root[data-reading-spacing=compact] .shownotes-copy{line-height:1.7}
+:root[data-reading-spacing=standard] .article-body,:root[data-reading-spacing=standard] .reading-paragraph,:root[data-reading-spacing=standard] .shownotes-copy{line-height:1.9}
 :root[data-reading-font=serif] .article-body,:root[data-reading-font=serif] .shownotes-copy{font-family:var(--font-serif);letter-spacing:.015em}
+:root[data-reading-font=custom] .article-body,:root[data-reading-font=custom] .shownotes-copy{font-family:var(--font-reading-custom,var(--font))}
+:root[data-reading-highlights=off] .article-body .red{color:inherit}
+:root[data-reading-highlights=off] .article-body strong{font-weight:inherit}
+:root[data-reading-cover=hide] .article-cover{display:none}
+:root[data-reading-cover=hide] .hero.has-cover{display:block}
 .anki-buttons{flex-wrap:wrap;align-items:center}.anki-card[open]{overflow:visible}
 .anki-card[open]>summary{border-radius:6px 6px 0 0}
 .quote-copy-control{position:relative;display:inline-flex;align-items:stretch}
@@ -185,7 +198,7 @@
 .reading-tools{max-width:830px;margin:0 auto 20px;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}
 .reading-tools button{padding:4px 9px;color:var(--muted)}.reading-tools #print-page{margin-left:auto}
 .shownotes-source{color:var(--muted);font-size:12px;margin:0 0 23px}
-.shownotes-copy{font-size:15px;line-height:1.9;overflow-wrap:anywhere}
+.shownotes-copy{font-size:calc(var(--reading-font-size,16px) - 1px);line-height:1.9;overflow-wrap:anywhere}
 .shownotes-copy>:first-child{margin-top:0}.shownotes-copy p,.shownotes-copy div{margin:0 0 1em}.shownotes-copy ul,.shownotes-copy ol{padding-left:1.6em}
 .shownotes-copy h2,.shownotes-copy h3,.shownotes-copy h4,.shownotes-copy h5,.shownotes-copy h6{font-size:17px;line-height:1.5;margin:1.5em 0 .6em}
 .shownotes-copy blockquote{border-left:3px solid var(--line);margin:1em 0;padding-left:1em;color:var(--muted)}
@@ -212,6 +225,7 @@
   #panel-transcript{display:block!important}
 }
 </style>
+<!--LR:READING_STYLE-->
 <!--LR:MINDMAP_STYLE-->
 </head>
 <body>
@@ -239,10 +253,10 @@
               <span class="reader-popover-heading">Reading appearance</span>
               <div class="reader-appearance-group" role="group" aria-label="Page theme"><span class="reader-popover-label">Page theme</span><div class="reader-segmented"><button type="button" data-theme-choice="light" aria-pressed="true"><span class="theme-swatch theme-swatch-light" aria-hidden="true"></span>Light</button><button type="button" data-theme-choice="sepia" aria-pressed="false"><span class="theme-swatch theme-swatch-sepia" aria-hidden="true"></span>Sepia</button><button type="button" data-theme-choice="dark" aria-pressed="false"><span class="theme-swatch theme-swatch-dark" aria-hidden="true"></span>Dark</button></div></div>
               <div class="reader-appearance-group"><span class="reader-popover-label">Text size</span><div class="reader-size-controls"><button type="button" id="font-decrease" aria-label="Decrease font size">A−</button><span id="font-status" role="status"></span><button type="button" id="font-increase" aria-label="Increase font size">A+</button></div></div>
-              <div class="reader-appearance-group" role="group" aria-label="Font style"><span class="reader-popover-label">Font style</span><div class="reader-segmented"><button type="button" data-reading-font="sans" aria-pressed="true">Sans</button><button type="button" data-reading-font="serif" aria-pressed="false">Serif</button></div></div>
-              <div class="reader-appearance-group" role="group" aria-label="Line width"><span class="reader-popover-label">Line width</span><div class="reader-segmented"><button type="button" data-reading-width="standard" aria-pressed="true">Standard</button><button type="button" data-reading-width="wide" aria-pressed="false">Wide</button></div></div>
-              <div class="reader-appearance-group" role="group" aria-label="Line spacing"><span class="reader-popover-label">Line spacing</span><div class="reader-segmented"><button type="button" data-reading-spacing="compact" aria-pressed="false">Compact</button><button type="button" data-reading-spacing="relaxed" aria-pressed="true">Relaxed</button></div></div>
-              <button class="reader-reset" type="button" id="font-reset">Reset appearance</button>
+              <div class="reader-appearance-group" role="group" aria-label="Font style"><span class="reader-popover-label">Font style</span><div class="reader-segmented"><button type="button" data-reading-font="sans" aria-pressed="true">Sans</button><button type="button" data-reading-font="serif" aria-pressed="false">Serif</button><button type="button" data-reading-font="custom" aria-pressed="false" hidden>Custom</button></div></div>
+              <div class="reader-appearance-group" role="group" aria-label="Line width"><span class="reader-popover-label">Line width</span><div class="reader-segmented"><button type="button" data-reading-width="narrow" aria-pressed="false">Narrow</button><button type="button" data-reading-width="standard" aria-pressed="true">Standard</button><button type="button" data-reading-width="wide" aria-pressed="false">Wide</button></div></div>
+              <div class="reader-appearance-group" role="group" aria-label="Line spacing"><span class="reader-popover-label">Line spacing</span><div class="reader-segmented"><button type="button" data-reading-spacing="compact" aria-pressed="false">Compact</button><button type="button" data-reading-spacing="standard" aria-pressed="false">Standard</button><button type="button" data-reading-spacing="relaxed" aria-pressed="true">Relaxed</button></div></div>
+              <div class="reader-appearance-footer"><button class="reader-more-settings" type="button" id="reader-more-settings" hidden>More reading settings…</button><button class="reader-reset" type="button" id="font-reset">Reset appearance</button></div>
               <span class="reader-appearance-status" id="appearance-status" role="status">Transcript &amp; Shownotes · Saved across articles</span>
             </div>
           </div>
@@ -262,7 +276,7 @@
     </div>
     <!--LR:SUMMARY_PANEL-->
     <!--LR:MINDMAP_PANEL-->
-    <section class="panel active" id="panel-transcript" data-panel="transcript" role="tabpanel" aria-labelledby="tab-transcript">
+    <section <!--LR:TRANSCRIPT_PANEL_ATTRS--> id="panel-transcript" data-panel="transcript" role="tabpanel" aria-labelledby="tab-transcript">
       <div class="panel-inner">
         <!--LR:MOBILE_TOC-->
         <!--LR:READING_NOTICE-->
@@ -277,6 +291,7 @@
 <div id="toast" role="status" aria-live="polite"></div>
 <div class="reading-resume" data-reading-resume role="status" aria-live="polite" hidden><span>Resumed reading</span><button type="button" data-reading-start-top>Start from top</button><button type="button" data-reading-resume-dismiss aria-label="Dismiss reading reminder">×</button></div>
 <script type="application/json" id="linkread-reader-labels"><!--LR:READER_LABELS--></script>
+<script type="application/json" id="linkread-reading-defaults"><!--LR:READING_DEFAULTS--></script>
 <script id="linkread-reader-init">
 <!--LR:READER_SCRIPT-->
 </script>

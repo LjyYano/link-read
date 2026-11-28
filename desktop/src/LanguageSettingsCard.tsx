@@ -2,13 +2,14 @@ import { ChevronDown, Monitor, Moon, Sun } from "lucide-react"
 import { resolveLocale, tr, type InterfaceLanguage, type LanguageSettings, type PageLanguage } from "./language.ts"
 import type { ThemeMode } from "./themeState"
 
-export function LanguageSettingsCard({ value, onChange, theme, onThemeChange, disabled = false, error }: {
+export function LanguageSettingsCard({ value, onChange, theme, onThemeChange, disabled = false, error, saveStatus }: {
   value: LanguageSettings
   onChange: (value: LanguageSettings) => void
   theme: ThemeMode
   onThemeChange: (theme: ThemeMode) => void
   disabled?: boolean
   error: string
+  saveStatus?: { text: string; saved: boolean }
 }) {
   const system = resolveLocale("system") === "zh-CN" ? "简体中文" : "English"
   const themeOptions: ReadonlyArray<{ id: ThemeMode; label: string; icon: typeof Monitor }> = [
@@ -17,7 +18,14 @@ export function LanguageSettingsCard({ value, onChange, theme, onThemeChange, di
     { id: "dark", label: tr("深色"), icon: Moon },
   ]
   return <section className="settings-card" aria-labelledby="settings-language-heading">
-    <header className="settings-card-header"><h2 id="settings-language-heading">{tr("语言与外观")}</h2></header>
+    <header className="settings-card-header">
+      <h2 id="settings-language-heading">{tr("语言与外观")}</h2>
+      {saveStatus?.text && (
+        <span className="settings-auto-save" role="status" data-state={saveStatus.saved ? "saved" : undefined}>
+          {saveStatus.text}
+        </span>
+      )}
+    </header>
     <div className="settings-card-body">
       <div className="settings-field">
         <span className="settings-label" id="settings-theme-label">{tr("界面外观")}</span>

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 
+from .archive_manifest import published_article_marker
 from .errors import LinkReadError
 from .storage import write_text
 
@@ -53,7 +54,7 @@ def archive_mutation(library: Path):
 def save_reading_state(folder: Path, state: dict[str, bool]) -> None:
     path = folder / STATE_FILENAME
     if (folder.is_symlink() or not folder.is_dir() or path.is_symlink()
-            or (folder / "article.html").is_symlink() or not (folder / "article.html").is_file()):
+            or published_article_marker(folder) is None):
         raise LinkReadError("找不到这篇已生成的文章")
     if any(type(state.get(key)) is not bool for key in ("isRead", "isStarred")):
         raise LinkReadError("阅读状态必须为布尔值")

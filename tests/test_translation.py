@@ -52,10 +52,11 @@ def test_generation_renders_only_the_final_body_in_chinese_offline(tmp_path, mon
     assert raw.model_dump_json() == before
     assert "简体中文" in provider.prompts[0]
     assert load_edition(finished.parent, raw).language == "zh-CN"
+    assert finished.name == "manifest.json" and not (finished.parent / "article.html").exists()
     _prepared_reader(finished)
-    for page in (finished, next(site.glob("pages/*/index.html")), finished.parent / ".reader.html"):
+    for page in (next(site.glob("pages/*/index.html")), finished.parent / ".reader.html"):
         html = page.read_text(encoding="utf-8")
-        assert '<html lang="zh-CN">' in html
+        assert '<html lang="zh-CN"' in html
         assert "data-select-transcript" not in html
         body = html.split('<article class="article-body"', 1)[1].split("</article>", 1)[0]
         assert "中文译文" in body
@@ -197,7 +198,8 @@ def test_english_original_uses_english_prompts_and_arabic_section_numbers(tmp_pa
 
     provider = EnglishPromptCheckProvider()
     article = generate_article(raw.source.url, provider, library=tmp_path / "library", page_language="original")
-    html = article.read_text(encoding="utf-8")
+    _prepared_reader(article)
+    html = (article.parent / ".reader.html").read_text(encoding="utf-8")
     assert "<h2>1. Building High Trust</h2>" in html
     assert "一、" not in html
     assert section_title(1, "Chapter 1: Building High Trust", language="en") == "1. Building High Trust"

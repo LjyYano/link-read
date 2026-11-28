@@ -15,13 +15,14 @@ from .storage import write_text
 
 
 # Bump when a packaged metadata/renderer algorithm changes without asset changes.
-CACHE_VERSION = 17
+CACHE_VERSION = 18
 READER_MANIFEST = ".reader-cache.json"
 LIBRARY_INDEX = ".library-index.json"
 _DERIVED = {".reader.html", READER_MANIFEST}
 _RENDER_RELEVANT_MODULES = frozenset({
     "__init__.py",
     "ai/models.py",
+    "archive_manifest.py",
     "article_details.py",
     "article_state.py",
     "covers.py",
@@ -30,6 +31,7 @@ _RENDER_RELEVANT_MODULES = frozenset({
     "models.py",
     "quotes.py",
     "reader_cache.py",
+    "reading_preferences.py",
     "source_notes.py",
     "storage.py",
     "translation.py",
@@ -110,7 +112,7 @@ def save_cache(path: Path, value: dict) -> None:
         pass
 
 
-def cached_reader(article: Path, signature: str) -> dict | None:
+def cached_reader(article: Path, signature: str, *, reading_signature: str = "") -> dict | None:
     cached = article.with_name(".reader.html")
     if cached.is_symlink():
         raise LinkReadError("阅读缓存路径不可用")
@@ -118,6 +120,7 @@ def cached_reader(article: Path, signature: str) -> dict | None:
     if (not manifest or manifest.get("version") != CACHE_VERSION
             or manifest.get("inputs") != signature
             or manifest.get("implementation") != implementation_signature()
+            or manifest.get("reading", "") != reading_signature
             or not isinstance(manifest.get("readingKey"), str)
             or not manifest["readingKey"] or len(manifest["readingKey"]) > 512):
         return None
@@ -137,11 +140,12 @@ def cached_reader(article: Path, signature: str) -> dict | None:
     return {"revision": digest.hexdigest()[:20], "readingKey": manifest["readingKey"]}
 
 
-def remember_reader(article: Path, signature: str, html: str, reading_key: str) -> dict:
+def remember_reader(article: Path, signature: str, html: str, reading_key: str, *, reading_signature: str = "") -> dict:
     digest = sha256(html.encode("utf-8")).hexdigest()
     save_cache(article.with_name(READER_MANIFEST), {
         "version": CACHE_VERSION, "inputs": signature,
-        "implementation": implementation_signature(), "sha256": digest,
+        "implementation": implementation_signature(), "reading": reading_signature,
+        "sha256": digest,
         "readingKey": reading_key,
     })
     return {"revision": digest[:20], "readingKey": reading_key}

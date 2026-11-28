@@ -25,10 +25,8 @@
     || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
 
   const systemTheme = matchMedia("(prefers-color-scheme: dark)");
-  const themeKey = "linkread-desktop-theme";
   const validTheme = value => value === "light" || value === "sepia" || value === "dark";
-  let theme = null;
-  try { theme = localStorage.getItem(themeKey); } catch {}
+  let theme = validTheme(document.documentElement.dataset.theme) ? document.documentElement.dataset.theme : null;
   function applyTheme() {
     const effectiveTheme = validTheme(theme) ? theme : systemTheme.matches ? "dark" : "light";
     document.documentElement.dataset.theme = effectiveTheme;
@@ -36,6 +34,7 @@
     window.parent.postMessage({ linkReadTheme: effectiveTheme }, "*");
   }
   applyTheme();
+  window.linkreadEnableDesktopControls?.();
   systemTheme.addEventListener("change", applyTheme);
   window.addEventListener("message", event => {
     if (event.source !== window.parent || !isAllowedHostOrigin(event.origin)) return;
@@ -44,16 +43,19 @@
       window.parent.postMessage({ linkReadEscapeResult: { id: event.data.linkReadEscapeRequest, handled } }, "*");
       return;
     }
+    if (event.data?.linkReadCommand === "set-reading" && event.data.reading && typeof event.data.reading === "object") {
+      if (validTheme(event.data.effectiveTheme)) theme = event.data.effectiveTheme;
+      window.linkreadApplyReading?.(event.data.reading, event.data.effectiveTheme);
+      return;
+    }
     if (event.data?.linkReadCommand === "set-theme" && validTheme(event.data.theme)) {
       theme = event.data.theme;
       applyTheme();
-      try { localStorage.setItem(themeKey, theme); } catch {}
       return;
     }
     if (event.data?.linkReadCommand !== "toggle-theme") return;
     theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     applyTheme();
-    try { localStorage.setItem(themeKey, theme); } catch {}
   });
 
   document.addEventListener("click", event => {

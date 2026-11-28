@@ -359,7 +359,7 @@ pub fn validate_preferences(value: &Value) -> Result<()> {
     }
     if !fields(
         value,
-        &["version", "preferences", "language", "theme"],
+        &["version", "preferences", "language", "theme", "reading"],
         &["version"],
     ) || value["version"] != 1
     {
@@ -444,6 +444,50 @@ pub fn validate_preferences(value: &Value) -> Result<()> {
     if let Some(theme) = obj.get("theme") {
         if !theme.is_null() && !choice(theme, &["system", "light", "dark"]) {
             return Err(invalid());
+        }
+    }
+    if let Some(reading) = obj.get("reading") {
+        if !reading.is_null() {
+            if !fields(
+                reading,
+                &[
+                    "theme",
+                    "fontFamily",
+                    "customFont",
+                    "fontSize",
+                    "lineWidth",
+                    "lineSpacing",
+                    "defaultTab",
+                    "showCover",
+                    "showHighlights",
+                ],
+                &[
+                    "theme",
+                    "fontFamily",
+                    "customFont",
+                    "fontSize",
+                    "lineWidth",
+                    "lineSpacing",
+                    "defaultTab",
+                    "showCover",
+                    "showHighlights",
+                ],
+            ) || !choice(&reading["theme"], &["auto", "light", "sepia", "dark"])
+                || !choice(&reading["fontFamily"], &["sans", "serif", "custom"])
+                || !reading["customFont"].as_str().is_some_and(|s| {
+                    s.is_empty() || super::system_fonts::valid_font_name(s)
+                })
+                || !reading["fontSize"]
+                    .as_u64()
+                    .is_some_and(|v| (14..=26).contains(&v))
+                || !choice(&reading["lineWidth"], &["narrow", "standard", "wide"])
+                || !choice(&reading["lineSpacing"], &["compact", "standard", "relaxed"])
+                || !choice(&reading["defaultTab"], &["transcript", "summary"])
+                || !reading["showCover"].is_boolean()
+                || !reading["showHighlights"].is_boolean()
+            {
+                return Err(invalid());
+            }
         }
     }
     if serde_json::to_vec(value).map_err(|_| invalid())?.len() > PREFERENCES_LIMIT {
@@ -575,6 +619,15 @@ pub fn save_preferences(data: &Path, value: &Value) -> Result<()> {
     let folder = data.join("state");
     let _lock = lock(&folder)?;
     write(&folder.join("preferences.json"), value)
+}
+
+pub fn load_reading_preferences_json(data: &Path) -> Option<String> {
+    let value = load_preferences(data).ok()?;
+    let reading = value.get("reading")?;
+    if !reading.is_object() {
+        return None;
+    }
+    serde_json::to_string(reading).ok()
 }
 
 fn reading_key(key: &str) -> Result<String> {
@@ -779,6 +832,31 @@ mod tests {
         let mut bad_cli = with_cli.clone();
         bad_cli["preferences"]["cli"]["codex"]["reasoningEffort"] = json!("extreme");
         assert!(save_preferences(dir.path(), &bad_cli).is_err());
+
+        let mut with_reading = with_cli.clone();
+        with_reading["reading"] = json!({
+            "theme": "sepia",
+            "fontFamily": "custom",
+            "customFont": "PingFang SC",
+            "fontSize": 20,
+            "lineWidth": "narrow",
+            "lineSpacing": "standard",
+            "defaultTab": "summary",
+            "showCover": false,
+            "showHighlights": false
+        });
+        save_preferences(dir.path(), &with_reading).unwrap();
+        assert_eq!(load_preferences(dir.path()).unwrap(), with_reading);
+        let serialized = load_reading_preferences_json(dir.path()).unwrap();
+        assert!(serialized.contains("\"PingFang SC\""));
+
+        let mut bad_font = with_reading.clone();
+        bad_font["reading"]["customFont"] = json!("Font</style><script>");
+        assert!(save_preferences(dir.path(), &bad_font).is_err());
+
+        let mut bad_size = with_reading.clone();
+        bad_size["reading"]["fontSize"] = json!(30);
+        assert!(save_preferences(dir.path(), &bad_size).is_err());
     }
     #[test]
     fn journal_round_trips_cli_reasoning_effort_and_rejects_invalid_values() {

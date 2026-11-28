@@ -179,7 +179,7 @@ def test_failed_regeneration_keeps_old_article_and_only_retries_missing_stage(tm
     monkeypatch.setattr(desktop, "make_provider", lambda *_a, **_k: provider)
     status, events = invoke(monkeypatch, capsys, tmp_path, "generate", raw.source.url)
     assert status == 0
-    article = tmp_path / events[-1]["article"]["id"] / "article.html"
+    article = tmp_path / events[-1]["article"]["id"] / "manifest.json"
     original = article.read_bytes()
 
     class FailedProof(FakeProvider):

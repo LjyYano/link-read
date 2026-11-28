@@ -87,7 +87,8 @@
       origin === 'null' || origin === 'tauri://localhost' || origin === 'https://tauri.localhost'
       || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
     try { root.history.scrollRestoration = 'manual'; } catch {}
-    const blank = () => ({ version: 1, updatedAt: 0, activeTab: 'transcript', tabs: {}, mindmap: null });
+    const initialTab = options.getActiveTab() || 'transcript';
+    const blank = () => ({ version: 1, updatedAt: 0, activeTab: initialTab, tabs: {}, mindmap: null });
     let state = blank();
     try { state = sanitize(JSON.parse(root.localStorage.getItem(storageKey))) || state; } catch {}
     let started = false, restoring = false, changed = false, touched = false, explicit = false;
@@ -299,7 +300,7 @@
     function start(hasExplicitNavigation) {
       explicit = hasExplicitNavigation;
       if (!explicit) {
-        const desired = options.tabNames.includes(state.activeTab) ? state.activeTab : 'transcript';
+        const desired = options.tabNames.includes(state.activeTab) ? state.activeTab : initialTab;
         const position = state.tabs[desired];
         options.activateTab(desired);
         started = true;
@@ -318,7 +319,7 @@
           if (!state.mindmap && incoming.mindmap && activeTab !== 'mindmap') state.mindmap = incoming.mindmap;
         } else if (incoming.updatedAt >= state.updatedAt) {
           state = incoming;
-          const desired = options.tabNames.includes(state.activeTab) ? state.activeTab : 'transcript';
+          const desired = options.tabNames.includes(state.activeTab) ? state.activeTab : initialTab;
           const position = state.tabs[desired];
           started = false;
           options.activateTab(desired);

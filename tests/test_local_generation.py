@@ -39,8 +39,10 @@ def test_upgrade_existing_local_archive_uses_saved_subtitle_and_preserves_id(tmp
     assert events[-1]["article"]["id"] == folder.name
     assert events[-1]["article"]["hasAnalysis"] is True
     assert load_document(folder / "note.json").transcript == before
-    assert 'id="tab-summary"' in (folder / "article.html").read_text()
-    assert len(list(library.glob("*/article.html"))) == 1
+    assert (folder / "manifest.json").is_file() and not (folder / "article.html").exists()
+    desktop._prepared_reader(folder / "manifest.json")
+    assert 'id="tab-summary"' in (folder / ".reader.html").read_text()
+    assert len(list(library.glob("*/manifest.json"))) == 1
 
 
 def test_failed_local_upgrade_keeps_old_article_and_transcript(tmp_path, monkeypatch, capsys):

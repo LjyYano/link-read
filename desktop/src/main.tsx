@@ -31,6 +31,10 @@ import { loadRecentArticles, rememberArticle } from "./quickOpenState"
 import { FileUp } from "lucide-react"
 import { Reader, type ReaderTheme } from "./Reader"
 import { flushReadingPositions } from "./readingPositionBridge"
+import {
+  loadReadingPreferences, normalizeReadingPreferences, resolveEffectiveReaderTheme, saveReadingPreferencesLocal,
+  type ReadingPreferences,
+} from "./readingPreferences"
 import { Settings, type SettingsLeaveGuard, type SettingsTarget } from "./Settings"
 import { isLoopbackBaseUrl, type Preferences } from "./settingsState"
 import { SourceReadinessPanel } from "./SourceReadinessPanel"
@@ -142,12 +146,14 @@ async function persistNativeEnvelope(next: {
   preferences: Preferences
   language: LanguageSettings
   theme: ThemeMode
+  reading: ReadingPreferences
 }) {
   await savePreferencesNative({
     version: 1,
     preferences: next.preferences,
     language: next.language,
     theme: next.theme,
+    reading: next.reading,
   })
 }
 
@@ -199,6 +205,7 @@ function App() {
   useEffect(() => { void setNativeLanguage(appLocale).catch(() => {}) }, [appLocale])
 
   const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode)
+  const [reading, setReading] = useState<ReadingPreferences>(loadReadingPreferences)
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches)
   const [appNotice, setAppNotice] = useState("")
   const [screen, setScreen] = useState<Screen>("create")
@@ -219,65 +226,112 @@ function App() {
   languageRef.current = language
   const themeModeRef = useRef(themeMode)
   themeModeRef.current = themeMode
+  const readingRef = useRef(reading)
+  readingRef.current = reading
+  const preferencesWriteQueue = useRef<Promise<void>>(Promise.resolve())
   const [readerTheme, setReaderTheme] = useState<ReaderTheme>()
   const [readerLeadingSlot, setReaderLeadingSlot] = useState<HTMLDivElement | null>(null)
   const [readerCenterSlot, setReaderCenterSlot] = useState<HTMLDivElement | null>(null)
   const [readerActionsSlot, setReaderActionsSlot] = useState<HTMLDivElement | null>(null)
 
-  async function changeLanguage(next: LanguageSettings) {
-    if (isTauri()) {
-      try {
-        await persistNativeEnvelope({
-          preferences: preferencesRef.current,
-          language: next,
-          theme: themeModeRef.current,
-        })
-      } catch {
-        const message = tr("无法保存语言设置，请重试。")
-        setLanguageError(message)
-        throw new Error(message)
-      }
-    }
-    try {
-      localStorage.setItem(languageKey, JSON.stringify(next))
-    } catch {
-      if (!isTauri()) {
-        const message = tr("无法保存语言设置，请重试。")
-        setLanguageError(message)
-        throw new Error(message)
-      }
-    }
-    languageRef.current = next
-    setLanguage(next)
-    setLanguageError("")
+  function enqueuePreferencesWrite<T>(work: () => Promise<T>): Promise<T> {
+    const task = preferencesWriteQueue.current.catch(() => {}).then(work)
+    preferencesWriteQueue.current = task.then(() => {}, () => {})
+    return task
   }
 
-  async function changeTheme(next: ThemeMode) {
-    if (isTauri()) {
+  function changeLanguage(next: LanguageSettings): Promise<void> {
+    return enqueuePreferencesWrite(async () => {
+      if (isTauri()) {
+        try {
+          await persistNativeEnvelope({
+            preferences: preferencesRef.current,
+            language: next,
+            theme: themeModeRef.current,
+            reading: readingRef.current,
+          })
+        } catch {
+          const message = tr("无法保存语言设置，请重试。")
+          setLanguageError(message)
+          throw new Error(message)
+        }
+      }
       try {
-        await persistNativeEnvelope({
-          preferences: preferencesRef.current,
-          language: languageRef.current,
-          theme: next,
-        })
+        localStorage.setItem(languageKey, JSON.stringify(next))
       } catch {
-        const message = tr("无法保存外观设置，请重试。")
-        setAppNotice(message)
-        throw new Error(message)
+        if (!isTauri()) {
+          const message = tr("无法保存语言设置，请重试。")
+          setLanguageError(message)
+          throw new Error(message)
+        }
       }
-    }
-    try {
-      saveThemeMode(next)
-    } catch {
-      if (!isTauri()) {
-        const message = tr("无法保存外观设置，请重试。")
-        setAppNotice(message)
-        throw new Error(message)
+      languageRef.current = next
+      setLanguage(next)
+      setLanguageError("")
+    })
+  }
+
+  function changeTheme(next: ThemeMode): Promise<void> {
+    return enqueuePreferencesWrite(async () => {
+      if (isTauri()) {
+        try {
+          await persistNativeEnvelope({
+            preferences: preferencesRef.current,
+            language: languageRef.current,
+            theme: next,
+            reading: readingRef.current,
+          })
+        } catch {
+          const message = tr("无法保存外观设置，请重试。")
+          setAppNotice(message)
+          throw new Error(message)
+        }
       }
-    }
-    themeModeRef.current = next
-    setReaderTheme(undefined)
-    setThemeMode(next)
+      try {
+        saveThemeMode(next)
+      } catch {
+        if (!isTauri()) {
+          const message = tr("无法保存外观设置，请重试。")
+          setAppNotice(message)
+          throw new Error(message)
+        }
+      }
+      themeModeRef.current = next
+      setReaderTheme(undefined)
+      setThemeMode(next)
+    })
+  }
+
+  function changeReading(nextOrPatch: ReadingPreferences | Partial<ReadingPreferences>): Promise<void> {
+    return enqueuePreferencesWrite(async () => {
+      const next = normalizeReadingPreferences({ ...readingRef.current, ...nextOrPatch })
+      if (isTauri()) {
+        try {
+          await persistNativeEnvelope({
+            preferences: preferencesRef.current,
+            language: languageRef.current,
+            theme: themeModeRef.current,
+            reading: next,
+          })
+        } catch {
+          const message = tr("无法保存阅读设置，请重试。")
+          setAppNotice(message)
+          throw new Error(message)
+        }
+      }
+      try {
+        saveReadingPreferencesLocal(next)
+      } catch {
+        if (!isTauri()) {
+          const message = tr("无法保存阅读设置，请重试。")
+          setAppNotice(message)
+          throw new Error(message)
+        }
+      }
+      readingRef.current = next
+      setReaderTheme(undefined)
+      setReading(next)
+    })
   }
   const [youtubePrompt, setYoutubePrompt] = useState<YoutubeSubtitlePrompt>()
 
@@ -478,6 +532,12 @@ function App() {
             setThemeMode(nextTheme)
             try { saveThemeMode(nextTheme) } catch {}
           }
+          if (envelope.reading && typeof envelope.reading === "object") {
+            const nextReading = normalizeReadingPreferences(envelope.reading)
+            readingRef.current = nextReading
+            setReading(nextReading)
+            try { saveReadingPreferencesLocal(nextReading) } catch {}
+          }
           try { localStorage.removeItem(storageKey) } catch {}
         } else {
           const legacy = readLegacyLocalPreferences()
@@ -486,6 +546,7 @@ function App() {
               preferences: legacy.value,
               language: languageRef.current,
               theme: themeModeRef.current,
+              reading: readingRef.current,
             })
             if (!active) return
             preferencesRef.current = legacy.value
@@ -516,6 +577,7 @@ function App() {
   async function finalizeWindowClose() {
     allowCloseRef.current = true
     try {
+      await preferencesWriteQueue.current.catch(() => {})
       if (screen === "reader") await flushReadingPositions()
       if (journalReady.current) await persistJournal()
     } catch {
@@ -729,10 +791,12 @@ function App() {
   }, [screen])
 
   const resolvedAppTheme = resolveTheme(themeMode, systemDark)
-  const resolvedActiveTheme = screen === "reader" && readerTheme
-    ? (readerTheme === "dark" ? "dark" : "light")
+  const effectiveReaderTheme = resolveEffectiveReaderTheme(reading.theme, resolvedAppTheme)
+  const activeReaderTheme = readerTheme ?? effectiveReaderTheme
+  const resolvedActiveTheme = screen === "reader"
+    ? (activeReaderTheme === "dark" ? "dark" : "light")
     : resolvedAppTheme
-  const activeReaderTone = screen === "reader" && readerTheme === "sepia" ? "sepia" : ""
+  const activeReaderTone = screen === "reader" && activeReaderTheme === "sepia" ? "sepia" : ""
   useLayoutEffect(() => {
     const system = window.matchMedia("(prefers-color-scheme: dark)")
     const handleSystemChange = () => setSystemDark(system.matches)
@@ -795,23 +859,26 @@ function App() {
     setScreen("settings")
   }
 
-  async function configure(next: Preferences) {
-    if (isTauri()) {
-      await persistNativeEnvelope({
-        preferences: next,
-        language: languageRef.current,
-        theme: themeModeRef.current,
-      })
-    } else {
-      localStorage.setItem(storageKey, JSON.stringify(next))
-    }
-    if (JSON.stringify(next.youtubeCookies) !== JSON.stringify(preferencesRef.current.youtubeCookies)) {
-      clearSubtitleDownloadErrors()
-      setYoutubePrompt(undefined)
-      if (source.trim()) forgetSourceReadiness(source.trim())
-    }
-    preferencesRef.current = next
-    setPreferences(next)
+  function configure(next: Preferences): Promise<void> {
+    return enqueuePreferencesWrite(async () => {
+      if (isTauri()) {
+        await persistNativeEnvelope({
+          preferences: next,
+          language: languageRef.current,
+          theme: themeModeRef.current,
+          reading: readingRef.current,
+        })
+      } else {
+        localStorage.setItem(storageKey, JSON.stringify(next))
+      }
+      if (JSON.stringify(next.youtubeCookies) !== JSON.stringify(preferencesRef.current.youtubeCookies)) {
+        clearSubtitleDownloadErrors()
+        setYoutubePrompt(undefined)
+        if (source.trim()) forgetSourceReadiness(source.trim())
+      }
+      preferencesRef.current = next
+      setPreferences(next)
+    })
   }
 
   function goToLibrary() {
@@ -1454,7 +1521,6 @@ function App() {
     || currentYoutubePrompt?.kind === "fix_cookies"
   const sourceNeedsAsr = !hasDownloadedSubtitles && !sourceNeedsYoutubeCookies
     && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled
-  const forcedReaderTheme = themeMode === "system" ? undefined : themeMode
 
   return (
     <div className="app-shell">
@@ -1514,7 +1580,8 @@ function App() {
         {screen === "settings" && (
           <Settings preferences={preferences} onSave={configure} leaveGuard={settingsLeaveGuard} target={settingsTarget}
             language={language} onLanguageChange={changeLanguage} languageError={languageError}
-            theme={themeMode} onThemeChange={changeTheme} unifiedHeader
+            theme={themeMode} onThemeChange={changeTheme} resolvedAppTheme={resolvedAppTheme}
+            reading={reading} onReadingChange={changeReading} unifiedHeader
             onTokenChanged={() => setApiTokenVersion(current => current + 1)}
             settingsGate={settingsGate.current} settingsRecovery={settingsRecovery}
             onBack={() => navigateTo(previousScreen)} />
@@ -1525,7 +1592,10 @@ function App() {
             ? { onGenerate: () => { void start(standaloneDownload) } } : undefined}
           onNavigationStart={beginNavigation}
           onThemeChange={setReaderTheme}
-          forcedTheme={forcedReaderTheme}
+          reading={reading}
+          effectiveTheme={effectiveReaderTheme}
+          onReadingChange={patch => { void changeReading(patch).catch(() => {}) }}
+          onOpenReadingSettings={() => void showSettings("reading")}
           toolbarSlots={{ leading: readerLeadingSlot, center: readerCenterSlot, actions: readerActionsSlot }}
           youtubeCookies={preferences.youtubeCookies}
           onViewRegeneration={readerTask ? () => openTasks(readerTask.id) : undefined}

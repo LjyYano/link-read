@@ -155,7 +155,10 @@ def test_desktop_podcast_runs_ai_archives_exports_and_rejects_duplicate(tmp_path
     assert article["platform"] == "apple_podcasts" and article["hasAnalysis"] is True
     assert article["sourceUrl"] == URL and article["thumbnailUrl"] == COVER
     folder = tmp_path / article["id"]
-    page = (folder / "article.html").read_text()
+    assert (folder / "manifest.json").is_file() and not (folder / "article.html").exists()
+    status, prepared = invoke(monkeypatch, capsys, tmp_path, "reader", article["id"])
+    assert status == 0 and prepared[0]["type"] == "reader"
+    page = (folder / ".reader.html").read_text()
     for panel in ("summary", "mindmap", "transcript", "keywords", "highlights", "shownotes"):
         assert f'id="tab-{panel}"' in page
     assert 'id="tab-notes"' not in page

@@ -30,29 +30,40 @@ pub fn article_file(library: &Path, id: &str) -> AppResult<PathBuf> {
         return Err("无效的文章编号".into());
     }
     let folder = library.join(id);
-    let file = folder.join("article.html");
-    if library.is_symlink()
-        || !library.is_dir()
-        || folder.is_symlink()
-        || file.is_symlink()
-        || !file.is_file()
-    {
+    if library.is_symlink() || !library.is_dir() || folder.is_symlink() || !folder.is_dir() {
         return Err("找不到这篇已生成的文章".into());
     }
-    Ok(file)
+    let manifest = folder.join("manifest.json");
+    let legacy = folder.join("article.html");
+    if manifest.is_symlink() || legacy.is_symlink() {
+        return Err("找不到这篇已生成的文章".into());
+    }
+    if manifest.is_file() {
+        return Ok(manifest);
+    }
+    if legacy.is_file() {
+        return Ok(legacy);
+    }
+    Err("找不到这篇已生成的文章".into())
 }
 
 pub fn rendered_article_file(library: &Path, id: &str) -> AppResult<PathBuf> {
-    let article = article_file(library, id)?;
-    let rendered = article.with_file_name(".reader.html");
+    let marker = article_file(library, id)?;
+    let rendered = marker.with_file_name(".reader.html");
     if rendered.is_symlink() {
         return Err("阅读缓存路径不可用".into());
     }
-    Ok(if rendered.is_file() {
-        rendered
-    } else {
-        article
-    })
+    if rendered.is_file() {
+        return Ok(rendered);
+    }
+    let legacy = marker.with_file_name("article.html");
+    if legacy.is_symlink() {
+        return Err("找不到这篇已生成的文章".into());
+    }
+    if legacy.is_file() {
+        return Ok(legacy);
+    }
+    Err("找不到这篇已生成的文章".into())
 }
 
 pub fn transcript_preview_file(library: &Path, id: &str) -> AppResult<PathBuf> {
