@@ -5,7 +5,7 @@
   const data = document.getElementById('yano-mindmap-data');
   if (!panel || !svgEl || !data) return;
   const labelsForPage = JSON.parse(document.getElementById('linkread-reader-labels')?.textContent || '{}');
-  const t = label => Object.hasOwn(labelsForPage, label) ? labelsForPage[label] : label;
+  const t = label => Object.prototype.hasOwnProperty.call(labelsForPage, label) ? labelsForPage[label] : label;
   const MINDMAP_MD = JSON.parse(data.textContent);
   const sourceData = JSON.parse(document.getElementById('linkread-mindmap-links')?.textContent || '{}');
   const cueRanges = Array.from(document.querySelectorAll('.reading-paragraph'), paragraph =>
@@ -23,6 +23,11 @@
   let instance = null, fallback = null, started = false, ready = false, rootData = null;
   let mode = 'overview', lastViewport = null, operation = 0, resizeFrame = 0;
   let exitingFullscreen = false, wasNativeFullscreen = false, nativeEscapePending = false, nativeEscapeReleased = false, nativeEscapeTimer = 0;
+  let wheelTimer = 0;
+  function scheduleWheelRemember() {
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => { wheelTimer = 0; remember(); }, 300);
+  }
   let lastSize = {width: 0, height: 0}, pendingSaved = position?.getMindmap(signature) || null;
   const isVisible = () => !panel.hidden && getComputedStyle(panel).display !== 'none';
   const isFullscreen = () => document.fullscreenElement === wrap || wrap.classList.contains('is-fullscreen');
@@ -185,6 +190,7 @@
   async function exitMapFullscreen(restoreFocus = true) {
     if (exitingFullscreen) return;
     exitingFullscreen = true;
+    clearTimeout(wheelTimer); wheelTimer = 0;
     remember(false);
     try {
       if (document.fullscreenElement === wrap && document.exitFullscreen) {
@@ -212,6 +218,7 @@
         try { await wrap.requestFullscreen(); entered = true; } catch {}
       }
       if (!entered) wrap.classList.add('is-fullscreen');
+      fullscreenBtn?.focus({preventScroll: true});
     }
     syncFullscreen();
   }
@@ -222,6 +229,22 @@
   document.addEventListener('fullscreenchange', syncFullscreen);
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !event.repeat) nativeEscapeReleased = false;
+    if (event.key === 'Tab' && isFullscreen()) {
+      const candidates = Array.from(wrap.querySelectorAll('button, [tabindex]:not([tabindex="-1"])')).filter(el => {
+        if (el.disabled || el.hidden || el.closest('[hidden]')) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+      if (candidates.length) {
+        const first = candidates[0], last = candidates[candidates.length - 1];
+        const active = document.activeElement;
+        if (!wrap.contains(active) || (!event.shiftKey && active === last)) {
+          event.preventDefault(); first.focus({preventScroll: true});
+        } else if (event.shiftKey && active === first) {
+          event.preventDefault(); last.focus({preventScroll: true});
+        }
+      }
+    }
   }, true);
   document.addEventListener('keydown', event => {
     // The full reader owns layer ordering. Retain a safe standalone fallback.
@@ -305,12 +328,33 @@
           initialExpandLevel: -1, maxWidth: 220, spacingHorizontal: 55,
           spacingVertical: 9, paddingX: 16, scrollForPan: true,
         });
+        function decorateMarkmapControls() {
+          svgEl.querySelectorAll('g.markmap-node > circle').forEach(circle => {
+            const node = circle.parentElement;
+            const labelText = node?.querySelector('foreignObject, text')?.textContent?.trim() || '';
+            const folded = node?.classList.contains('markmap-fold');
+            circle.setAttribute('tabindex', '0');
+            circle.setAttribute('role', 'button');
+            circle.setAttribute('aria-label', t(folded ? 'Expand ' : 'Collapse ') + labelText);
+            if (!circle.dataset.lrKeyboardBound) {
+              circle.dataset.lrKeyboardBound = '1';
+              circle.addEventListener('keydown', ev => {
+                if (ev.key === 'Enter' || ev.key === ' ') {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  circle.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                }
+              });
+            }
+          });
+        }
         const toggle = instance.toggleNode.bind(instance);
         instance.toggleNode = async (...args) => {
           const current = ++operation;
           const view = markmapViewport();
           await toggle(...args);
           if (current !== operation) return;
+          decorateMarkmapControls();
           setMode('custom');
           applyViewport(view);
           remember();
@@ -322,11 +366,12 @@
         });
         // Markmap's wheel-for-pan path applies a programmatic D3 transform,
         // which has no sourceEvent. Persist the user's pan explicitly.
-        svgEl.addEventListener('wheel', () => requestAnimationFrame(() => remember()), {passive: true});
+        svgEl.addEventListener('wheel', scheduleWheelRemember, {passive: true});
         const current = ++operation;
         setMode(pendingSaved?.mode || 'overview');
         void instance.setData(treeAtDepth(root, 0, false, 0, '0', pendingSaved)).then(() => {
           if (current !== operation) return;
+          decorateMarkmapControls();
           if (!applyViewport(pendingSaved?.viewport)) fitMap();
           ready = true;
           lastSize = dimensions();
@@ -457,7 +502,7 @@
       scale = clamp(scale / factor, .02, 20);
       view.w = rect.width / scale; view.h = rect.height / scale;
       view.x += (oldW - view.w) * px; view.y += (oldH - view.h) * py;
-      updateView(); remember();
+      updateView(); scheduleWheelRemember();
     }, {passive: false});
     el.addEventListener('pointerdown', event => {
       if (event.target.closest('.yano-fallback-node') || !view) return;

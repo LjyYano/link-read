@@ -208,7 +208,7 @@ class _DescriptionMarkdown(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
-        self.links: list[tuple[str, int]] = []
+        self.links: list[tuple[str, int, list[str]]] = []
         self.lists: list[tuple[str, int]] = []
 
     def handle_starttag(self, tag, attrs):
@@ -232,7 +232,7 @@ class _DescriptionMarkdown(HTMLParser):
         elif tag == "hr":
             self.parts.append("\n\n---\n\n")
         elif tag == "a":
-            self.links.append((dict(attrs).get("href", ""), len(self.parts)))
+            self.links.append((dict(attrs).get("href", ""), len(self.parts), []))
 
     def handle_endtag(self, tag):
         if tag in {"p", "div", "blockquote", "pre", "h2", "h3", "h4", "h5", "h6"}:
@@ -242,15 +242,18 @@ class _DescriptionMarkdown(HTMLParser):
                 self.lists.pop()
             self.parts.append("\n\n")
         elif tag == "a" and self.links:
-            href, start = self.links.pop()
-            label = "".join(self.parts[start:])
-            if href and label != _markdown_text(href):
-                # Angle autolinks avoid an untrusted ')' terminating a Markdown
-                # link destination. The URL has already passed the HTML filter.
-                target = quote(href, safe=":/?#[]@!$&'()*+,;=%~")
+            href, start, raw_chunks = self.links.pop()
+            raw_label = "".join(raw_chunks).strip()
+            target = quote(href, safe=":/?#[]@!$&'()*+,;=%~") if href else ""
+            if target and raw_label == href.strip():
+                del self.parts[start:]
+                self.parts.append(f"<{target}>")
+            elif target and raw_label:
                 self.parts.append(f" <{target}>")
 
     def handle_data(self, text):
+        if self.links:
+            self.links[-1][2].append(text)
         self.parts.append(_markdown_text(text))
 
 

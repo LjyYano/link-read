@@ -4,10 +4,10 @@
 .reading-state-button:hover:not(:disabled) { background:var(--hover); color:var(--ink); }
 .reading-state-button:disabled { opacity:.5; }
 .reading-complete-button { width:32px; min-width:32px; padding:0; }
-.reading-complete-button[aria-pressed="true"], .reading-complete-button[aria-pressed="true"]:hover:not(:disabled) { color:#327446; border-color:color-mix(in srgb, #327446 20%, var(--line)); background:color-mix(in srgb, #327446 7%, var(--paper)); }
+.reading-complete-button[aria-pressed="true"], .reading-complete-button[aria-pressed="true"]:hover:not(:disabled) { color:#327446; border-color:rgba(50,116,70,.24); background:rgba(50,116,70,.08); }
 .reading-complete-icon circle { fill:currentColor; }
 .reading-complete-icon path { stroke:#fff; }
-.reading-star-button[aria-pressed="true"], .reading-star-button[aria-pressed="true"]:hover:not(:disabled) { color:#a77012; border-color:color-mix(in srgb, #a77012 20%, var(--line)); background:color-mix(in srgb, #a77012 7%, var(--paper)); }
+.reading-star-button[aria-pressed="true"], .reading-star-button[aria-pressed="true"]:hover:not(:disabled) { color:#a77012; border-color:rgba(167,112,18,.24); background:rgba(167,112,18,.08); }
 .reading-actions-compact { gap:3px; }
 .reading-actions-compact .reading-state-button { border:0; min-width:28px; min-height:28px; padding:4px; background:transparent; }
 .reading-actions-compact .reading-state-button span { display:none; }

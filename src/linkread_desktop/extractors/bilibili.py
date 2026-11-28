@@ -121,11 +121,16 @@ def _public_subtitles(session, info: dict, cid: int, published: list) -> list[di
     if not isinstance(subtitle, dict) or "subtitles" not in subtitle:
         raise _invalid_subtitles("B 站公开字幕列表不完整，请重新检查来源。")
     tracks = subtitle["subtitles"]
-    # The public view returns an explicit null for a page with no tracks.
+    # The public view returns an explicit null for a page with no tracks, or
+    # empty-url placeholders when subtitles require login.
     if tracks is None or tracks == []:
         return []
     if not isinstance(tracks, list):
         raise _invalid_subtitles("B 站公开字幕列表格式错误，请重新检查来源。")
+    if all(isinstance(track, dict) and isinstance(track.get("lan"), str)
+           and isinstance(track.get("subtitle_url"), str) and not track["subtitle_url"].strip()
+           for track in tracks):
+        return []
 
     published_tracks = {(_track_id(entry), entry.get("lan")) for entry in published
                         if isinstance(entry, dict) and isinstance(entry.get("lan"), str)}
@@ -139,7 +144,9 @@ def _public_subtitles(session, info: dict, cid: int, published: list) -> list[di
         auto = _AI_TRACK.fullmatch(path)
         track_id = _track_id(track)
         matches = (auto is not None and auto[1] == f"{aid}{cid}") or (
-            _CC_TRACK.fullmatch(path) and track_id and (track_id, track["lan"]) in published_tracks
+            _CC_TRACK.fullmatch(path) and track_id and (
+                (track_id, track["lan"]) in published_tracks or info.get("cid") != cid
+            )
         )
         if matches:
             verified.append({**track, "subtitle_url": url})

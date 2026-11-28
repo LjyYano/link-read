@@ -1,14 +1,20 @@
 import { tr } from "./language.ts"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
-import { ArrowLeft, ArrowUpRight, CircleAlert, Download, Ellipsis, ExternalLink, FileText, FolderOpen, LoaderCircle, Pencil, Printer, RotateCw, Share, SunMoon, Sparkles, X } from "lucide-react"
+import { ArrowLeft, ArrowUpRight, CircleAlert, Download, Ellipsis, ExternalLink, FileText, FolderOpen, LoaderCircle, Pencil, Printer, RotateCw, Share, SunMoon, Sparkles, Trash2, X } from "lucide-react"
 import { exportArticle, exportSubtitles, openArticle, openExternal, openVideo, prepareArticle, preparePreview, refreshShownotes, revealArticle, loadReadingPosition, saveReadingPosition, type Article, type ExportFormat, type SubtitleExportFormat } from "./api"
+import { ConfirmDialog } from "./ConfirmDialog"
 import { menuNavigation } from "./menu"
 import { ReadingActions, type ChangeArticleState } from "./ReadingActions"
 import { ReadingPositionBridge } from "./readingPositionBridge"
 import { ReaderEscapeBridge, readerShortcutsBlocked } from "./readerEscape"
 import type { TaskActivity } from "./taskProgress"
-import type { Job } from "./Home"
+import type { Job } from "./JobCard"
+import type { YoutubeCookieOptions } from "./youtubeCookies"
 import "./reader.css"
+
+function isAllowedReaderOrigin(origin: string): boolean {
+  return origin === "linkread-reader://localhost" || origin === "null"
+}
 
 type Menu = "export" | "more"
 type PreparedReader = { status: "loading" } | { status: "ready"; revision: string; readingKey: string; shownotes: boolean }
@@ -18,9 +24,10 @@ type ShownotesRefresh = { status: "idle" | "loading" | "empty" } | { status: "er
 export type PreviewTask = { id: string; status: Job["status"]; message?: string; activity?: TaskActivity; article?: Article; onOpenComplete: () => void }
 export type StandaloneSubtitlePreview = { onGenerate: () => void }
 
-export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onStateChange, preview, standalonePreview,
-  onNavigationStart, onEdit, onExportMarkdown, detailsRevision = 0, onThemeChange, onViewRegeneration, onOpenUpdated }: {
-  article: Article; onBack: () => void; onRegenerate: (article: Article) => Promise<void>; onStateChange: ChangeArticleState
+export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerate, onDelete, onStateChange, preview, standalonePreview,
+  onNavigationStart, onEdit, onExportMarkdown, detailsRevision = 0, onThemeChange, onViewRegeneration, onOpenUpdated,
+  youtubeCookies, forcedTheme }: {
+  article: Article; onBack: () => void; onRegenerate: (article: Article) => Promise<void>; onDelete?: (id: string) => Promise<void>; onStateChange: ChangeArticleState
   preview?: PreviewTask
   standalonePreview?: StandaloneSubtitlePreview
   backLabel?: string
@@ -31,16 +38,21 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
   onEdit?: (article: Article) => void
   onExportMarkdown?: (article: Article) => void
   detailsRevision?: number
+  youtubeCookies?: YoutubeCookieOptions
+  forcedTheme?: "light" | "dark"
 }) {
   const frame = useRef<HTMLIFrameElement>(null)
   const actions = useRef<HTMLDivElement>(null)
   const exportButton = useRef<HTMLButtonElement>(null)
   const moreButton = useRef<HTMLButtonElement>(null)
   const [menu, setMenu] = useState<Menu>()
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [error, setError] = useState("")
   const [exporting, setExporting] = useState(false)
   const [prepared, setPrepared] = useState<PreparedReader>({ status: "loading" })
   const [shownotesRefresh, setShownotesRefresh] = useState<ShownotesRefresh>({ status: "idle" })
+  const youtubeCookiesRef = useRef(youtubeCookies)
+  youtubeCookiesRef.current = youtubeCookies
   const prepareVersion = useRef(0)
   const preparing = useRef(false)
   const articleReady = useRef(false)
@@ -80,7 +92,7 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
       if (refreshing) await positionBridge.current?.flush()
       if (version !== prepareVersion.current) return
       const result = await (article.previewId ? preparePreview(article.previewId)
-        : refreshing ? refreshShownotes(article.id) : prepareArticle(article.id))
+        : refreshing ? refreshShownotes(article.id, youtubeCookiesRef.current) : prepareArticle(article.id))
       if (version !== prepareVersion.current) return
       if ("status" in result && result.status === "empty") {
         setShownotesRefresh({ status: "empty" })
@@ -130,7 +142,10 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
     })
     positionBridge.current = bridge
     const message = (event: MessageEvent) => {
-      if (event.source === frame.current?.contentWindow && event.data && typeof event.data === "object") bridge.receive(event.data)
+      if (event.source === frame.current?.contentWindow && isAllowedReaderOrigin(event.origin)
+        && event.data && typeof event.data === "object") {
+        bridge.receive(event.data)
+      }
     }
     window.addEventListener("message", message)
     return () => { window.removeEventListener("message", message); bridge.close(); if (positionBridge.current === bridge) positionBridge.current = undefined }
@@ -163,7 +178,7 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
 
   useLayoutEffect(() => {
     function handleFrameMessage(event: MessageEvent) {
-      if (event.source !== frame.current?.contentWindow) return
+      if (event.source !== frame.current?.contentWindow || !isAllowedReaderOrigin(event.origin)) return
       escapeBridge.current.receive(event.data)
       const theme = event.data?.linkReadTheme
       if (theme === "light" || theme === "dark") onThemeChange?.(theme)
@@ -241,11 +256,24 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
         <button className="desktop-reader-action desktop-reader-back" type="button" onClick={() => void leave(onBack)}>
           <ArrowLeft size={17} aria-hidden="true" />{backLabel}
         </button>
+        <h1 className="desktop-reader-title" title={article.title}>{article.title}</h1>
         <div className="desktop-reader-actions" ref={actions} onKeyDown={menuNavigation} onBlur={event => {
           // Safari can blur a focused menu button to null on mouse-down. Keep
           // it mounted for the following click; outside pointer-down dismisses.
           if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setMenu(undefined)
         }}>
+          <button className="desktop-reader-action" type="button" disabled={prepared.status !== "ready"}
+            aria-label={tr("Toggle Theme")} title={tr("Toggle Theme")}
+            onClick={() => frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-theme" }, "*")}>
+            <SunMoon size={17} aria-hidden="true" />
+          </button>
+          {isPreview && (
+            <button className="desktop-reader-action" type="button" disabled={prepared.status !== "ready"}
+              aria-label={tr("Print transcript / Save PDF")} title={tr("Print transcript / Save PDF")}
+              onClick={() => frame.current?.contentWindow?.postMessage({ linkReadCommand: "print" }, "*")}>
+              <Printer size={17} aria-hidden="true" />
+            </button>
+          )}
           {!isPreview && <>
           <ReadingActions article={article} onChange={onStateChange} compact nativeTooltips={false} />
           <button className="desktop-reader-action" type="button" aria-label={tr("Open in Browser")}
@@ -297,11 +325,12 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
                     moreButton.current?.focus()
                   }}><ArrowUpRight size={15} aria-hidden="true" />{tr("Original Source")}</button>
                 )}
-                <button type="button" onClick={() => {
-                  frame.current?.contentWindow?.postMessage({ linkReadCommand: "toggle-theme" }, "*")
-                  setMenu(undefined)
-                  moreButton.current?.focus()
-                }}><SunMoon size={15} aria-hidden="true" />{tr("Toggle Theme")}</button>
+                {onDelete && (
+                  <button className="desktop-reader-delete" type="button" onClick={() => {
+                    setMenu(undefined)
+                    setConfirmDeleteOpen(true)
+                  }}><Trash2 size={15} aria-hidden="true" />{tr("删除文章")}</button>
+                )}
               </div>
             )}
           </div>
@@ -350,7 +379,10 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
           <Sparkles size={14} aria-hidden="true" />{tr("Enrich with AI")}
         </button>
       </div>}
-      {error && <p className="desktop-reader-error" role="alert">{error}</p>}
+      {error && <div className="desktop-reader-error" role="alert">
+        <span>{error}</span>
+        <button className="icon-button" type="button" aria-label={tr("Dismiss error")} onClick={() => setError("")}><X size={14} /></button>
+      </div>}
       {shownotesRefresh.status !== "idle" && <div className="reader-shownotes-refresh"
         role={shownotesRefresh.status === "error" ? "alert" : "status"} data-state={shownotesRefresh.status}>
         {shownotesRefresh.status === "loading" && <><LoaderCircle size={14} className="spin" aria-hidden="true" /><span>{tr("Fetching Shownotes…")}</span></>}
@@ -363,6 +395,9 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
           aria-label={tr("Dismiss Shownotes notice")} onClick={() => setShownotesRefresh({ status: "idle" })}><X size={14} /></button>}
       </div>}
       {prepared.status === "ready" ? <iframe ref={frame} className="desktop-reader-frame" sandbox="allow-scripts allow-same-origin allow-modals" title={article.title}
+        onLoad={() => {
+          if (forcedTheme) frame.current?.contentWindow?.postMessage({ linkReadCommand: "set-theme", theme: forcedTheme }, "*")
+        }}
         src={`linkread-reader://localhost/${article.previewId ? `preview/${encodeURIComponent(article.previewId)}` : encodeURIComponent(article.id)}?v=${encodeURIComponent(prepared.revision)}&platform=${article.platform}${prepared.shownotes ? "#shownotes" : ""}`} />
         : <div className="desktop-reader-loading" role={prepared.status === "error" ? "alert" : "status"}>
           {prepared.status === "loading" ? <><LoaderCircle size={20} className="spin" aria-hidden="true" /><span>{tr("Preparing your article…")}</span></>
@@ -370,6 +405,23 @@ export function Reader({ article, onBack, backLabel = tr("Library"), onRegenerat
               <button className="secondary" type="button" onClick={() => void prepare()}><RotateCw size={14} />{tr("Try Again")}</button>
             </>}
         </div>}
+      {confirmDeleteOpen && onDelete && (
+        <ConfirmDialog
+          title={tr("删除文章")}
+          message={tr("确认永久删除《") + article.title + tr("》？\n本地字幕、AI 笔记、HTML 阅读页都会一起删除，且无法撤销。")}
+          confirmLabel={tr("删除文章")}
+          danger
+          onConfirm={async () => {
+            prepareVersion.current++
+            positionBridge.current?.close()
+            positionBridge.current = undefined
+            await onDelete(article.id)
+            setConfirmDeleteOpen(false)
+            onBack()
+          }}
+          onCancel={() => setConfirmDeleteOpen(false)}
+        />
+      )}
     </section>
   )
 }

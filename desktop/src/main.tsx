@@ -1,62 +1,77 @@
-import { languageKey, loadLanguageSettings, resolveLocale, setLocale, tr, type LanguageSettings } from "./language.ts"
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react"
+import { createRoot } from "react-dom/client"
 import { isTauri } from "@tauri-apps/api/core"
 import { getCurrentWebview } from "@tauri-apps/api/webview"
 import { getCurrentWindow } from "@tauri-apps/api/window"
-import { titlebarMouseDown } from "./titlebarActions"
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react"
-import { createRoot } from "react-dom/client"
-import { BookOpen, CircleCheck, ListTodo, Search, Settings as SettingsIcon, X } from "lucide-react"
 import {
-  cancelGeneration, checkDuplicate, checkTool, deleteArticle,
-  articleTranscriptPath, exportSubtitles, generateArticle, listArticles, pickSubtitle, providerNames, updateArticleState,
-  loadTaskJournal, saveTaskJournal, normalizeGenerationFailure, openVideo, setNativeLanguage,
-  readSubtitleClipboard, resolveSubtitlePath, savePastedSubtitle,
+  articleTranscriptPath, cancelGeneration, checkDuplicate, checkTool, deleteArticle,
+  exportSubtitles, generateArticle, listArticles, loadPreferencesNative, loadTaskJournal,
+  normalizeGenerationFailure, openVideo, pickSubtitle, providerNames, readSubtitleClipboard,
+  resolveSubtitlePath, savePastedSubtitle, savePreferencesNative, saveTaskJournal, setNativeLanguage,
+  updateArticleState,
   type Article, type ArticleStatePatch, type DownloadedSubtitles, type Library, type Progress,
   type SubtitleExportFormat, type ToolStatus,
 } from "./api"
-import { Bookshelf, Home, type Job, type TaskJob } from "./Home"
-import { Reader } from "./Reader"
-import { ArticleDetailsDialog } from "./ArticleDetailsDialog"
 import { AppUpdateDialog } from "./AppUpdateDialog"
-import { useAppUpdates } from "./useAppUpdates"
-import { MarkdownExportDialog } from "./MarkdownExportDialog"
-import { useSourceDuplicate } from "./useSourceDuplicate"
-import { QuickOpen } from "./QuickOpen"
-import { TaskCenter } from "./TaskCenter"
-import { groupTasks, activeTaskCount, unreviewedTaskIds, reviewedTerminalTaskIds,
-  loadReviewedTasks, saveReviewedTasks, reviewTasks, loadCompletedArticleIds, rememberCompletedArticle, completedArticles } from "./taskCenterState"
-import { loadRecentArticles, rememberArticle } from "./quickOpenState"
-import { useContinueReading } from "./useContinueReading"
-import { useSourceReadiness, rememberSourceFailure, forgetSourceReadiness } from "./useSourceReadiness"
-import { SourceReadinessPanel } from "./SourceReadinessPanel"
-import { useSubtitleDownload, forgetSubtitleDownload, clearSubtitleDownloadErrors } from "./useSubtitleDownload"
-import { defaultYoutubeCookies, loadYoutubeCookies, type YoutubeCookieOptions } from "./youtubeCookies"
-import {
-  failureToYoutubePrompt, hasYoutubeCookiesConfigured,
-  resolveYoutubeSubtitlePrompt, type YoutubeSubtitlePrompt,
-} from "./youtubeGuidance"
-import { YoutubeSubtitleDialog } from "./YoutubeSubtitleDialog"
-import { flushReadingPositions } from "./readingPositionBridge"
-import { progressFromEvent } from "./progress"
-import { SerialTaskQueue } from "./taskQueue"
-import { GenerationSettingsGate, taskSettingsForGeneration } from "./generationSettings"
-import { TaskJournalWriter, parseTaskJournal, restoreTaskJournal, resumeNeedsAsrConfirmation, taskSnapshot,
-  type GenerationInput, type TaskJournal } from "./taskJournal"
-import { recordProgress } from "./taskProgress"
-import { mergeArticleMetadata } from "./coverSource"
-import { normalizeVideoLink } from "./videoLinks"
-import { maxSubtitleBytes, pastedSubtitleFormat, pastedSubtitlePath, subtitleExtension, type ComposerPaste } from "./subtitlePaste"
-import { useLinkPreview } from "./useLinkPreview"
-import { Settings, type SettingsTarget } from "./Settings"
-import type { Preferences } from "./settingsState"
+import { ArticleDetailsDialog } from "./ArticleDetailsDialog"
 import { defaultAsr, loadAsrOptions } from "./asrSettings"
+import { Bookshelf } from "./BookshelfSection"
+import { ConfirmDialog } from "./ConfirmDialog"
+import { mergeArticleMetadata } from "./coverSource"
+import { GenerationSettingsGate, taskSettingsForGeneration } from "./generationSettings"
+import { Home } from "./Home"
+import type { Job, TaskJob } from "./JobCard"
+import { languageKey, loadLanguageSettings, resolveLocale, setLocale, tr, type LanguageSettings } from "./language.ts"
 import { ArticleStateChanges, ArticleStateWrites, defaultShelfFilters, withArticleState, type ShelfFilters } from "./libraryState"
+import { MarkdownExportDialog } from "./MarkdownExportDialog"
+import { progressFromEvent } from "./progress"
+import { QuickOpen } from "./QuickOpen"
+import { loadRecentArticles, rememberArticle } from "./quickOpenState"
+import { Reader } from "./Reader"
+import { flushReadingPositions } from "./readingPositionBridge"
+import { Settings, type SettingsLeaveGuard, type SettingsTarget } from "./Settings"
+import { isLoopbackBaseUrl, type Preferences } from "./settingsState"
+import { SourceReadinessPanel } from "./SourceReadinessPanel"
+import { maxSubtitleBytes, pastedSubtitleFormat, pastedSubtitlePath, subtitleExtension, type ComposerPaste } from "./subtitlePaste"
+import { TaskCenter } from "./TaskCenter"
+import {
+  activeTaskCount, completedArticles, groupTasks, loadCompletedArticleIds, loadReviewedTasks,
+  rememberCompletedArticle, reviewedTerminalTaskIds, reviewTasks, saveReviewedTasks, unreviewedTaskIds,
+} from "./taskCenterState"
+import {
+  parseTaskJournal, restoreTaskJournal, resumeNeedsAsrConfirmation, TaskJournalWriter, taskSnapshot,
+  type GenerationInput, type TaskJournal,
+} from "./taskJournal"
+import { recordProgress } from "./taskProgress"
+import { SerialTaskQueue } from "./taskQueue"
+import { loadThemeMode, resolveTheme, saveThemeMode, type ThemeMode } from "./themeState"
+import { TitleBar } from "./TitleBar"
+import { ToastBanner } from "./ToastBanner"
+import { useAppUpdates } from "./useAppUpdates"
+import { useContinueReading } from "./useContinueReading"
+import { useLinkPreview } from "./useLinkPreview"
+import { useSourceDuplicate } from "./useSourceDuplicate"
+import { forgetSourceReadiness, rememberSourceFailure, useSourceReadiness } from "./useSourceReadiness"
+import { clearSubtitleDownloadErrors, forgetSubtitleDownload, useSubtitleDownload } from "./useSubtitleDownload"
+import { normalizeVideoLink } from "./videoLinks"
+import { defaultYoutubeCookies, loadYoutubeCookies, type YoutubeCookieOptions } from "./youtubeCookies"
+import { failureToYoutubePrompt, hasYoutubeCookiesConfigured, resolveYoutubeSubtitlePrompt, type YoutubeSubtitlePrompt } from "./youtubeGuidance"
+import { YoutubeSubtitleDialog } from "./YoutubeSubtitleDialog"
 import "./styles.css"
 import "./source-preview.css"
+import "./experience.css"
 
 type Screen = "create" | "library" | "settings" | "reader"
 type ReadingOrigin = { screen: Exclude<Screen, "reader">; scroll: number; tasks: boolean; completedArticleId?: string; taskId?: string }
 type ActiveGeneration = GenerationInput & { replacementArticleId?: string; youtubeCookies?: YoutubeCookieOptions }
+type PendingConfirm = {
+  title: string
+  message: string
+  confirmLabel?: string
+  danger?: boolean
+  resolve: (accepted: boolean) => void
+}
+
 const storageKey = "linkread-preferences"
 const settingsWriteKey = "linkread-settings-write-pending"
 
@@ -64,26 +79,72 @@ function hasPendingSettingsWrite(): boolean {
   try { return localStorage.getItem(settingsWriteKey) !== null } catch { return true }
 }
 
-function loadPreferences(): Preferences {
-  try {
-    const saved = JSON.parse(localStorage.getItem(storageKey) || "{}")
-    return {
-      asr: loadAsrOptions(saved.asr),
-      youtubeCookies: loadYoutubeCookies(saved.youtubeCookies),
-      provider: saved.provider === "claude" || saved.provider === "api" ? saved.provider : "codex",
-      paths: {
-        codex: typeof saved.paths?.codex === "string" ? saved.paths.codex : "",
-        claude: typeof saved.paths?.claude === "string" ? saved.paths.claude : "",
-      },
-      api: {
-        baseUrl: typeof saved.api?.baseUrl === "string" ? saved.api.baseUrl : "",
-        model: typeof saved.api?.model === "string" ? saved.api.model : "",
-      },
-    }
-  } catch {
-    return { provider: "codex", paths: { codex: "", claude: "" }, api: { baseUrl: "", model: "" },
-      asr: { ...defaultAsr }, youtubeCookies: { ...defaultYoutubeCookies } }
+function defaultPreferences(): Preferences {
+  return {
+    provider: "codex",
+    paths: { codex: "", claude: "" },
+    api: { baseUrl: "", model: "" },
+    asr: { ...defaultAsr },
+    youtubeCookies: { ...defaultYoutubeCookies },
   }
+}
+
+function normalizePreferencesObject(raw: unknown): Preferences {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return defaultPreferences()
+  const saved = raw as Record<string, unknown>
+  const paths = saved.paths && typeof saved.paths === "object" ? saved.paths as Record<string, unknown> : undefined
+  const api = saved.api && typeof saved.api === "object" ? saved.api as Record<string, unknown> : undefined
+  return {
+    asr: loadAsrOptions(saved.asr as Partial<Preferences["asr"]> | undefined),
+    youtubeCookies: loadYoutubeCookies(saved.youtubeCookies),
+    provider: saved.provider === "claude" || saved.provider === "api" ? saved.provider : "codex",
+    paths: {
+      codex: typeof paths?.codex === "string" ? paths.codex : "",
+      claude: typeof paths?.claude === "string" ? paths.claude : "",
+    },
+    api: {
+      baseUrl: typeof api?.baseUrl === "string" ? api.baseUrl : "",
+      model: typeof api?.model === "string" ? api.model : "",
+    },
+  }
+}
+
+function readLegacyLocalPreferences(): { value: Preferences; existed: boolean } {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return { value: defaultPreferences(), existed: false }
+    return { value: normalizePreferencesObject(JSON.parse(raw)), existed: true }
+  } catch {
+    return { value: defaultPreferences(), existed: false }
+  }
+}
+
+function normalizeLanguageEnvelope(raw: unknown): LanguageSettings | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const obj = raw as Record<string, unknown>
+  if (!["system", "zh-CN", "en"].includes(String(obj.interfaceLanguage))
+    || !["original", "zh-CN", "en"].includes(String(obj.pageLanguage))) return undefined
+  return {
+    interfaceLanguage: obj.interfaceLanguage as LanguageSettings["interfaceLanguage"],
+    pageLanguage: obj.pageLanguage as LanguageSettings["pageLanguage"],
+  }
+}
+
+function normalizeThemeEnvelope(raw: unknown): ThemeMode | undefined {
+  return raw === "system" || raw === "light" || raw === "dark" ? raw : undefined
+}
+
+async function persistNativeEnvelope(next: {
+  preferences: Preferences
+  language: LanguageSettings
+  theme: ThemeMode
+}) {
+  await savePreferencesNative({
+    version: 1,
+    preferences: next.preferences,
+    language: next.language,
+    theme: next.theme,
+  })
 }
 
 function stepFor(stage: string) {
@@ -120,51 +181,6 @@ function sourcePlatform(source: string): Article["platform"] | undefined {
   } catch { /* The processing command reports unsupported links. */ }
 }
 
-function TitleBar({ screen, taskCount, unreadTasks, onTasks, onSettings, onQuickOpen }: {
-  screen: Screen
-  taskCount: number
-  unreadTasks: number
-  onTasks: () => void
-  onSettings: () => void
-  onQuickOpen: () => void
-}) {
-  return (
-    <header className="titlebar">
-      <div className="titlebar-drag" onMouseDown={event => {
-        if (!isTauri()) return
-        void titlebarMouseDown(event, getCurrentWindow()).catch(() => {
-          console.warn(tr("窗口拖动或缩放操作未完成"))
-        })
-      }} />
-      <div className="titlebar-brand" aria-label="LinkRead">
-        <span className="titlebar-mark"><BookOpen size={13} strokeWidth={2.1} aria-hidden="true" /></span>
-        <span>LinkRead</span>
-      </div>
-      <div className="titlebar-tools">
-      <button className="icon-button titlebar-tasks" type="button" aria-label={tr("任务中心{0}{1}",
-        taskCount ? tr("，{0} 个活动任务", taskCount) : "", unreadTasks ? tr("，{0} 条未查看", unreadTasks) : "")}
-        title={tr("任务中心{0}", unreadTasks ? tr(" · {0} 条记录需要查看", unreadTasks) : "")} onClick={event => {
-          // WebKit does not focus buttons on pointer clicks by default. Make
-          // this trigger the dialog's explicit return point before mounting it.
-          event.currentTarget.focus({ preventScroll: true }); onTasks()
-        }}>
-        <ListTodo size={16} aria-hidden="true" />
-        {taskCount > 0 && <span className="titlebar-task-count">{taskCount}</span>}
-        {unreadTasks > 0 && <span className="titlebar-task-alert" aria-hidden="true">!</span>}
-      </button>
-      <button className="icon-button" type="button" aria-label={tr("快速打开")} title={tr("快速打开（⌘K / Ctrl+K）")} onClick={onQuickOpen}>
-        <Search size={16} aria-hidden="true" />
-      </button>
-      {(screen === "create" || screen === "library") && (
-        <button className="icon-button titlebar-settings" type="button" aria-label={tr("设置")} title={tr("设置")} onClick={onSettings}>
-          <SettingsIcon size={17} aria-hidden="true" />
-        </button>
-      )}
-      </div>
-    </header>
-  )
-}
-
 function App() {
   const [language, setLanguage] = useState(loadLanguageSettings)
   const [languageError, setLanguageError] = useState("")
@@ -178,13 +194,9 @@ function App() {
   }, [])
   useEffect(() => { void setNativeLanguage(appLocale).catch(() => {}) }, [appLocale])
 
-  function changeLanguage(next: LanguageSettings) {
-    try {
-      localStorage.setItem(languageKey, JSON.stringify(next))
-      setLanguage(next)
-      setLanguageError("")
-    } catch { setLanguageError(tr("无法保存语言设置，请重试。")) }
-  }
+  const [themeMode, setThemeMode] = useState<ThemeMode>(loadThemeMode)
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches)
+  const [appNotice, setAppNotice] = useState("")
   const [screen, setScreen] = useState<Screen>("create")
   const [previousScreen, setPreviousScreen] = useState<Exclude<Screen, "settings">>("create")
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>()
@@ -194,10 +206,73 @@ function App() {
   const nativePaste = isTauri() && navigator.platform.startsWith("Mac")
   const [dragging, setDragging] = useState(false)
   const [inputError, setInputError] = useState("")
-  const [preferences, setPreferences] = useState(loadPreferences)
+  const [preferences, setPreferences] = useState<Preferences>(() => readLegacyLocalPreferences().value)
+  const [preferencesReady, setPreferencesReady] = useState(!isTauri())
   const preferencesRef = useRef(preferences)
   preferencesRef.current = preferences
+  const languageRef = useRef(language)
+  languageRef.current = language
+  const themeModeRef = useRef(themeMode)
+  themeModeRef.current = themeMode
+  const [readerTheme, setReaderTheme] = useState<"light" | "dark">()
+
+  async function changeLanguage(next: LanguageSettings) {
+    if (isTauri()) {
+      try {
+        await persistNativeEnvelope({
+          preferences: preferencesRef.current,
+          language: next,
+          theme: themeModeRef.current,
+        })
+      } catch {
+        const message = tr("无法保存语言设置，请重试。")
+        setLanguageError(message)
+        throw new Error(message)
+      }
+    }
+    try {
+      localStorage.setItem(languageKey, JSON.stringify(next))
+    } catch {
+      if (!isTauri()) {
+        const message = tr("无法保存语言设置，请重试。")
+        setLanguageError(message)
+        throw new Error(message)
+      }
+    }
+    languageRef.current = next
+    setLanguage(next)
+    setLanguageError("")
+  }
+
+  async function changeTheme(next: ThemeMode) {
+    if (isTauri()) {
+      try {
+        await persistNativeEnvelope({
+          preferences: preferencesRef.current,
+          language: languageRef.current,
+          theme: next,
+        })
+      } catch {
+        const message = tr("无法保存外观设置，请重试。")
+        setAppNotice(message)
+        throw new Error(message)
+      }
+    }
+    try {
+      saveThemeMode(next)
+    } catch {
+      if (!isTauri()) {
+        const message = tr("无法保存外观设置，请重试。")
+        setAppNotice(message)
+        throw new Error(message)
+      }
+    }
+    themeModeRef.current = next
+    setReaderTheme(undefined)
+    setThemeMode(next)
+  }
   const [youtubePrompt, setYoutubePrompt] = useState<YoutubeSubtitlePrompt>()
+
   const linkPreview = useLinkPreview(source, localPath !== null)
   const sourceReadiness = useSourceReadiness(source, localPath !== null, preferences.youtubeCookies, result => {
     const prompt = resolveYoutubeSubtitlePrompt({
@@ -223,7 +298,7 @@ function App() {
   })
   const [settingsRecovery, setSettingsRecovery] = useState(hasPendingSettingsWrite)
   const settingsGate = useRef(new GenerationSettingsGate({
-    readPreferences: loadPreferences,
+    readPreferences: () => preferencesRef.current,
     hasPendingWrite: hasPendingSettingsWrite,
     setPendingWrite: pending => {
       if (pending) localStorage.setItem(settingsWriteKey, "1")
@@ -251,7 +326,6 @@ function App() {
   const [article, setArticle] = useState<Article>()
   const [openedCompletion, setOpenedCompletion] = useState<string>()
   const [readerSession, setReaderSession] = useState(0)
-  const [readerTheme, setReaderTheme] = useState<"light" | "dark">()
   const readingOrigin = useRef<ReadingOrigin>({ screen: "library", scroll: 0, tasks: false })
   const returnScroll = useRef<number | undefined>(undefined)
   const [detailsArticle, setDetailsArticle] = useState<Article>()
@@ -283,32 +357,146 @@ function App() {
   const articleStateWrites = useRef(new ArticleStateWrites())
   const requestId = useRef<string | null>(null)
   const navigationVersion = useRef(0)
-  const settingsLeaveGuard = useRef<(() => boolean) | null>(null)
+  const settingsLeaveGuard = useRef<SettingsLeaveGuard | null>(null)
   const picking = useRef(false)
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm>()
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  const allowCloseRef = useRef(false)
+
   const busy = jobs.some(task => task.job.status === "running" || task.job.status === "cancelling" || task.job.status === "queued")
   const duplicate = useSourceDuplicate(localPath ?? source.trim(), localPath !== null, library)
   const existingArticle = duplicate?.article
     ? library?.articles.find(item => item.id === duplicate.article?.id) ?? duplicate.article : undefined
   const existingTask = matchingTask(duplicate?.key)
   const canInstallUpdate = !busy && !journalLoading
+
+  function askConfirm(options: { title: string; message: string; confirmLabel?: string; danger?: boolean }): Promise<boolean> {
+    return new Promise(resolve => {
+      setPendingConfirm(current => {
+        current?.resolve(false)
+        return { ...options, resolve }
+      })
+    })
+  }
+
+  function runWithLeaveGuard(action: () => void) {
+    if (screen !== "settings" || !settingsLeaveGuard.current) {
+      action()
+      return
+    }
+    if (settingsLeaveGuard.current.confirm(action)) action()
+  }
+
   const update = useAppUpdates(
-    () => canInstallUpdate && !submitting.current && allowSettingsNavigation(),
+    () => canInstallUpdate && !submitting.current && !(screen === "settings" && settingsLeaveGuard.current?.isDirty()),
     async () => {
       if (journalReady.current) await persistJournal()
       await flushReadingPositions()
     },
   )
+
   const handleMenu = useEffectEvent((action: string) => {
     if (action === "check-updates") update.check()
     if (action === "open-settings" && !quickOpen && !taskCenterOpen
-        && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) void showSettings()
+      && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) void showSettings()
   })
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    void (async () => {
+      try {
+        const nativeRaw = await loadPreferencesNative()
+        if (!active) return
+        if (nativeRaw && typeof nativeRaw === "object" && !Array.isArray(nativeRaw)
+          && (nativeRaw as Record<string, unknown>).version === 1) {
+          const envelope = nativeRaw as Record<string, unknown>
+          if (envelope.preferences && typeof envelope.preferences === "object") {
+            const normalized = normalizePreferencesObject(envelope.preferences)
+            preferencesRef.current = normalized
+            setPreferences(normalized)
+          }
+          const nextLang = normalizeLanguageEnvelope(envelope.language)
+          if (nextLang) {
+            languageRef.current = nextLang
+            setLanguage(nextLang)
+            try { localStorage.setItem(languageKey, JSON.stringify(nextLang)) } catch {}
+          }
+          const nextTheme = normalizeThemeEnvelope(envelope.theme)
+          if (nextTheme) {
+            themeModeRef.current = nextTheme
+            setThemeMode(nextTheme)
+            try { saveThemeMode(nextTheme) } catch {}
+          }
+          try { localStorage.removeItem(storageKey) } catch {}
+        } else {
+          const legacy = readLegacyLocalPreferences()
+          if (legacy.existed) {
+            await persistNativeEnvelope({
+              preferences: legacy.value,
+              language: languageRef.current,
+              theme: themeModeRef.current,
+            })
+            if (!active) return
+            preferencesRef.current = legacy.value
+            setPreferences(legacy.value)
+            try { localStorage.removeItem(storageKey) } catch {}
+          }
+        }
+      } catch {
+        if (active) setAppNotice(tr("无法读取应用设置，已使用默认设置。"))
+      } finally {
+        if (active) setPreferencesReady(true)
+      }
+    })()
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     if (!isTauri()) return
     let disposed = false
     let unlisten: (() => void) | undefined
     void getCurrentWebview().listen<string>("linkread-menu", event => handleMenu(event.payload)).then(cleanup => {
+      if (disposed) cleanup()
+      else unlisten = cleanup
+    }).catch(() => {})
+    return () => { disposed = true; unlisten?.() }
+  }, [])
+
+  async function finalizeWindowClose() {
+    allowCloseRef.current = true
+    try {
+      if (screen === "reader") await flushReadingPositions()
+      if (journalReady.current) await persistJournal()
+    } catch {
+      // Best-effort state flush on confirmed window close.
+    }
+    try {
+      await getCurrentWindow().destroy()
+    } catch {
+      allowCloseRef.current = false
+      setAppNotice(tr("无法关闭窗口，请重试。"))
+    }
+  }
+
+  const handleWindowClose = useEffectEvent(() => {
+    const activeRunning = jobsRef.current.some(task => task.job.status === "running" || task.job.status === "cancelling")
+    const continueClose = () => {
+      if (activeRunning) setCloseConfirmOpen(true)
+      else void finalizeWindowClose()
+    }
+    runWithLeaveGuard(continueClose)
+  })
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void getCurrentWindow().onCloseRequested(event => {
+      if (allowCloseRef.current) return
+      event.preventDefault()
+      handleWindowClose()
+    }).then(cleanup => {
       if (disposed) cleanup()
       else unlisten = cleanup
     }).catch(() => {})
@@ -340,14 +528,11 @@ function App() {
     submitting.current = false
   }
 
-  function allowSettingsNavigation() {
-    return screen !== "settings" || settingsLeaveGuard.current?.() !== false
-  }
-
   function navigateTo(next: Screen) {
-    if (next !== "settings" && !allowSettingsNavigation()) return
-    beginNavigation()
-    setScreen(next)
+    runWithLeaveGuard(() => {
+      beginNavigation()
+      setScreen(next)
+    })
   }
 
   function showQuickOpen() {
@@ -470,6 +655,7 @@ function App() {
     setLocalPath(paths[0])
     setSource("")
     setInputError("")
+    setScreen("create")
   }
 
   useEffect(() => { void refreshLibrary() }, [])
@@ -482,21 +668,31 @@ function App() {
     const timeout = window.setTimeout(() => setCompletionNotice([]), 12_000)
     return () => window.clearTimeout(timeout)
   }, [completionNotice])
+  useEffect(() => {
+    if (!appNotice) return
+    const timeout = window.setTimeout(() => setAppNotice(""), 10_000)
+    return () => window.clearTimeout(timeout)
+  }, [appNotice])
   useLayoutEffect(() => {
     if (workspace.current) workspace.current.scrollTop = returnScroll.current ?? (screen === "library" ? shelfScroll.current : 0)
     returnScroll.current = undefined
   }, [screen])
+
+  const resolvedAppTheme = resolveTheme(themeMode, systemDark)
+  const resolvedActiveTheme = (screen === "reader" && readerTheme) || resolvedAppTheme
   useLayoutEffect(() => {
     const system = window.matchMedia("(prefers-color-scheme: dark)")
-    function applyTheme() {
-      document.documentElement.dataset.theme =
-        (screen === "reader" && readerTheme) || (system.matches ? "dark" : "light")
-    }
-    applyTheme()
-    system.addEventListener("change", applyTheme)
-    return () => system.removeEventListener("change", applyTheme)
-  }, [screen, readerTheme])
+    const handleSystemChange = () => setSystemDark(system.matches)
+    handleSystemChange()
+    system.addEventListener("change", handleSystemChange)
+    return () => system.removeEventListener("change", handleSystemChange)
+  }, [])
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = resolvedActiveTheme
+  }, [resolvedActiveTheme])
+
   useEffect(() => {
+    if (!preferencesReady) return
     let active = true
     setToolStatus(undefined)
     setToolError("")
@@ -506,10 +702,10 @@ function App() {
       error => { if (active) setToolError(String(error)) },
     )
     return () => { active = false }
-  }, [preferences, apiTokenVersion])
+  }, [preferences, preferencesReady, apiTokenVersion])
 
   useEffect(() => {
-    if (!isTauri() || screen !== "create") return
+    if (!isTauri() || (screen !== "create" && screen !== "library")) return
     let active = true
     let unlisten: (() => void) | undefined
     getCurrentWebview().onDragDropEvent(({ payload }) => {
@@ -544,26 +740,36 @@ function App() {
     setScreen("settings")
   }
 
-  function configure(next: Preferences) {
-    localStorage.setItem(storageKey, JSON.stringify(next))
-    if (JSON.stringify(next.youtubeCookies) !== JSON.stringify(preferences.youtubeCookies)) {
+  async function configure(next: Preferences) {
+    if (isTauri()) {
+      await persistNativeEnvelope({
+        preferences: next,
+        language: languageRef.current,
+        theme: themeModeRef.current,
+      })
+    } else {
+      localStorage.setItem(storageKey, JSON.stringify(next))
+    }
+    if (JSON.stringify(next.youtubeCookies) !== JSON.stringify(preferencesRef.current.youtubeCookies)) {
       clearSubtitleDownloadErrors()
       setYoutubePrompt(undefined)
       if (source.trim()) forgetSourceReadiness(source.trim())
     }
+    preferencesRef.current = next
     setPreferences(next)
   }
 
   function goToLibrary() {
-    if (!allowSettingsNavigation()) return
-    beginNavigation()
-    if (screen === "create") {
-      shelfScroll.current = 0
-      setShelfSearch("")
-    }
-    setDragging(false)
-    setScreen("library")
-    void refreshLibrary()
+    runWithLeaveGuard(() => {
+      beginNavigation()
+      if (screen === "create") {
+        shelfScroll.current = 0
+        setShelfSearch("")
+      }
+      setDragging(false)
+      setScreen("library")
+      void refreshLibrary()
+    })
   }
 
   function setLink(value: string) {
@@ -881,8 +1087,6 @@ function App() {
     const eligible = new Set(reviewedTerminalTaskIds(jobsRef.current, reviewedTasksRef.current))
     const selected = new Set(ids.filter(id => eligible.has(id)))
     if (!selected.size) return
-    // Persist the removal before hiding rows. Any concurrent progress update is
-    // followed by the fresh snapshot below; running/queued jobs never qualify.
     try {
       await journalWriter.current.write(journalSnapshot(jobsRef.current.filter(task => !selected.has(task.id))))
     } catch (failure) {
@@ -932,7 +1136,6 @@ function App() {
   }
 
   function articleDetailsSaved(updated: Article) {
-    // Invalidate an older library response before publishing the successful edit.
     loadingVersion.current++
     const merged = articleStateChanges.current.reconcile([updated], 0)[0]
     setLibrary(current => current ? { ...current, articles: current.articles.map(item => item.id === merged.id ? merged : item) } : current)
@@ -950,8 +1153,13 @@ function App() {
     submitting.current = true
     try {
       const title = selected.hasAnalysis === false ? tr("AI 整理") : tr("重新整理")
-      if (!window.confirm(tr("{0}《{1}》？\n使用 {2} 处理已保存的字幕，可能产生模型费用。新版本成功后才替换旧文章。",
-        title, selected.title, providerNames[preferences.provider]))) return
+      const confirmed = await askConfirm({
+        title,
+        message: tr("{0}《{1}》？\n使用 {2} 处理已保存的字幕，可能产生模型费用。新版本成功后才替换旧文章。",
+          title, selected.title, providerNames[preferences.provider]),
+        confirmLabel: title,
+      })
+      if (!confirmed) return
       const input = await articleTranscriptPath(selected.id)
       const duplicate = await checkDuplicate(input, true)
       if (matchingTask(duplicate.key)) throw new Error(tr("该文章已在处理或排队，可在任务中心查看。"))
@@ -973,12 +1181,12 @@ function App() {
     if (!original || !previous || !["error", "cancelled", "interrupted"].includes(previous.status)) return
     submitting.current = true
     try {
-      // A restored record is not an execution plan or a saved spending permission.
       const provider = preferences.provider
       const executable = provider === "api" ? "" : preferences.paths[provider]
       const currentTool = await checkTool(provider, executable)
       const unavailable = provider === "api"
-        ? !preferences.api.baseUrl || !preferences.api.model || !currentTool.keyAvailable
+        ? !preferences.api.baseUrl || !preferences.api.model
+          || (!currentTool.keyAvailable && !isLoopbackBaseUrl(preferences.api.baseUrl))
         : !currentTool.executable || (provider === "claude" && !currentTool.keyAvailable)
       if (unavailable) throw { message: tr("请检查当前 AI 服务设置，再继续此任务。"), code: "settings", stage: null, retryable: true, action: "settings" }
       const previewId = previous.status === "done" ? original.previewId : previous.previewId ?? original.previewId
@@ -987,15 +1195,28 @@ function App() {
         key !== id && input.sourceKey === duplicate.key
         && (taskQueue.current.activeId === key || taskQueue.current.waitingIds.includes(key)))
       const replace = duplicate.article !== null || inQueue
-      if (replace && !window.confirm(duplicate.article
-        ? tr("《{0}》已在书架中。是否重新生成并替换？\n旧文章会在新版本成功后被替换。", duplicate.article.title)
-        : tr("该内容已经在生成或排队。是否继续添加重新生成任务？\n新任务会排在后面，并替换前一个版本。"))) return
+      if (replace) {
+        const confirmedReplace = await askConfirm({
+          title: tr("重新生成并替换"),
+          message: duplicate.article
+            ? tr("《{0}》已在书架中。是否重新生成并替换？\n旧文章会在新版本成功后被替换。", duplicate.article.title)
+            : tr("该内容已经在生成或排队。是否继续添加重新生成任务？\n新任务会排在后面，并替换前一个版本。"),
+          confirmLabel: tr("继续生成"),
+        })
+        if (!confirmedReplace) return
+      }
       const isYoutube = !original.localFile && sourcePlatform(original.input) === "youtube"
       const nextSettings = taskSettingsForGeneration(preferences, { isYoutube, pageLanguage: original.pageLanguage })
       const subtitleLogin = previous.status === "error" && previous.failure?.code === "subtitle_login_required"
         && sourcePlatform(original.input) === "bilibili"
-      if (!subtitleLogin && !original.localFile && !previewId && resumeNeedsAsrConfirmation(original.asr, nextSettings.asr) && !window.confirm(
-        tr("当前语音识别设置比此任务上次使用的范围更大，或服务/分片配置已改变。\n继续时只会在没有可读取字幕的情况下使用已启用的语音识别，可能产生新费用。是否继续？"))) return
+      if (!subtitleLogin && !original.localFile && !previewId && resumeNeedsAsrConfirmation(original.asr, nextSettings.asr)) {
+        const confirmedAsr = await askConfirm({
+          title: tr("确认语音识别费用"),
+          message: tr("当前语音识别设置比此任务上次使用的范围更大，或服务/分片配置已改变。\n继续时只会在没有可读取字幕的情况下使用已启用的语音识别，可能产生新费用。是否继续？"),
+          confirmLabel: tr("继续处理"),
+        })
+        if (!confirmedAsr) return
+      }
       enqueueTask({ ...original, ...nextSettings,
         youtubeCookies: preferences.youtubeCookies ? { ...preferences.youtubeCookies } : undefined,
         sourceKey: duplicate.key, replace, previewId,
@@ -1018,6 +1239,7 @@ function App() {
   function returnFromReader() {
     const origin = readingOrigin.current
     returnScroll.current = origin.scroll
+    setReaderTheme(undefined)
     if (origin.screen === "settings") setSettingsTarget(undefined)
     setScreen(origin.screen)
     if (origin.tasks) {
@@ -1037,75 +1259,84 @@ function App() {
   }
 
   async function read(selected: Article, positionFlushed = false) {
-    if (!allowSettingsNavigation()) return
-    const isCurrent = beginNavigation()
-    if (screen === "reader" && !positionFlushed) await flushReadingPositions()
-    if (!isCurrent()) return
-    rememberReadingOrigin(taskCenterOpen ? selected.id : undefined)
-    setTaskCenterOpen(false)
-    setOpenedCompletion(latestCompletion(selected.id)?.id)
-    if (screen === "reader" && article?.id === selected.id) setReaderSession(current => current + 1)
-    setPreviewTaskId(undefined)
-    setStandaloneDownload(undefined)
-    setCompletionNotice(current => current.filter(item => item.id !== selected.id))
-    setArticle(articleStateChanges.current.reconcile([selected], 0)[0])
-    setRecentArticles(current => rememberArticle(current, selected.id))
-    setDragging(false)
-    setScreen("reader")
+    runWithLeaveGuard(() => {
+      void (async () => {
+        const isCurrent = beginNavigation()
+        if (screen === "reader" && !positionFlushed) await flushReadingPositions()
+        if (!isCurrent()) return
+        rememberReadingOrigin(taskCenterOpen ? selected.id : undefined)
+        setTaskCenterOpen(false)
+        setOpenedCompletion(latestCompletion(selected.id)?.id)
+        if (screen === "reader" && article?.id === selected.id) setReaderSession(current => current + 1)
+        setPreviewTaskId(undefined)
+        setStandaloneDownload(undefined)
+        setCompletionNotice(current => current.filter(item => item.id !== selected.id))
+        setArticle(articleStateChanges.current.reconcile([selected], 0)[0])
+        setRecentArticles(current => rememberArticle(current, selected.id))
+        setDragging(false)
+        setScreen("reader")
+      })()
+    })
   }
 
   async function readPreview(id: string) {
     const completed = jobsRef.current.find(task => task.id === id)
     if (completed?.job.status === "done") { void read(completed.job.article); return }
-    if (!allowSettingsNavigation()) return
-    const isCurrent = beginNavigation()
-    if (screen === "reader") await flushReadingPositions()
-    if (!isCurrent()) return
-    const task = jobsRef.current.find(task => task.id === id)
-    if (!task) return
-    if (task.job.status === "done") { void read(task.job.article, true); return }
-    const previewId = task.job.previewId
-    if (!previewId) return
-    rememberReadingOrigin(undefined, taskCenterOpen ? id : undefined)
-    setTaskCenterOpen(false)
-    const identity = { ...taskInputs.current.get(id)?.identity, ...task.job }
-    setPreviewTaskId(id)
-    setStandaloneDownload(undefined)
-    setArticle({ id: "preview-" + previewId, previewId, title: identity.title || tr("Transcript preview"),
-      hasAnalysis: false, category: "", platform: identity.platform || "local", updatedAt: Date.now(),
-      sourceUrl: identity.sourceUrl ?? null, author: identity.author ?? null, publishedAt: identity.publishedAt ?? null,
-      durationMs: identity.durationMs ?? null, thumbnailUrl: identity.thumbnailUrl ?? null,
+    runWithLeaveGuard(() => {
+      void (async () => {
+        const isCurrent = beginNavigation()
+        if (screen === "reader") await flushReadingPositions()
+        if (!isCurrent()) return
+        const task = jobsRef.current.find(t => t.id === id)
+        if (!task) return
+        if (task.job.status === "done") { void read(task.job.article, true); return }
+        const previewId = task.job.previewId
+        if (!previewId) return
+        rememberReadingOrigin(undefined, taskCenterOpen ? id : undefined)
+        setTaskCenterOpen(false)
+        const identity = { ...taskInputs.current.get(id)?.identity, ...task.job }
+        setPreviewTaskId(id)
+        setStandaloneDownload(undefined)
+        setArticle({ id: "preview-" + previewId, previewId, title: identity.title || tr("Transcript preview"),
+          hasAnalysis: false, category: "", platform: identity.platform || "local", updatedAt: Date.now(),
+          sourceUrl: identity.sourceUrl ?? null, author: identity.author ?? null, publishedAt: identity.publishedAt ?? null,
+          durationMs: identity.durationMs ?? null, thumbnailUrl: identity.thumbnailUrl ?? null,
+        })
+        setDragging(false)
+        setScreen("reader")
+      })()
     })
-    setDragging(false)
-    setScreen("reader")
   }
 
   async function openDownloadedPreview(downloaded: DownloadedSubtitles) {
-    if (!allowSettingsNavigation()) return
-    const isCurrent = beginNavigation()
-    if (screen === "reader") await flushReadingPositions()
-    if (!isCurrent()) return
-    rememberReadingOrigin()
-    setTaskCenterOpen(false)
-    setPreviewTaskId(undefined)
-    setStandaloneDownload(downloaded)
-    setArticle({
-      id: "preview-" + downloaded.previewId,
-      previewId: downloaded.previewId,
-      title: downloaded.metadata.title || tr("Transcript preview"),
-      hasAnalysis: false,
-      category: "",
-      platform: downloaded.metadata.platform,
-      updatedAt: Date.now(),
-      sourceUrl: downloaded.metadata.sourceUrl ?? downloaded.source,
-      author: downloaded.metadata.author ?? null,
-      publishedAt: downloaded.metadata.publishedAt ?? null,
-      durationMs: downloaded.metadata.durationMs ?? null,
-      thumbnailUrl: downloaded.metadata.thumbnailUrl ?? null,
-      readingKey: downloaded.readingKey,
+    runWithLeaveGuard(() => {
+      void (async () => {
+        const isCurrent = beginNavigation()
+        if (screen === "reader") await flushReadingPositions()
+        if (!isCurrent()) return
+        rememberReadingOrigin()
+        setTaskCenterOpen(false)
+        setPreviewTaskId(undefined)
+        setStandaloneDownload(downloaded)
+        setArticle({
+          id: "preview-" + downloaded.previewId,
+          previewId: downloaded.previewId,
+          title: downloaded.metadata.title || tr("Transcript preview"),
+          hasAnalysis: false,
+          category: "",
+          platform: downloaded.metadata.platform,
+          updatedAt: Date.now(),
+          sourceUrl: downloaded.metadata.sourceUrl ?? downloaded.source,
+          author: downloaded.metadata.author ?? null,
+          publishedAt: downloaded.metadata.publishedAt ?? null,
+          durationMs: downloaded.metadata.durationMs ?? null,
+          thumbnailUrl: downloaded.metadata.thumbnailUrl ?? null,
+          readingKey: downloaded.readingKey,
+        })
+        setDragging(false)
+        setScreen("reader")
+      })()
     })
-    setDragging(false)
-    setScreen("reader")
   }
 
   useEffect(() => {
@@ -1113,14 +1344,13 @@ function App() {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey
           || quickOpen || taskCenterOpen || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return
       if (event.key === "Escape") {
-        // Settings and Reader own Escape so they can handle their topmost
-        // layer and preserve unsaved work before navigating.
+        // Settings and Reader own Escape.
       } else if (event.metaKey || event.ctrlKey) {
         if (event.key.toLowerCase() === "k") {
           event.preventDefault()
           showQuickOpen()
         } else if (event.key === ",") {
-          if (nativePaste && event.metaKey) return // macOS dispatches Command+, through the app menu.
+          if (nativePaste && event.metaKey) return
           event.preventDefault()
           showSettings()
         } else if (event.key.toLowerCase() === "o" && screen !== "settings") {
@@ -1137,11 +1367,13 @@ function App() {
     return () => window.removeEventListener("keydown", handleShortcut)
   }, [screen, previousScreen, quickOpen, taskCenterOpen])
 
-  const toolWarning = toolError
+  const toolWarning = !preferencesReady ? undefined
+    : toolError
     || (preferences.provider === "api"
       ? (!preferences.api.baseUrl || !preferences.api.model
         ? tr("请在设置中填写 API Base URL 和模型")
-        : toolStatus && !toolStatus.keyAvailable ? tr("请在设置中保存 API Token") : undefined)
+        : toolStatus && !toolStatus.keyAvailable && !isLoopbackBaseUrl(preferences.api.baseUrl)
+          ? tr("请在设置中保存 API Token") : undefined)
       : toolStatus && !toolStatus.executable ? tr("未检测到 {0}", providerNames[preferences.provider])
       : toolStatus && !toolStatus.keyAvailable ? tr("缺少 ANTHROPIC_API_KEY") : undefined)
 
@@ -1190,17 +1422,31 @@ function App() {
     || currentYoutubePrompt?.kind === "fix_cookies"
   const sourceNeedsAsr = !hasDownloadedSubtitles && !sourceNeedsYoutubeCookies
     && sourceReadiness.result?.status === "needs_asr" && !preferences.asr.enabled
+  const forcedReaderTheme = themeMode === "system" ? undefined : themeMode
 
   return (
     <div className="app-shell">
-      <TitleBar screen={screen} taskCount={activeTaskCount(jobs)} unreadTasks={unreadTaskIds.length} onTasks={showTasks} onSettings={() => void showSettings()}
-        onQuickOpen={showQuickOpen} />
+      <TitleBar
+        screen={screen}
+        taskCount={activeTaskCount(jobs)}
+        unreadTasks={unreadTaskIds.length}
+        themeMode={themeMode}
+        resolvedTheme={resolvedAppTheme}
+        onToggleTheme={next => {
+          void changeTheme(next).catch(() => {})
+        }}
+        onTasks={showTasks}
+        onSettings={() => void showSettings()}
+        onQuickOpen={showQuickOpen}
+      />
       <main ref={workspace} className={screen === "reader" ? "workspace workspace-reader" : "workspace"}>
         {screen === "create" && (
           <Home {...shelfActions} linkPreview={linkPreview} source={source} setSource={setLink} localPath={localPath}
             nativePaste={nativePaste} pasting={pasting} onPaste={paste}
             onPick={pick} onClear={() => setLink("")} onStart={() => void start()} busy={busy} jobs={jobs}
-            onCancel={cancel} onRetry={retry} onRemove={removeJob} toolWarning={toolWarning} inputError={inputError}
+            reviewedTaskIds={reviewedTasks} onDismissTaskFailure={id => markReviewed([id])}
+            onCancel={cancel} onRetry={retry} onRemove={removeJob} toolWarning={toolWarning}
+            preferencesReady={preferencesReady} inputError={inputError}
             onPreview={readPreview} journalLoading={journalLoading} journalError={journalError} onRetryJournal={retryJournal}
             onTasks={showTasks} taskSummary={{ queued: groupedTasks.queued.length, attention: groupedTasks.attention.length, unread: unreadTaskIds.length }} resume={resume}
             existingArticle={existingArticle} existingTask={Boolean(existingTask)}
@@ -1227,31 +1473,37 @@ function App() {
         {screen === "settings" && (
           <Settings preferences={preferences} onSave={configure} leaveGuard={settingsLeaveGuard} target={settingsTarget}
             language={language} onLanguageChange={changeLanguage} languageError={languageError}
+            theme={themeMode} onThemeChange={changeTheme}
             onTokenChanged={() => setApiTokenVersion(current => current + 1)}
             settingsGate={settingsGate.current} settingsRecovery={settingsRecovery}
             onBack={() => navigateTo(previousScreen)} />
         )}
         {screen === "reader" && article && <Reader key={`${article.id}:${readerSession}`} article={article} onBack={returnFromReader} backLabel={backLabel}
-          onRegenerate={regenerate} onStateChange={changeArticleState} preview={preview}
+          onRegenerate={regenerate} onDelete={removeArticle} onStateChange={changeArticleState} preview={preview}
           standalonePreview={standaloneDownload && article.previewId === standaloneDownload.previewId
             ? { onGenerate: () => { void start(standaloneDownload) } } : undefined}
           onNavigationStart={beginNavigation}
           onThemeChange={setReaderTheme}
+          forcedTheme={forcedReaderTheme}
+          youtubeCookies={preferences.youtubeCookies}
           onViewRegeneration={readerTask ? () => openTasks(readerTask.id) : undefined}
           onOpenUpdated={readerUpdate ? () => void read(readerUpdate, true) : undefined}
           onEdit={shelfActions.onEdit} onExportMarkdown={shelfActions.onExportMarkdown} detailsRevision={detailsRevisions[article.id]} />}
       </main>
       {detailsArticle && <ArticleDetailsDialog key={detailsArticle.id} article={detailsArticle} onSaved={articleDetailsSaved} onClose={() => setDetailsArticle(undefined)} />}
       {exportArticle && <MarkdownExportDialog key={exportArticle.id} article={exportArticle} onClose={() => setExportArticle(undefined)} />}
-      {youtubePrompt && !detailsArticle && !exportArticle && <YoutubeSubtitleDialog
-        prompt={youtubePrompt}
-        onConfigureCookies={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); void showSettings("youtube") }}
-        onConfigureAsr={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); void showSettings("asr") }}
-        onImportSubtitles={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); setScreen("create"); void pick() }}
-        onClose={() => setYoutubePrompt(undefined)} />}
-      {update.prompt && !youtubePrompt && !detailsArticle && !exportArticle && !quickOpen && !taskCenterOpen &&
+      {youtubePrompt && screen === "create" && !detailsArticle && !exportArticle && !pendingConfirm && !closeConfirmOpen && !quickOpen && !taskCenterOpen && (
+        <YoutubeSubtitleDialog
+          prompt={youtubePrompt}
+          onConfigureCookies={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); void showSettings("youtube") }}
+          onConfigureAsr={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); void showSettings("asr") }}
+          onImportSubtitles={() => { setYoutubePrompt(undefined); setTaskCenterOpen(false); setScreen("create"); void pick() }}
+          onClose={() => setYoutubePrompt(undefined)} />
+      )}
+      {update.prompt && !youtubePrompt && !detailsArticle && !exportArticle && !pendingConfirm && !closeConfirmOpen && !quickOpen && !taskCenterOpen && (
         <AppUpdateDialog prompt={update.prompt} busy={!canInstallUpdate} onClose={update.dismiss}
-          onCheck={() => update.check()} onInstall={() => void update.install()} />}
+          onCheck={() => update.check()} onInstall={() => void update.install()} />
+      )}
       {taskCenterOpen && <TaskCenter jobs={jobs} reviewedIds={reviewedTasks} onReviewed={markReviewed}
         completed={completedArticles(library?.articles ?? [], completedArticleIds)}
         initialTaskId={taskCenterFocusId}
@@ -1267,30 +1519,60 @@ function App() {
         onClose={() => setQuickOpen(false)} onRefresh={refreshLibrary}
         onRead={selected => { setQuickOpen(false); void read(selected) }}
         onLibrary={query => {
-          if (!allowSettingsNavigation()) return
-          setQuickOpen(false)
-          const isCurrent = beginNavigation()
-          void (async () => {
-            if (screen === "reader") await flushReadingPositions()
-            if (!isCurrent()) return
-            shelfScroll.current = 0
-            setShelfSearch(query)
-            setShelfFilters(defaultShelfFilters)
-            setScreen("library")
-          })()
+          runWithLeaveGuard(() => {
+            setQuickOpen(false)
+            const isCurrent = beginNavigation()
+            void (async () => {
+              if (screen === "reader") await flushReadingPositions()
+              if (!isCurrent()) return
+              shelfScroll.current = 0
+              setShelfSearch(query)
+              setShelfFilters(defaultShelfFilters)
+              setScreen("library")
+            })()
+          })
         }} />}
-      {readyArticle && <div className="completion-toast" role="status" aria-live="polite">
-        <CircleCheck size={18} aria-hidden="true" />
-        <div className="completion-toast-content"><strong>{tr("文章已生成")}</strong>
-          <span>{readyArticle.title}{visibleCompletions.length > 1 ? tr(" · 另有 {0} 篇已完成", visibleCompletions.length - 1) : ""}</span>
-        </div>
-        <button className="text-button" type="button" onClick={() => read(readyArticle)}>{tr("打开文章")}</button>
-        <button className="icon-button" type="button" aria-label={tr("关闭完成提示")} onClick={() => setCompletionNotice([])}><X size={15} /></button>
-      </div>}
+      {pendingConfirm && (
+        <ConfirmDialog
+          title={pendingConfirm.title}
+          message={pendingConfirm.message}
+          confirmLabel={pendingConfirm.confirmLabel}
+          danger={pendingConfirm.danger}
+          onConfirm={() => {
+            const current = pendingConfirm
+            setPendingConfirm(undefined)
+            current.resolve(true)
+          }}
+          onCancel={() => {
+            const current = pendingConfirm
+            setPendingConfirm(undefined)
+            current.resolve(false)
+          }}
+        />
+      )}
+      {closeConfirmOpen && (
+        <ConfirmDialog
+          title={tr("退出 LinkRead")}
+          message={tr("当前仍有任务正在处理。\n退出后运行中的生成会中断，但已完成的阶段缓存会保留。确认关闭窗口？")}
+          confirmLabel={tr("仍要关闭")}
+          danger
+          onConfirm={async () => {
+            setCloseConfirmOpen(false)
+            await finalizeWindowClose()
+          }}
+          onCancel={() => setCloseConfirmOpen(false)}
+        />
+      )}
+      <ToastBanner
+        readyArticle={readyArticle}
+        extraCompletedCount={Math.max(0, visibleCompletions.length - 1)}
+        notice={appNotice}
+        onOpenArticle={selected => void read(selected)}
+        onDismissCompleted={() => setCompletionNotice([])}
+        onDismissNotice={() => setAppNotice("")}
+      />
     </div>
   )
 }
 
 createRoot(document.getElementById("root")!).render(<App />)
-
-import "./experience.css"

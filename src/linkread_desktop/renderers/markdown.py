@@ -1,6 +1,7 @@
 """Portable Markdown, with source-linked AI insights when available."""
 
 from html import escape
+import re
 from typing import Literal
 
 from ..ai.models import NoteDocument
@@ -18,6 +19,10 @@ _EN = {
     "章节导读": "Chapters", "金句": "Highlights", "关键词": "Keywords", "节目简介": "Shownotes",
     "阅读正文": "Transcript", "完整字幕": "Full transcript", "原始字幕": "Original subtitles", "译文": "Translation",
 }
+
+
+def _single_line(value: str) -> str:
+    return re.sub(r"[\r\n]+", " ", value).strip()
 
 
 def render_markdown(document: TranscriptDocument | NoteDocument, *,
@@ -42,7 +47,7 @@ def render_markdown(document: TranscriptDocument | NoteDocument, *,
 
     translations = edition.cues if edition else None
     colon = ": " if language == "en" else "："
-    title = (title if title is not None else display_title(document)).replace("\n", " ").strip()
+    title = _single_line(title if title is not None else display_title(document))
     source = document.source
     metadata = [f"# {escape(title, quote=False)}", ""]
     if document.transcript_source == "asr":
@@ -51,9 +56,11 @@ def render_markdown(document: TranscriptDocument | NoteDocument, *,
     if fallback and translations is None:
         metadata.extend(["> " + label("{count} 段沿用原字幕：为避免 AI 改写，已保留原文。").format(count=fallback), ""])
     if source.author:
-        metadata.append(f"- **{label('作者')}**{colon}{source.author}")
+        metadata.append(f"- **{label('作者')}**{colon}{_single_line(source.author)}")
     if category:
-        metadata.append(f"- **{label('分类')}**{colon}{escape(category, quote=False)}")
+        safe_category = _single_line(category)
+        if safe_category:
+            metadata.append(f"- **{label('分类')}**{colon}{escape(safe_category, quote=False)}")
     if source.published_at:
         metadata.append(f"- **{label('发布日期')}**{colon}{source.published_at}")
     if source.duration_ms is not None:
@@ -98,22 +105,23 @@ def render_markdown(document: TranscriptDocument | NoteDocument, *,
             end = start + paragraph.segment_count - 1
             blocks.append((start, end, paragraph.text, None))
             start = end + 1
-    headings = {c.start_segment_index: c.title for c in note.analysis.chapters} if note else {}
+    chapters = note.analysis.chapters if note else []
     if translations is not None:
         metadata.extend(["## " + label("译文"), ""])
-    elif not headings:
+    elif not chapters:
         metadata.extend(["## " + label("阅读正文"), ""])
+    next_chapter = 0
     for start, end, body, subheading in blocks:
-        if start in headings:
-            metadata.extend([f"## {headings[start]}", ""])
+        while next_chapter < len(chapters) and chapters[next_chapter].start_segment_index <= end:
+            metadata.extend([f"## {_single_line(chapters[next_chapter].title)}", ""])
+            next_chapter += 1
         if subheading and translations is None:
-            metadata.extend([f"### {subheading}", ""])
+            metadata.extend([f"### {_single_line(subheading)}", ""])
         if translations is not None:
             body = reading_translation(
                 [cue.text for cue in document.segments[start:end + 1]],
                 translations[start:end + 1], language, body,
             )
-            body = escape(body, quote=False)
         for paragraph in body.split("\n\n"):
             if paragraph.strip():
                 metadata.extend([paragraph.strip(), ""])

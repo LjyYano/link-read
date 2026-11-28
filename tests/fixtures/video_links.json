@@ -238,5 +238,21 @@
   {
     "input": "https:///podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527",
     "output": null
+  },
+  {
+    "input": "https://www.bilibili.com/video//BV1H4sJ6XEF5",
+    "output": null
+  },
+  {
+    "input": "https://www.youtube.com//watch?v=1-Fo8McCD9w",
+    "output": null
+  },
+  {
+    "input": "https://b23.tv/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output": null
+  },
+  {
+    "input": "https://podcasts.apple.com/cn/podcast/【商业】/id1552904790?i=1000801308527",
+    "output": "https://podcasts.apple.com/cn/podcast/id1552904790?i=1000801308527"
   }
 ]

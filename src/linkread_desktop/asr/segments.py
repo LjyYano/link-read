@@ -120,21 +120,29 @@ def split_audio(audio: Path, folder: Path, *, minutes: int, duration_ms: int, pr
         except (subprocess.SubprocessError, OSError) as exc:
             raise AsrError("音频分片失败或超时；原音轨已保留，未提交收费转写") from exc
         entries = []
+        samples = 0
+        raw_parts = []
         for file in sorted(stage.glob("part-*.wav")):
             with wave.open(str(file), "rb") as wav:
+                if wav.getframerate() != RATE or wav.getnchannels() != 1 or wav.getsampwidth() != 2:
+                    raise AsrError("音频分片格式不受支持，未提交转写")
                 frames = wav.getnframes()
             if frames:
-                entries.append({"filename": file.name, "frames": frames, "sha256": digest(file)})
+                checksum = digest(file)
+                start, end = round(samples * 1000 / RATE), round((samples + frames) * 1000 / RATE)
+                entries.append({"filename": file.name, "frames": frames, "sha256": checksum})
+                raw_parts.append((file.name, start, end - start, checksum))
+                samples += frames
         if not entries:
             raise AsrError("音频分片结果为空，未提交转写")
         write_text(stage / "manifest.json", json.dumps({"version": 1, "parts": entries}))
         stage.rename(target)
-    parts = _manifest_parts(target)
+    parts = [AudioPart(target / name, start, duration, checksum) for name, start, duration, checksum in raw_parts]
     report(progress, "audio_split_done", f"音频已分成 {len(parts)} 片，每片约 {minutes} 分钟")
     return parts
 
 
-def transcribe_parts(parts: list[AudioPart], config, *, progress=None, workers=2) -> list[TranscriptSegment]:
+def transcribe_parts(parts: list[AudioPart], config, *, progress=None, workers=2, cancel=None) -> list[TranscriptSegment]:
     total = len(parts)
     report(progress, "asr_chunks_start", f"开始分片转写：{total} 片，最多同时处理 {min(workers, total)} 片", completed=0, total=total)
 
@@ -157,7 +165,12 @@ def transcribe_parts(parts: list[AudioPart], config, *, progress=None, workers=2
                 # A single chunk's asr_done/upload_done must not complete the entire lane.
                 report(progress, "asr_chunk_progress", f"第 {index}/{total} 片 · {event.message}")
             report(progress, "asr_chunk_progress", f"正在处理第 {index}/{total} 片")
-            local = BailianAsr(config).transcribe(part.path, state_file, progress=feedback, allow_empty=True)
+            client = BailianAsr(config)
+            local = (
+                client.transcribe(part.path, state_file, progress=feedback, allow_empty=True, cancel=cancel)
+                if cancel is not None and type(client).transcribe is BailianAsr.transcribe
+                else client.transcribe(part.path, state_file, progress=feedback, allow_empty=True)
+            )
             # Store completed silent chunks too: silence is not a reason to recharge.
             write_text(result_file, json.dumps({"sha256": part.checksum,
                 "segments": [row.model_dump() for row in local]}, ensure_ascii=False))
@@ -165,14 +178,20 @@ def transcribe_parts(parts: list[AudioPart], config, *, progress=None, workers=2
         for sentence in local:
             if sentence.start_ms > part.duration_ms + 1000 or (sentence.end_ms or 0) > part.duration_ms + 1000:
                 raise AsrError("分片识别返回超出音频范围的时间戳")
-            shifted.append(TranscriptSegment(start_ms=part.offset_ms + sentence.start_ms,
-                end_ms=part.offset_ms + sentence.end_ms if sentence.end_ms is not None else None,
-                text=sentence.text))
+            raw_start = min(sentence.start_ms, part.duration_ms)
+            raw_end = min(sentence.end_ms, part.duration_ms) if sentence.end_ms is not None else None
+            if raw_end is not None and raw_end < raw_start:
+                raw_end = raw_start
+            shifted.append(TranscriptSegment(
+                start_ms=part.offset_ms + raw_start,
+                end_ms=part.offset_ms + raw_end if raw_end is not None else None,
+                text=sentence.text,
+            ))
         return shifted
 
     def done(index, count):
         report(progress, "asr_chunk_done", f"已完成 {count}/{total} 片（第 {index} 片完成）", completed=count, total=total)
-    results = ordered_batches(parts, process, workers=workers, on_complete=done)
+    results = ordered_batches(parts, process, workers=workers, on_complete=done, cancel=cancel)
     sentences = sorted([item for result in results for item in result], key=lambda x: x.start_ms)
     if not sentences:
         raise AsrError("音频分片全部完成，但未识别到可用语句")

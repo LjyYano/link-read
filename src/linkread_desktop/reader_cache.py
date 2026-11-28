@@ -15,10 +15,25 @@ from .storage import write_text
 
 
 # Bump when a packaged metadata/renderer algorithm changes without asset changes.
-CACHE_VERSION = 14
+CACHE_VERSION = 15
 READER_MANIFEST = ".reader-cache.json"
 LIBRARY_INDEX = ".library-index.json"
 _DERIVED = {".reader.html", READER_MANIFEST}
+_RENDER_RELEVANT_MODULES = frozenset({
+    "__init__.py",
+    "ai/models.py",
+    "article_details.py",
+    "article_state.py",
+    "covers.py",
+    "errors.py",
+    "links.py",
+    "models.py",
+    "quotes.py",
+    "reader_cache.py",
+    "source_notes.py",
+    "storage.py",
+    "translation.py",
+})
 
 
 def archive_signature(folder: Path) -> str:
@@ -61,7 +76,10 @@ def implementation_signature() -> str:
             if entry.is_dir():
                 if entry.name != "__pycache__":
                     visit(entry, name + "/")
-            elif entry.name.endswith((".py", ".html", ".js", ".css", ".LICENSE.txt")):
+            elif entry.name.endswith((".html", ".js", ".css", ".LICENSE.txt")):
+                digest.update(name.encode())
+                digest.update(entry.read_bytes())
+            elif entry.name.endswith(".py") and (name.startswith("renderers/") or name in _RENDER_RELEVANT_MODULES):
                 digest.update(name.encode())
                 digest.update(entry.read_bytes())
 

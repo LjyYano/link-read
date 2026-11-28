@@ -471,7 +471,55 @@ def _source_info(info: dict, url: str) -> SourceInfo:
     )
 
 
-def youtube_metadata(url: str) -> SourceInfo:
+_MAX_CAPTION_BYTES = 16 * 1024 * 1024
+
+
+def _validate_caption_url(url: str) -> str:
+    import ipaddress
+
+    try:
+        if not isinstance(url, str) or not url or "\\" in url or any(ord(c) < 33 for c in url):
+            raise ValueError
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if (parsed.scheme != "https" or not host or parsed.username is not None or parsed.password is not None
+                or parsed.port not in {None, 443}
+                or host == "localhost" or host.endswith((".localhost", ".local", ".internal"))):
+            raise ValueError
+        try:
+            addr = ipaddress.ip_address(host)
+        except ValueError:
+            addr = None
+        if addr is not None and (not addr.is_global or addr.is_private or addr.is_loopback or addr.is_link_local):
+            raise ValueError
+        return url
+    except ValueError as exc:
+        raise ExtractionError("YouTube 字幕下载地址无效或不受信任", code="youtube_subtitle_invalid", retryable=True, action="retry") from exc
+
+
+def _prune_non_youtube_cookies(jar: object) -> None:
+    if jar is None:
+        return
+    try:
+        entries = list(jar)
+    except TypeError:
+        return
+    allowed = ("youtube.com", "google.com", "googlevideo.com", "youtu.be")
+    for cookie in entries:
+        domain = (getattr(cookie, "domain", None) or "").strip().lower().lstrip(".")
+        if domain and any(domain == item or domain.endswith("." + item) for item in allowed):
+            continue
+        clear = getattr(jar, "clear", None)
+        if callable(clear):
+            try:
+                clear(getattr(cookie, "domain", ""), getattr(cookie, "path", "/"), getattr(cookie, "name", ""))
+            except KeyError:
+                pass
+
+
+def youtube_metadata(
+    url: str, *, cookies_from_browser: str | None = None, cookies_file: Path | None = None,
+) -> SourceInfo:
     """Explicit description refresh; metadata only, never captions or media."""
     url = canonical_link(url)
     expected_id = url.rsplit("=", 1)[1]
@@ -479,10 +527,12 @@ def youtube_metadata(url: str) -> SourceInfo:
         from yt_dlp import YoutubeDL
     except ImportError as exc:
         raise ExtractionError("获取 YouTube 简介需要 yt-dlp，请检查桌面版后端是否完整安装") from exc
+    cookie_options = _cookie_options(cookies_from_browser, cookies_file)
     options = {"quiet": True, "no_warnings": True, "noplaylist": True,
                "skip_download": True, "writesubtitles": False, "writeautomaticsub": False,
                "writethumbnail": False, "socket_timeout": 15, "retries": 1,
                "extractor_retries": 1, "logger": _QuietLogger()}
+    options.update(cookie_options)
     try:
         with YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -568,8 +618,15 @@ def extract_youtube(
             caption_type = "自动字幕" if is_auto else "人工字幕"
             report(progress, "captions_done", f"选定字幕：{language}（{caption_type} / {track['ext'].upper()}）")
             report(progress, "download", "正在下载字幕文本（不下载视频或音频）")
-            with ydl.urlopen(track["url"]) as response:
-                content = response.read().decode("utf-8-sig", errors="replace")
+            caption_url = _validate_caption_url(track["url"])
+            if cookie_options:
+                _prune_non_youtube_cookies(loaded_jar)
+            with ydl.urlopen(caption_url) as response:
+                raw_bytes = response.read(_MAX_CAPTION_BYTES + 1)
+                if len(raw_bytes) > _MAX_CAPTION_BYTES:
+                    raise ExtractionError("YouTube 返回的字幕文件过大，已停止读取。",
+                                          code="youtube_subtitle_invalid", retryable=True, action="retry")
+                content = raw_bytes.decode("utf-8-sig", errors="replace")
     except (ExtractionError, SubtitleUnavailableError):
         raise
     except Exception as exc:

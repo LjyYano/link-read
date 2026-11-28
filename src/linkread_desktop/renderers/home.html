@@ -59,7 +59,7 @@ h1{font-size:28px;font-weight:725;line-height:1.3;letter-spacing:-.6px;margin:0}
 <script type="application/json" id="library-labels"><!--LR:LABELS--></script>
 <script>
 const labels=JSON.parse(document.getElementById("library-labels").textContent);
-const t=label=>Object.hasOwn(labels,label)?labels[label]:label;
+const t=label=>Object.prototype.hasOwnProperty.call(labels,label)?labels[label]:label;
 const ARTICLES=JSON.parse(document.getElementById("article-data").textContent);
 const rows=[...document.querySelectorAll('tr.record')];
 const search=document.querySelector('#search');

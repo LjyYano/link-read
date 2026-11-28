@@ -4,16 +4,20 @@ A second provider pass is kept separate from summarization: note content can
 be polished or re-polished without repeating expensive semantic extraction.
 """
 
-import json
-import re
 from dataclasses import dataclass
+from hashlib import sha256
+import json
+from pathlib import Path
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..errors import LinkReadError, error_operation
 from ..progress import ProgressCallback, report
+from ..storage import write_text
+from ..text_language import is_english_language, is_latin_heavy, looks_english_text
 from .batches import ordered_batches
-from .checkpoints import validated_call
+from .checkpoints import RunProvider, provider_identity, validated_call
 from .models import NoteDocument, ReadingParagraph, lexical_content, source_emphasis
 from .provider import ProviderError, StructuredProvider
 
@@ -75,11 +79,7 @@ def _join_cues(texts: list[str]) -> str:
 
 
 def _latin_heavy(texts: list[str]) -> bool:
-    sample = "".join(texts[:80])[:4000]
-    if not sample:
-        return False
-    cjk = sum(1 for ch in sample if "\u3400" <= ch <= "\u9fff" or "\u3040" <= ch <= "\u30ff" or "\uac00" <= ch <= "\ud7af")
-    return cjk / len(sample) < 0.25
+    return is_latin_heavy(texts[:80], max_chars=4000)
 
 
 def polish_batch_budget(blocks: list[_SourceBlock], max_chars: int) -> int:
@@ -207,14 +207,9 @@ def _reassemble_blocks(raw, owners, processed):
 
 
 def _is_english_blocks(blocks: list[_SourceBlock], language: str | None = None) -> bool:
-    declared = (language or "").lower().replace("_", "-").removeprefix("ai-")
-    if declared == "en" or declared.startswith("en-"):
+    if is_english_language(language):
         return True
-    sample = "".join(block.text for block in blocks[:20])[:2500]
-    han = sum(1 for ch in sample if "\u3400" <= ch <= "\u9fff")
-    other = any("\u3040" <= ch <= "\u30ff" or "\uac00" <= ch <= "\ud7af" for ch in sample)
-    latin = sum(1 for ch in sample if "A" <= ch <= "Z" or "a" <= ch <= "z")
-    return latin >= 20 and han == 0 and not other
+    return looks_english_text((block.text for block in blocks[:20]), max_chars=2500, require_zero_han=True)
 
 
 def _prompt(
@@ -263,7 +258,7 @@ def _prompt(
 
 def _call(provider: StructuredProvider, blocks: list[_SourceBlock], *, title: str,
           position: int, count: int, timeout_seconds: int, cache_dir=None,
-          strict_retry: bool = False, language: str | None = None) -> list[_Edit]:
+          strict_retry: bool = False, language: str | None = None, cancel=None) -> list[_Edit]:
     prompt = _prompt(blocks, title=title, position=position, count=count,
                      strict_retry=strict_retry, language=language)
     def validate(payload):
@@ -278,13 +273,65 @@ def _call(provider: StructuredProvider, blocks: list[_SourceBlock], *, title: st
         return edits
     try:
         return validated_call(provider, prompt, POLISH_SCHEMA, validate,
-                              timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="polish")
+                              timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="polish", cancel=cancel)
     except _ChangedWords as exc:
         # The caller retries only these altered paragraphs. Never cache them.
         return exc.edits
     except (ValidationError, ValueError) as exc:
         raise ProviderError(f"阅读校对第 {position}/{count} 批结构不合法",
                             code="model_output_invalid", stage="polish") from exc
+
+
+def _verified_repair_cache_path(cache_dir: Path | None, provider: StructuredProvider, batch: list[_SourceBlock],
+                                title: str, position: int, count: int, language: str | None) -> Path | None:
+    if cache_dir is None:
+        return None
+    identity = getattr(provider, "identity", provider_identity(provider))
+    fingerprint = sha256(json.dumps([
+        "polish-verified-v1", identity, title, position, count, language,
+        [[b.start, b.end, b.text, b.chapter] for b in batch],
+    ], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    folder = Path(cache_dir)
+    if folder.is_symlink():
+        raise LinkReadError("模型批次缓存不可使用符号链接")
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    target = folder / (fingerprint + ".json")
+    if target.is_symlink():
+        raise LinkReadError("模型批次缓存不可使用符号链接")
+    return target
+
+
+def _load_verified_repairs(path: Path | None, batch: list[_SourceBlock]) -> list[tuple[_SourceBlock, _Edit, bool]] | None:
+    if path is None or not path.is_file() or path.stat().st_size >= 8 * 1024**2:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        rows = data.get("items") if isinstance(data, dict) else None
+        if not isinstance(rows, list) or len(rows) != len(batch):
+            return None
+        verified: list[tuple[_SourceBlock, _Edit, bool]] = []
+        for idx, (block, row) in enumerate(zip(batch, rows)):
+            if not isinstance(row, dict) or type(row.get("edited")) is not bool:
+                return None
+            edit = _Edit.model_validate({
+                "index": idx, "text": row.get("text"), "subheading": row.get("subheading"),
+                "bold": row.get("bold", []), "red": row.get("red", []),
+            })
+            if lexical_content(edit.text or "") != lexical_content(block.text):
+                return None
+            verified.append((block, edit, row["edited"]))
+        return verified
+    except (OSError, ValueError, TypeError, ValidationError):
+        return None
+
+
+def _save_verified_repairs(path: Path | None, verified: list[tuple[_SourceBlock, _Edit, bool]]) -> None:
+    if path is None:
+        return
+    payload = {"items": [{
+        "text": edit.text, "subheading": edit.subheading, "bold": edit.bold, "red": edit.red, "edited": ok,
+    } for _, edit, ok in verified]}
+    write_text(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
 
 
 class _ChangedWords(ValueError):
@@ -296,6 +343,7 @@ class _ChangedWords(ValueError):
 def polish_reading(
     note: NoteDocument, provider: StructuredProvider, *, timeout_seconds: int = 300,
     max_chars: int = 5000, progress: ProgressCallback | None = None, workers: int = 1, cache_dir=None,
+    cancel=None,
 ) -> NoteDocument:
     """Check punctuation in short requests; original cues stay unchanged.
 
@@ -315,29 +363,50 @@ def polish_reading(
            completed=0, total=total)
 
     def process_batch(position: int, batch: list[_SourceBlock]) -> list[tuple[_SourceBlock, _Edit, bool]]:
+        cached_path = _verified_repair_cache_path(
+            cache_dir, provider, batch, note.transcript.source.title, position, len(batches), note.transcript.language,
+        )
+        reused = _load_verified_repairs(cached_path, batch)
+        if reused is not None:
+            if isinstance(provider, RunProvider):
+                provider.cache_hit("polish")
+            return reused
+        editable = [i for i, block in enumerate(batch) if lexical_content(block.text)]
+        if not editable:
+            return [(block, _Edit(index=i, text=block.text, subheading=None), False) for i, block in enumerate(batch)]
         report(progress, "polish_batch", f"已调度校对批次 {position}/{len(batches)}（{len(batch)} 个文本片段）")
-        edits = _call(provider, batch, title=note.transcript.source.title,
-                      position=position, count=len(batches), timeout_seconds=timeout_seconds,
-                      cache_dir=cache_dir, language=note.transcript.language)
+        editable_blocks = [batch[i] for i in editable]
+        editable_edits = _call(provider, editable_blocks, title=note.transcript.source.title,
+                               position=position, count=len(batches), timeout_seconds=timeout_seconds,
+                               cache_dir=cache_dir, language=note.transcript.language, cancel=cancel)
+        edits = [_Edit(index=i, text=block.text, subheading=None) for i, block in enumerate(batch)]
+        for i, edit in zip(editable, editable_edits):
+            edits[i] = edit.model_copy(update={"index": i})
         report(progress, "polish_verify", f"第 {position}/{total} 批已收到结果，正在核对原文文字")
-        invalid = [i for i, (block, edit) in enumerate(zip(batch, edits))
-                   if lexical_content(edit.text) != lexical_content(block.text)]
+        invalid = [i for i in editable if lexical_content(edits[i].text or "") != lexical_content(batch[i].text)]
         if invalid:
             report(progress, "polish_retry", f"第 {position}/{total} 批中有 {len(invalid)} 段被 AI 改动了文字，正在重新补标点")
             subset = [batch[i] for i in invalid]
             repaired = _call(provider, subset, title=note.transcript.source.title,
                              position=position, count=len(batches), timeout_seconds=timeout_seconds,
-                             cache_dir=cache_dir, strict_retry=True, language=note.transcript.language)
+                             cache_dir=cache_dir, strict_retry=True, language=note.transcript.language, cancel=cancel)
             for i, new_edit in zip(invalid, repaired):
-                edits[i] = new_edit
-        verified = [(block, edit, lexical_content(edit.text) == lexical_content(block.text))
-                    for block, edit in zip(batch, edits)]
+                edits[i] = new_edit.model_copy(update={"index": i})
+        verified = []
+        for i, (block, edit) in enumerate(zip(batch, edits)):
+            if not lexical_content(block.text):
+                verified.append((block, _Edit(index=i, text=block.text, subheading=None), False))
+            else:
+                ok = lexical_content(edit.text or "") == lexical_content(block.text)
+                verified.append((block, edit if ok else _Edit(index=i, text=block.text, subheading=None), ok))
+        if invalid:
+            _save_verified_repairs(cached_path, verified)
         return verified
 
     def batch_complete(position: int, completed: int) -> None:
         report(progress, "polish_done", f"第 {position}/{total} 批完成", completed=completed, total=total)
 
-    processed = ordered_batches(batches, process_batch, workers=workers, on_complete=batch_complete)
+    processed = ordered_batches(batches, process_batch, workers=workers, on_complete=batch_complete, cancel=cancel)
     all_edits = _reassemble_blocks(raw, owners, [item for batch in processed for item in batch])
 
     headings = {c.start_segment_index for c in note.analysis.chapters}

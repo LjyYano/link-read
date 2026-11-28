@@ -8,7 +8,8 @@
 .preview-unavailable { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; color:var(--muted); font-size:12px; padding:8px 2px 0; }
 .preview-unavailable .text-button { display:inline-flex; align-items:center; gap:5px; font-size:12px; padding:3px 0; }
 .preview-pending-cover { display:grid; place-items:center; border:1px solid var(--line); background:var(--surface); color:var(--muted); }
-.preview-pending-cover[data-platform="apple_podcasts"] { color:#a34ad3; background:color-mix(in srgb,#a34ad3 7%,var(--paper)); }
+.preview-pending-cover[data-platform="apple_podcasts"] { color:#a34ad3; background:rgba(163,74,211,.08); }
+[data-theme="dark"] .preview-pending-cover[data-platform="apple_podcasts"] { color:#d296f4; background:rgba(163,74,211,.16); }
 .preview-loading-info strong { font-size:14px; font-weight:600; }
 .source-preview-info .preview-status { display:flex; gap:6px; color:var(--muted); align-items:center; font-size:12px; }
 .preview-status .spin { color:var(--accent); flex-shrink:0; }

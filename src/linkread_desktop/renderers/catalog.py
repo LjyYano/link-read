@@ -82,7 +82,7 @@ def load_catalog(source: Path, *, include_user: bool = True) -> CatalogMetadata 
         try:
             values = CatalogMetadata.model_validate(_read_object(candidate)).model_dump()
         except ValueError as exc:
-            raise ExtractionError(f"书架分类与标签文件无效：{candidate}（{exc}）") from exc
+            raise ExtractionError(f"书架分类与标签文件无效：{candidate.name}") from exc
     user = load_user_metadata(source) if include_user else {}
     category, tags = user.get("category"), user.get("tags")
     if category is not None:

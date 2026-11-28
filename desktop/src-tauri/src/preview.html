@@ -3,6 +3,7 @@
 <style>
 /* The app toolbar already provides navigation back to the bookshelf. */
 .linkread-desktop .crumb { display: none; }
+.linkread-desktop .theme-btn { display: none; }
 .linkread-desktop [data-reading-actions] { display: none; }
 .linkread-desktop [data-refresh-shownotes] { display: inline-flex; }
 /* Old archives use margin:auto, which vertically centers short tabs in Grid. */
@@ -15,7 +16,11 @@
 <script>
 (() => {
   "use strict";
+  window.__linkreadDesktop = true;
   document.documentElement.classList.add("linkread-desktop");
+  const isAllowedHostOrigin = origin =>
+    origin === "null" || origin === "tauri://localhost" || origin === "https://tauri.localhost"
+    || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
 
   const systemTheme = matchMedia("(prefers-color-scheme: dark)");
   const themeKey = "linkread-desktop-theme";
@@ -29,10 +34,16 @@
   applyTheme();
   systemTheme.addEventListener("change", applyTheme);
   window.addEventListener("message", event => {
-    if (event.source !== window.parent) return;
+    if (event.source !== window.parent || !isAllowedHostOrigin(event.origin)) return;
     if (typeof event.data?.linkReadEscapeRequest === "string" && /^[0-9]{1,20}$/.test(event.data.linkReadEscapeRequest)) {
       const handled = window.linkreadCloseReaderLayer?.() === true;
       window.parent.postMessage({ linkReadEscapeResult: { id: event.data.linkReadEscapeRequest, handled } }, "*");
+      return;
+    }
+    if (event.data?.linkReadCommand === "set-theme" && (event.data.theme === "light" || event.data.theme === "dark")) {
+      theme = event.data.theme;
+      applyTheme();
+      try { localStorage.setItem(themeKey, theme); } catch {}
       return;
     }
     if (event.data?.linkReadCommand !== "toggle-theme") return;

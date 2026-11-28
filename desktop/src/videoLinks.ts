@@ -4,8 +4,9 @@ export function normalizeVideoLink(source: string): string {
   let text = source.trim()
   if (/https?\\*:/i.test(text)) {
     text = text.replace(/\\+([:/?.=&_#%\-])/g, "$1").replace(/&(?:amp|#38|#x26);/gi, "&")
-    const matches = [...new Set((text.match(/https?:\/\/[^\s<>"\[\]【】「」]+/gi) ?? [])
-      .map(value => value.replace(/[).,;!，。；！）']+$/, "")))]
+    const matches = [...new Set((text.match(
+      /https?:\/\/podcasts\.apple\.com\/(?:[A-Za-z]{2}\/)?podcast\/(?:(?:(?!\]\()[^/\s<>"])+\/)?id[1-9][0-9]*[^\s<>"\[\]【】「」]*|https?:\/\/[^\s<>"\[\]【】「」]+/gi,
+    ) ?? []).map(value => value.replace(/[).,;!，。；！）']+$/, "")))]
     if (matches.length > 1) throw new Error(tr("检测到多个链接，请一次提交一个视频或播客单集"))
     if (matches.length) text = matches[0]
   }
@@ -13,7 +14,9 @@ export function normalizeVideoLink(source: string): string {
   if (!authority || authority.includes(":") || authority.includes("@")) throw new Error(tr("来源链接不能包含端口或账号信息"))
   const u = new URL(text)
   if (u.protocol !== "https:" || u.username || u.password || u.port) throw new Error(tr("需要视频或播客单集的 HTTPS 链接"))
-  const path = u.pathname.split("/").filter(Boolean)
+  if (u.pathname.includes("//")) throw new Error(tr("来源链接路径不能包含多余的斜杠"))
+  const trimmedPath = u.pathname.endsWith("/") ? u.pathname.slice(0, -1) : u.pathname
+  const path = trimmedPath.split("/").filter(Boolean)
   if (["bilibili.com", "www.bilibili.com", "m.bilibili.com"].includes(u.hostname)) {
     const ids = u.searchParams.getAll("bvid")
     let id: string | undefined
@@ -30,21 +33,21 @@ export function normalizeVideoLink(source: string): string {
     return `https://www.bilibili.com/video/${id}?p=${Number(p)}`
   }
   if (["b23.tv", "www.b23.tv"].includes(u.hostname)) {
-    if (!/^\/[A-Za-z0-9_-]+\/?$/.test(u.pathname)) throw new Error(tr("B 站短链接无效"))
+    if (!/^\/[A-Za-z0-9_-]{1,64}\/?$/.test(u.pathname)) throw new Error(tr("B 站短链接无效"))
     return `https://b23.tv/${path[0]}`
   }
   if (["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be", "www.youtu.be"].includes(u.hostname)) {
     const ids = u.searchParams.getAll("v")
     const id = ["youtu.be", "www.youtu.be"].includes(u.hostname) && path.length === 1 ? path[0]
-      : path.length === 1 && path[0] === "watch" ? (ids.length === 1 ? ids[0] : undefined)
-      : path.length === 2 && ["shorts", "embed", "live"].includes(path[0]) ? path[1] : undefined
+      : trimmedPath === "/watch" ? (ids.length === 1 ? ids[0] : undefined)
+      : path.length === 2 && ["shorts", "live", "embed"].includes(path[0]) ? path[1] : undefined
     if (!id || !/^[A-Za-z0-9_-]{11}$/.test(id)) throw new Error(tr("需要单个 YouTube 视频链接"))
     return `https://www.youtube.com/watch?v=${id}`
   }
   if (u.hostname === "podcasts.apple.com") {
     // URL() removes dot segments; inspect the pasted path before that normalization.
     const rawPath = text.match(/^https:\/\/[^/?#]+([^?#]*)/i)?.[1] || ""
-    if (rawPath.split("/").some(segment => /^(?:\.|%2e){1,2}$/i.test(segment))) {
+    if (rawPath.includes("//") || rawPath.split("/").some(segment => /^(?:\.|%2e){1,2}$/i.test(segment))) {
       throw new Error(tr("Apple 播客链接路径无效"))
     }
     const match = u.pathname.match(/^\/(?:([A-Za-z]{2})\/)?podcast\/(?:[^/]+\/)?id([1-9][0-9]{0,19})\/?$/)

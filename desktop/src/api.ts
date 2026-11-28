@@ -167,10 +167,17 @@ export const updateArticleState = (id: string, patch: ArticleStatePatch) =>
 export type PreparedArticle = { revision: string; readingKey: string }
 export const prepareArticle = (id: string) => invoke<PreparedArticle>("prepare_article", { id })
 type ShownotesResult = { status: "empty" } | ({ status: "updated" } & PreparedArticle)
-export const refreshShownotes = (id: string) => invoke<ShownotesResult>("refresh_shownotes", { id })
+export const refreshShownotes = (id: string, youtubeCookies?: YoutubeCookieOptions) =>
+  invoke<ShownotesResult>("refresh_shownotes", {
+    id,
+    ...(youtubeCookies && youtubeCookies.mode !== "none" ? { youtubeCookies } : {}),
+  })
 export const preparePreview = (id: string) => invoke<PreparedArticle & { article: Article }>("prepare_preview", { id })
 export const loadTaskJournal = () => invoke<unknown>("load_task_journal")
 export const saveTaskJournal = (journal: TaskJournal) => invoke<void>("save_task_journal", { journal })
+export const loadPreferencesNative = () => invoke<unknown>("load_preferences")
+export const savePreferencesNative = (preferences: unknown) => invoke<void>("save_preferences", { preferences })
+export const pickExecutable = (title: string) => invoke<string | null>("pick_executable", { title, uiLanguage: locale() })
 export const loadReadingPosition = (key: string) => invoke<unknown>("load_reading_position", { key })
 export const saveReadingPosition = (key: string, position: unknown) => invoke<void>("save_reading_position", { key, position })
 

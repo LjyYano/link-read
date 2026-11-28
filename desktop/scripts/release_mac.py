@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,30 @@ DEFAULT_FEED = f"{RELEASES_URL}/latest/download/latest.json"
 TARGETS = {"arm64": ("aarch64", "arm64"), "x86_64": ("x86_64", "amd64")}
 NOTARY_API = ("APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_PATH")
 NOTARY_ACCOUNT = ("APPLE_ID", "APPLE_TEAM_ID", "APPLE_PASSWORD")
+SECRET_ENV_KEYS = ("APPLE_PASSWORD", "APPLE_API_KEY", "TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD")
+
+
+def sanitize_error_text(text):
+    cleaned = str(text)
+    for name in SECRET_ENV_KEYS:
+        secret = os.environ.get(name)
+        if secret and len(secret) >= 4:
+            cleaned = cleaned.replace(secret, f"<REDACTED:{name}>")
+    return cleaned
+
+
+def preflight_checks(python):
+    missing_tools = [tool for tool in ("xcrun", "codesign", "ditto", "tar", "npm", "cargo") if not shutil.which(tool)]
+    if missing_tools:
+        raise ValueError(f"缺少打包所需命令行工具：{', '.join(missing_tools)}。")
+    if not python.is_file():
+        raise ValueError(f"找不到打包 Python 解释器：{python}")
+    try:
+        subprocess.run([python, "-c", "import dmgbuild, PyInstaller, yt_dlp"],
+                       check=True, capture_output=True, text=True, timeout=30)
+    except subprocess.CalledProcessError as exc:
+        detail = sanitize_error_text((exc.stderr or exc.stdout or "").strip())
+        raise ValueError(f"打包 Python 环境缺少必要依赖（dmgbuild / PyInstaller / yt-dlp）：{detail}") from None
 
 
 def https_url(value):
@@ -32,10 +57,14 @@ def notary_options():
     profile = os.environ.get("LINKREAD_NOTARY_PROFILE")
     if profile:
         return ["--keychain-profile", profile]
-    for names, flags in ((NOTARY_API, ("--key-id", "--issuer", "--key")),
-                         (NOTARY_ACCOUNT, ("--apple-id", "--team-id", "--password"))):
-        if all(os.environ.get(name) for name in names):
-            return [part for flag, name in zip(flags, names) for part in (flag, os.environ[name])]
+    if all(os.environ.get(name) for name in NOTARY_API):
+        return [part for flag, name in zip(("--key-id", "--issuer", "--key"), NOTARY_API) for part in (flag, os.environ[name])]
+    if all(os.environ.get(name) for name in NOTARY_ACCOUNT):
+        return [
+            "--apple-id", os.environ["APPLE_ID"],
+            "--team-id", os.environ["APPLE_TEAM_ID"],
+            "--password", "@env:APPLE_PASSWORD",
+        ]
     raise ValueError("请先配置 Apple 公证凭据，见 docs/macos-release.md。")
 
 
@@ -115,6 +144,8 @@ def main():
     if not options.first_dmg and not private_key:
         raise ValueError("请设置 TAURI_SIGNING_PRIVATE_KEY。")
     credentials = notary_options()
+    python = Path(os.environ.get("LINKREAD_PYTHON", DESKTOP.parent / ".venv/bin/python")).expanduser()
+    preflight_checks(python)
     arch, artifact_arch = TARGETS[platform.machine()]
     target = f"{arch}-apple-darwin"
     native = DESKTOP / "src-tauri"
@@ -179,8 +210,9 @@ if __name__ == "__main__":
     try:
         main()
     except subprocess.CalledProcessError as error:
-        raise SystemExit(f"发行步骤失败，退出码 {error.returncode}。") from None
+        cmd_name = Path(str(error.cmd[0])).name if isinstance(error.cmd, (list, tuple)) and error.cmd else "subprocess"
+        raise SystemExit(f"发行步骤（{cmd_name}）失败，退出码 {error.returncode}。") from None
     except subprocess.TimeoutExpired:
         raise SystemExit("等待 Apple 公证超时。可在钥匙串配置的公证历史中检查提交状态。") from None
     except (OSError, ValueError) as error:
-        raise SystemExit(str(error)) from None
+        raise SystemExit(sanitize_error_text(error)) from None

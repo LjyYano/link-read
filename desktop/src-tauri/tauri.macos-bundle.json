@@ -4,8 +4,10 @@
   },
   "bundle": {
     "active": true,
-    "externalBin": ["binaries/linkread-sidecar"],
-    "resources": { "../build/licenses/": "licenses/" },
+    "resources": {
+      "../build/licenses/": "licenses/",
+      "../build/sidecar/dist/linkread-sidecar/": "sidecar/"
+    },
     "macOS": { "signingIdentity": "-", "hardenedRuntime": false }
   }
 }

@@ -41,6 +41,34 @@ def notice_files(directory: Path) -> list[Path]:
                               for part in path.relative_to(directory).parts[:-1])))
 
 
+def bundled_python_distributions(sidecar_dir: Path) -> set[str]:
+    """Discover frozen Python distribution names from *.dist-info / *.egg-info in a sidecar dir."""
+    names: set[str] = set()
+    for pattern in ("*.dist-info", "*.egg-info"):
+        for entry in sidecar_dir.rglob(pattern):
+            if not entry.is_dir():
+                continue
+            raw_name = None
+            try:
+                raw_name = metadata.PathDistribution(entry).metadata.get("Name")
+            except OSError:
+                raw_name = None
+            if not raw_name:
+                raw_name = re.split(r"-[0-9]", entry.stem, maxsplit=1)[0]
+            if raw_name:
+                names.add(canonicalize_name(raw_name))
+    return names
+
+
+def bundled_native_libraries(sidecar_dir: Path) -> list[str]:
+    """List native shared libraries bundled inside the --onedir sidecar."""
+    return sorted(
+        path.relative_to(sidecar_dir).as_posix()
+        for path in sidecar_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".dylib", ".so"}
+    )
+
+
 class Collector:
     def __init__(self, output: Path, root: Path = ROOT):
         self.output = output
@@ -130,12 +158,15 @@ class Collector:
             raise RuntimeError("Renderer notice inventory is incomplete; update scripts/vendor_licenses.json")
         return project
 
-    def python(self, project: dict) -> None:
+    def python(self, project: dict, extra_distributions: set[str] | list[str] | None = None) -> None:
         # Include the bootloader's license and exception, plus a conservative
-        # superset of its build dependencies. These entries do not imply that
-        # every build-tool dependency is linked into the application.
+        # superset of its build dependencies and frozen sidecar distributions.
+        project_name = canonicalize_name(project["name"])
         pending = [Requirement(value) for value in project.get("dependencies", [])
                    + project.get("optional-dependencies", {}).get("youtube", []) + ["pyinstaller"]]
+        for extra_name in sorted({canonicalize_name(item) for item in (extra_distributions or ())}):
+            if extra_name != project_name:
+                pending.append(Requirement(extra_name))
         visited: dict[str, set[str]] = {}
         distributions: dict[str, metadata.Distribution] = {}
         while pending:
@@ -227,9 +258,9 @@ class Collector:
                      [value for value in (package.get("repository"), package.get("source")) if value], files,
                      [Path(declared).name] if declared else [])
 
-    def manifest(self, target: str) -> dict:
+    def manifest(self, target: str, native_libraries: list[str] | None = None) -> dict:
         inputs = ["pyproject.toml", "desktop/package-lock.json", "desktop/src-tauri/Cargo.lock", "desktop/scripts/vendor_licenses.json"]
-        return {
+        data = {
             "schema_version": 1, "generator": "linkread-desktop/collect_licenses.py",
             "target": target, "python": sys.version.split()[0],
             "app_version": json.loads((self.desktop / "package.json").read_text())["version"],
@@ -237,30 +268,40 @@ class Collector:
             "inputs": {name: hashlib.sha256((self.root / name).read_bytes()).hexdigest() for name in inputs},
             "components": self.components,
         }
+        if native_libraries is not None:
+            data["bundled_native_libraries"] = native_libraries
+        return data
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True, help="Exact Rust target triple used by the App build")
     parser.add_argument("--output", type=Path, default=DESKTOP / "build/licenses")
+    parser.add_argument("--sidecar-dir", type=Path, default=None, help="Bundled --onedir sidecar directory to audit")
     args = parser.parse_args()
     output = args.output.resolve()
     if args.output.is_symlink():
         raise RuntimeError(f"The license output must not be a symlink: {args.output}")
+    if args.sidecar_dir is not None and not args.sidecar_dir.is_dir():
+        raise RuntimeError(f"Missing --sidecar-dir directory: {args.sidecar_dir}")
     if output.exists() and any(output.iterdir()):
         manifest = output / "manifest.json"
         if not manifest.is_file() or json.loads(manifest.read_text()).get("generator") != "linkread-desktop/collect_licenses.py":
             raise RuntimeError(f"Refusing to replace a non-generated, non-empty directory: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
+    extra_python = bundled_python_distributions(args.sidecar_dir) if args.sidecar_dir is not None else None
+    native_libraries = bundled_native_libraries(args.sidecar_dir) if args.sidecar_dir is not None else None
     with tempfile.TemporaryDirectory(prefix="licenses-", dir=output.parent) as temporary:
         staging = Path(temporary) / "notices"
         staging.mkdir()
         collector = Collector(staging)
         project = collector.project()
-        collector.python(project)
+        collector.python(project, extra_distributions=extra_python)
         collector.npm()
         collector.rust(args.target)
-        (staging / "manifest.json").write_text(json.dumps(collector.manifest(args.target), ensure_ascii=False, indent=2) + "\n")
+        (staging / "manifest.json").write_text(
+            json.dumps(collector.manifest(args.target, native_libraries=native_libraries), ensure_ascii=False, indent=2) + "\n",
+        )
         if output.exists():
             shutil.rmtree(output)
         shutil.move(staging, output)

@@ -19,12 +19,18 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
   const identityRef = useRef("")
   const testIdentity = useRef("")
   const mounted = useRef(true)
+  const currentValue = useRef(value)
+  currentValue.current = value
+  const currentDisabled = useRef(disabled)
+  currentDisabled.current = disabled
+  const pickRevision = useRef(0)
   const identity = JSON.stringify([value.mode, value.browser, value.filePath.trim()])
 
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
+      pickRevision.current++
       revision.current.invalidate()
     }
   }, [])
@@ -40,15 +46,20 @@ export function YoutubeCookiesPanel({ value, onChange, disabled }: {
 
   async function chooseFile() {
     if (disabled || picking) return
+    const snapshot = currentValue.current
+    const rev = ++pickRevision.current
     setPicking(true)
     setPickError("")
     try {
       const selected = await pickCookiesFile()
-      if (selected) onChange({ ...value, mode: "file", filePath: selected })
+      if (selected && mounted.current && !currentDisabled.current
+        && pickRevision.current === rev && currentValue.current === snapshot) {
+        onChange({ ...snapshot, mode: "file", filePath: selected })
+      }
     } catch (error) {
-      setPickError(String(error))
+      if (mounted.current && pickRevision.current === rev) setPickError(String(error))
     } finally {
-      setPicking(false)
+      if (mounted.current) setPicking(false)
     }
   }
 

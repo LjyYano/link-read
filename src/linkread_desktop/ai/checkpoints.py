@@ -55,7 +55,7 @@ class RunProvider:
                    active=self._active, queued=len(self._waiting), validating=self._validating,
                    completed=self._completed, cacheHits=self.cache_hits))
 
-    def execute(self, prompt, schema, validate, *, timeout_seconds, stage=None):
+    def execute(self, prompt, schema, validate, *, timeout_seconds, stage=None, cancel=None):
         queued = time.monotonic()
         ticket = object()
         with self.condition:
@@ -67,7 +67,10 @@ class RunProvider:
             # FIFO admission stops a busy proofreading executor from repeatedly
             # taking slots before already-queued analysis/publication requests.
             try:
-                self.condition.wait_for(lambda: self._waiting[0] is ticket and self._active < self.limit)
+                while not (self._waiting[0] is ticket and self._active < self.limit):
+                    if cancel is not None and cancel.is_set():
+                        raise LinkReadError("生成已取消", code="cancelled")
+                    self.condition.wait(timeout=0.5 if cancel is not None else None)
             except BaseException:
                 self._waiting.remove(ticket)
                 self.condition.notify_all()
@@ -83,11 +86,15 @@ class RunProvider:
             self.condition.notify_all()
         output_chars = 0
         try:
+            if cancel is not None and cancel.is_set():
+                raise LinkReadError("生成已取消", code="cancelled")
             with error_context(stage):
+                extra = {}
                 if stage in {"polish", "translation"} and getattr(self.provider, "supports_reasoning_effort", False):
-                    payload = self.provider.generate(prompt, schema, timeout_seconds=timeout_seconds, reasoning_effort="low")
-                else:
-                    payload = self.provider.generate(prompt, schema, timeout_seconds=timeout_seconds)
+                    extra["reasoning_effort"] = "low"
+                if cancel is not None and getattr(self.provider, "supports_cancel", False):
+                    extra["cancel"] = cancel
+                payload = self.provider.generate(prompt, schema, timeout_seconds=timeout_seconds, **extra)
             # Count only characters; never persist prompts, model text or tokens.
             try:
                 output_chars = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
@@ -135,8 +142,10 @@ class RunProvider:
             self._event(self._request_id, stage, "cache")
 
 
-def validated_call(provider, prompt, schema, validate, *, timeout_seconds, cache_dir=None, stage=None):
+def validated_call(provider, prompt, schema, validate, *, timeout_seconds, cache_dir=None, stage=None, cancel=None):
     """Never cache unverified model output; always revalidate stored checkpoints."""
+    if cancel is not None and cancel.is_set():
+        raise LinkReadError("生成已取消", code="cancelled")
     path = None
     if cache_dir is not None:
         identity = getattr(provider, "identity", provider_identity(provider))
@@ -167,9 +176,10 @@ def validated_call(provider, prompt, schema, validate, *, timeout_seconds, cache
         return result
     with error_context(stage):
         if isinstance(provider, RunProvider):
-            result = provider.execute(prompt, schema, checked, timeout_seconds=timeout_seconds, stage=stage)
+            result = provider.execute(prompt, schema, checked, timeout_seconds=timeout_seconds, stage=stage, cancel=cancel)
         else:
-            result = checked(provider.generate(prompt, schema, timeout_seconds=timeout_seconds))
+            extra = {"cancel": cancel} if cancel is not None and getattr(provider, "supports_cancel", False) else {}
+            result = checked(provider.generate(prompt, schema, timeout_seconds=timeout_seconds, **extra))
     if path is not None:
         write_text(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     return result

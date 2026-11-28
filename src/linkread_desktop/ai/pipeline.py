@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from ..errors import LinkReadError, error_operation
 from ..models import TranscriptDocument, TranscriptSegment
 from ..progress import ProgressCallback, report
+from ..text_language import is_english_language, is_latin_heavy, looks_english_text
 from .batches import ordered_batches
 from .checkpoints import validated_call
 from .models import Chapter, ChunkInsights, Highlight, NoteAnalysis, NoteDocument
@@ -67,12 +68,8 @@ def split_chunks(segments: list[TranscriptSegment], *, max_chars: int = 4500) ->
 
 def _use_english_prompt(language: str | None, segments: tuple[TranscriptSegment, ...]) -> bool:
     if language is not None:
-        return language.strip().lower().startswith("en")
-    sample = "".join(cue.text for cue in segments[:40])[:2500]
-    han = sum(1 for ch in sample if "\u3400" <= ch <= "\u9fff")
-    other = any("\u3040" <= ch <= "\u30ff" or "\uac00" <= ch <= "\ud7af" for ch in sample)
-    latin = sum(1 for ch in sample if "A" <= ch <= "Z" or "a" <= ch <= "z")
-    return latin >= 20 and han == 0 and not other
+        return is_english_language(language)
+    return looks_english_text((cue.text for cue in segments[:40]), max_chars=2500, require_zero_han=True)
 
 
 def _prompt(chunk: TranscriptChunk, *, title: str, position: int, count: int, language: str | None = None) -> str:
@@ -129,11 +126,7 @@ def _unique(values: list[str], *, max_items: int) -> list[str]:
 
 
 def _latin_heavy(segments: list[TranscriptSegment]) -> bool:
-    sample = "".join(cue.text for cue in segments[:80])[:4000]
-    if not sample:
-        return False
-    cjk = sum(1 for ch in sample if "\u3400" <= ch <= "\u9fff" or "\u3040" <= ch <= "\u30ff" or "\uac00" <= ch <= "\ud7af")
-    return cjk / len(sample) < 0.25
+    return is_latin_heavy((cue.text for cue in segments[:80]), max_chars=4000)
 
 
 def default_analysis_budget(segments: list[TranscriptSegment]) -> int:
@@ -145,7 +138,7 @@ def default_analysis_budget(segments: list[TranscriptSegment]) -> int:
 def enrich(
     transcript: TranscriptDocument, provider: StructuredProvider, *, max_chars: int | None = None,
     timeout_seconds: int = 300, progress: ProgressCallback | None = None, workers: int = 1, cache_dir=None,
-    language: str | None = None,
+    language: str | None = None, cancel=None,
 ) -> NoteDocument:
     """Validate every chunk and source reference, then assemble in source order.
 
@@ -198,7 +191,7 @@ def enrich(
         try:
             return validated_call(provider,
                 _prompt(chunk, title=transcript.source.title, position=position, count=len(chunks), language=language),
-                CHUNK_SCHEMA, validate, timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="analysis")
+                CHUNK_SCHEMA, validate, timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="analysis", cancel=cancel)
         except (ValidationError, ValueError) as exc:
             raise ProviderError(f"第 {position}/{len(chunks)} 块 AI 返回内容不符合结构或字幕索引约束",
                                 code="model_output_invalid", stage="analysis") from exc
@@ -207,7 +200,7 @@ def enrich(
         report(progress, "ai_done", f"第 {position}/{total} 块提炼完成", completed=completed, total=total)
 
     for part, local_chapters, local_highlights in ordered_batches(
-        chunks, process_chunk, workers=workers, on_complete=chunk_complete,
+        chunks, process_chunk, workers=workers, on_complete=chunk_complete, cancel=cancel,
     ):
         summaries.append(part.summary.strip())
         takeaways.extend(part.takeaways)

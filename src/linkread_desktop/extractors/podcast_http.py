@@ -36,6 +36,26 @@ class _AnonymousAuth(requests.auth.AuthBase):
 _ANONYMOUS_AUTH = _AnonymousAuth()
 
 
+def _is_public_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if (not address.is_global or address.is_private or address.is_loopback
+            or address.is_link_local or address.is_multicast or address.is_reserved or address.is_unspecified):
+        return False
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.ipv4_mapped is not None and not _is_public_ip(address.ipv4_mapped):
+            return False
+        if address.sixtofour is not None and not _is_public_ip(address.sixtofour):
+            return False
+        if address.teredo is not None:
+            if not _is_public_ip(address.teredo[0]) or not _is_public_ip(address.teredo[1]):
+                return False
+        # NAT64 well-known (64:ff9b::/96) and local-use (64:ff9b:1::/48) carry embedded IPv4 in last 32 bits.
+        if address in ipaddress.IPv6Network("64:ff9b::/96") or address in ipaddress.IPv6Network("64:ff9b:1::/48"):
+            embedded = ipaddress.IPv4Address(address.packed[-4:])
+            if not _is_public_ip(embedded):
+                return False
+    return True
+
+
 def public_url(value: str, *, resolve: bool = True) -> str:
     """Accept only ordinary public HTTP(S) endpoints, without credentials."""
     try:
@@ -47,8 +67,8 @@ def public_url(value: str, *, resolve: bool = True) -> str:
                 or parsed.username is not None or parsed.password is not None
                 or parsed.port not in {None, 443 if parsed.scheme == "https" else 80}):
             raise ValueError
-        host = host.encode("idna").decode("ascii").lower()
-        if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        host = host.encode("idna").decode("ascii").lower().rstrip(".")
+        if not host or host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
             raise ValueError
         try:
             addresses = [ipaddress.ip_address(host)]
@@ -58,7 +78,7 @@ def public_url(value: str, *, resolve: bool = True) -> str:
             addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(
                 host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM,
             )]
-        if (resolve and not addresses) or any(not address.is_global for address in addresses):
+        if (resolve and not addresses) or any(not _is_public_ip(address) for address in addresses):
             raise ValueError
         authority = f"[{host}]" if ":" in host else host
         return urlunsplit((parsed.scheme, authority, parsed.path or "/", parsed.query, ""))

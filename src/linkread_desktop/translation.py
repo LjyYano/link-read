@@ -16,6 +16,7 @@ from .errors import LinkReadError, error_operation
 from .models import TranscriptDocument
 from .progress import ProgressCallback, report
 from .storage import write_text
+from .text_language import is_english_language, looks_english_text, normalize_language_tag
 
 Language = Literal["zh-CN", "en"]
 PageLanguage = Literal["original", "zh-CN", "en"]
@@ -24,8 +25,7 @@ EDITION_FILE = ".reading-edition.json"
 
 
 def source_language(document: TranscriptDocument) -> str | None:
-    value = (document.language or "").lower().replace("_", "-").removeprefix("ai-")
-    return value if re.fullmatch(r"[a-z]{2,3}(?:-[a-z0-9]{1,8})*", value) else None
+    return normalize_language_tag(document.language)
 
 
 def page_locale(document: TranscriptDocument, language: PageLanguage) -> Language:
@@ -225,6 +225,7 @@ def _batches(document: TranscriptDocument, budget: int):
 def prepare_edition(
     folder: Path, document: TranscriptDocument, language: PageLanguage, provider: StructuredProvider, *,
     max_chars: int, timeout_seconds: int, workers: int, progress: ProgressCallback | None, cache_dir: Path,
+    cancel=None,
 ) -> ReadingEdition:
     saved = load_edition(folder, document)
     if saved and saved.language == language:
@@ -257,7 +258,7 @@ def prepare_edition(
 
             try:
                 return validated_call(provider, prompt, _Batch.model_json_schema(), validate,
-                    timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="translation")
+                    timeout_seconds=timeout_seconds, cache_dir=cache_dir, stage="translation", cancel=cancel)
             except (ValueError, ValidationError) as error:
                 raise ProviderError("字幕翻译结果缺失或索引无效", code="model_output_invalid", stage="translation") from error
 
@@ -265,7 +266,7 @@ def prepare_edition(
             report(progress, "translation_done", f"已翻译 {count}/{total} 批字幕", completed=count, total=total)
 
         fragments = [[] for _ in document.segments]
-        for batch in ordered_batches(batches, process, workers=workers, on_complete=completed):
+        for batch in ordered_batches(batches, process, workers=workers, on_complete=completed, cancel=cancel):
             for cue, text in batch:
                 fragments[cue].append(text)
         cues = [join_translation(parts, language) for parts in fragments]

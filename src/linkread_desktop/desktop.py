@@ -7,8 +7,9 @@ from hashlib import sha256
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 from urllib.parse import urlsplit
 
 from .ai.provider import make_provider
@@ -25,6 +26,8 @@ from .covers import (
     remove_local_cover, save_cover_bytes,
 )
 from .generation import _run_note, generate_article
+
+_DEFAULT_GENERATE_ARTICLE = generate_article
 from .errors import LinkReadError, error_context, error_details
 from .links import canonical_link
 from .messages import english_mode, localize_event
@@ -33,7 +36,7 @@ from .extractors.local import extract_local
 from .models import SourceInfo, TranscriptDocument
 from .pipeline import extract as extract_source, video_source_key
 from .progress import ProgressCallback, ProgressEvent, report
-from .renderers.extras import load_extras
+from .renderers.extras import load_extras, load_reading_overview
 from .renderers.formatting import display_title, source_link, source_info_link
 from .renderers.catalog import load_catalog, load_user_metadata
 from .renderers.markdown import render_markdown
@@ -45,7 +48,9 @@ from .renderers.site import article_metadata, load_transcript, load_document
 from .storage import write_text
 from .source_notes import MAX_SOURCE_NOTES_BYTES, with_source_notes
 from .workspace import find_workspace, _source_key
-from .transcript_previews import load_preview, save_preview, prepare_preview, resume_preview, preview_folder, snapshot_id
+from .transcript_previews import (
+    cleanup_stale_previews, load_preview, save_preview, prepare_preview, resume_preview, preview_folder, snapshot_id,
+)
 from .translation import PageLanguage, load_edition
 from .reader_cache import (CACHE_VERSION, LIBRARY_INDEX, archive_signature, implementation_signature,
                            cached_reader, remember_reader, read_cache, save_cache)
@@ -103,9 +108,10 @@ def _linked_source(folder: Path, source: SourceInfo) -> dict | None:
 
 def _article_record(article: Path, *, archived: tuple[Path, TranscriptDocument | NoteDocument, TranscriptDocument] | None = None) -> dict:
     source, document, raw = archived if archived is not None else _article_source(article)
-    metadata = article_metadata(document, source, overview=load_extras(source).reading)
+    details = read_article_details(article.parent)
+    metadata = article_metadata(document, source, overview=load_reading_overview(source), details=details)
     appearance = _source_metadata(raw)
-    linked = _linked_source(article.parent, raw.source)
+    linked = details.get("linkedSource") if details and raw.source.platform == "local" else None
     if linked:
         appearance.update(sourceUrl=linked["url"], thumbnailUrl=linked["thumbnailUrl"])
     return {
@@ -336,6 +342,8 @@ def _library_records(library: Path) -> dict:
         index = {"version": CACHE_VERSION, "implementation": implementation, "entries": updated}
         if writable and index != cached:
             save_cache(path, index)
+        if writable:
+            cleanup_stale_previews(library)
         articles.sort(key=lambda item: (item["updatedAt"], item["title"]), reverse=True)
         return {"articles": articles, "unavailable": unavailable}
 
@@ -381,14 +389,17 @@ def _prepared_reader(article: Path) -> dict:
     return remember_reader(article, signature, html, reading_state_key(document))
 
 
-def _refresh_shownotes(article: Path) -> dict:
+def _refresh_shownotes(
+    article: Path, *, cookies_from_browser: str | None = None, cookies_file: Path | None = None,
+) -> dict:
     _, _, raw = _article_source(article)
     url = source_info_link(raw.source)
     key = video_source_key(url) if url else None
     if not url or not key:
         raise LinkReadError("这篇文章没有可获取简介的原始来源", code="shownotes_source_missing")
+    auth = _youtube_auth_options(url, local_file=False, cookies_from_browser=cookies_from_browser, cookies_file=cookies_file)
     with error_context("shownotes"):
-        source = shownotes_metadata(url)
+        source = shownotes_metadata(url, **auth) if auth else shownotes_metadata(url)
     refreshed_url = source_info_link(source)
     if (source.platform != raw.source.platform or not refreshed_url
             or key != video_source_key(refreshed_url)):
@@ -414,21 +425,27 @@ def _refresh_shownotes(article: Path) -> dict:
 
 
 
-def _duplicate(source: str, library: Path, *, local_file: bool, session=None) -> dict:
-    """Look up an existing completed article using the canonical source key."""
+def _resolve_duplicate_source(source: str, *, local_file: bool, session=None) -> tuple[str, str]:
+    """Resolve source key and canonical URL (only contacting network for short URLs)."""
     if local_file:
         path = Path(source)
         if not path.is_absolute() or not path.is_file():
             raise LinkReadError("找不到字幕文件，请重新选择", code="source_missing", stage="extract", action="source")
         document = extract_local(path)
         key = _source_key(document)
-    else:
-        url = _video_url(source)
-        if urlsplit(url).hostname in BILIBILI_SHORT_HOSTS:
-            url = canonical_video_url(url, session=session)
-        key = video_source_key(url)
-        if key is None:
-            raise LinkReadError("无法识别视频 ID，不能安全检查重复内容")
+        return key, source
+    url = _video_url(source)
+    if urlsplit(url).hostname in BILIBILI_SHORT_HOSTS:
+        url = canonical_video_url(url, session=session)
+    key = video_source_key(url)
+    if key is None:
+        raise LinkReadError("无法识别视频 ID，不能安全检查重复内容")
+    return key, url
+
+
+def _duplicate(source: str, library: Path, *, local_file: bool, session=None) -> dict:
+    """Look up an existing completed article using the canonical source key."""
+    key, _ = _resolve_duplicate_source(source, local_file=local_file, session=session)
     folder = find_workspace(library, key) if key else None
     article = None
     if folder is not None and (folder / "article.html").is_file():
@@ -476,11 +493,28 @@ def _publish_replacement_locked(generated: Path, library: Path) -> Path:
     if backups.is_symlink():
         raise LinkReadError("资料库备份目录不可用")
     backup = backups / destination.name
-    if backup.exists() or backup.is_symlink():
+    if backup.is_symlink():
         raise LinkReadError("发现未处理的旧版文章备份，请先检查资料库")
+    if backup.exists():
+        # A completed previous swap may only have left a backup if cleanup after
+        # rename failed. Remove stale backup only after verifying destination is intact.
+        if (destination.is_symlink() or not destination.is_dir()
+                or not (destination / "article.html").is_file()
+                or not (destination / "transcript.json").is_file()):
+            raise LinkReadError("发现未处理的旧版文章备份，请先检查资料库")
+        shutil.rmtree(backup)
     if destination.exists():
         archive_signature(destination)
-        old_source, _, _ = _article_source(destination / "article.html")
+        old_transcript_path = destination / "transcript.json"
+        if old_transcript_path.is_symlink():
+            raise LinkReadError("原始字幕路径不可用")
+        old_raw = load_transcript(old_transcript_path)
+        if _source_key(old_raw) != key:
+            raise LinkReadError("文章归档与原始字幕不匹配，已保留旧文章")
+        try:
+            old_source, _, _ = _article_source(destination / "article.html")
+        except LinkReadError:
+            old_source = old_transcript_path
         new_source, _, _ = _article_source(generated)
         # Preserve every user metadata object, including fields the app does not
         # edit. The GUI overlay remains last in precedence after regeneration.
@@ -520,7 +554,6 @@ def _publish_replacement_locked(generated: Path, library: Path) -> Path:
         # source notes, even when that older transcript has a stale description.
         previous_metadata = destination / ".source-metadata.json"
         if previous_metadata.is_file() and not previous_metadata.is_symlink():
-            _reader_source(destination / "article.html")  # Validate identity before carrying it over.
             write_text(generated.parent / ".source-metadata.json", previous_metadata.read_text(encoding="utf-8"))
         if find_local_cover(generated.parent) is None:
             copy_local_cover(destination, generated.parent)
@@ -600,7 +633,14 @@ def _generate_with_replacement(
     options.update(_youtube_auth_options(
         source, local_file=local_file, cookies_from_browser=cookies_from_browser, cookies_file=cookies_file,
     ))
-    duplicate = _duplicate(source, library, local_file=local_file)
+    resolved_url = None
+    if not local_file:
+        try:
+            resolved_url = _resolve_duplicate_source(source, local_file=False)[1]
+        except LinkReadError:
+            resolved_url = None
+    duplicate = _duplicate(resolved_url or source, library, local_file=local_file)
+    effective_source = resolved_url or source
     if duplicate["article"] is not None and not replace:
         raise LinkReadError("这篇文章已存在，请确认重新生成并替换")
     # Incomplete runs can leave a valid note.json even without article.html.
@@ -647,7 +687,7 @@ def _generate_with_replacement(
         progress(event)
 
     if not replace:
-        return generate_article(source, provider, library=library, progress=persisted_progress, **options)
+        return generate_article(effective_source, provider, library=library, progress=persisted_progress, **options)
 
     library.mkdir(parents=True, exist_ok=True)
     stages = library / ".generation-staging"
@@ -662,7 +702,13 @@ def _generate_with_replacement(
     with file_lock(stages / f".{stage_key}.lock"):
         stage_root = _prepare_generation_stage(stages, stage_key, value)
         report(progress, "replace", "正在独立生成新版本，复用同一来源及模型的已验证阶段；旧文章保留到完成")
-        generated = generate_article(source, provider, library=stage_root, progress=persisted_progress, **options)
+        generate_kwargs = {**options}
+        if generate_article is _DEFAULT_GENERATE_ARTICLE:
+            generate_kwargs["allow_corrupt_replace"] = True
+        generated = generate_article(
+            effective_source, provider, library=stage_root, progress=persisted_progress,
+            **generate_kwargs,
+        )
         report(progress, "replace_publish", "新版本已完成，正在替换旧文章")
         result = _publish_replacement(generated, library)
         # Interrupted/failed stages deliberately remain resumable. Only a
@@ -729,7 +775,34 @@ def _generation_stage(
     key, value = _resolve_generation_stage(stages, source_key, identity, expected)
     return _prepare_generation_stage(stages, key, value)
 
+def _start_parent_watcher() -> None:
+    if os.environ.get("LINKREAD_WATCH_PARENT") != "1":
+        return
+    stdin = getattr(sys, "stdin", None)
+    buffer = getattr(stdin, "buffer", None)
+    if buffer is None:
+        return
+    try:
+        # Reading sys.stdin.buffer would hold its lock while blocked, and CPython aborts
+        # at shutdown when it cannot close sys.stdin. A private descriptor keeps the
+        # pipe open for the watcher and never touches buffered state.
+        descriptor = os.dup(buffer.fileno())
+    except (AttributeError, OSError, ValueError):
+        return
+
+    def _watch() -> None:
+        try:
+            while os.read(descriptor, 1024):
+                pass
+        except OSError:
+            pass
+        os._exit(1)
+
+    Thread(target=_watch, name="linkread-parent-watch", daemon=True).start()
+
+
 def main() -> int:
+    _start_parent_watcher()
     parser = argparse.ArgumentParser(description=("LinkRead desktop generation and offline reader" if english_mode()
                                                    else "LinkRead 桌面端生成和离线阅读工具"))
     parser.add_argument("--library", type=Path, required=True)
@@ -791,7 +864,10 @@ def main() -> int:
     details.add_argument("article_id")
     commands.add_parser("reader").add_argument("article_id")
     commands.add_parser("preview-reader").add_argument("preview_id")
-    commands.add_parser("refresh-shownotes").add_argument("article_id")
+    refresh_shownotes = commands.add_parser("refresh-shownotes")
+    refresh_shownotes.add_argument("--cookies-from-browser")
+    refresh_shownotes.add_argument("--cookies", type=Path)
+    refresh_shownotes.add_argument("article_id")
     state = commands.add_parser("reading-state")
     state.add_argument("--read", choices=("true", "false"))
     state.add_argument("--starred", choices=("true", "false"))
@@ -904,7 +980,9 @@ def main() -> int:
                   sourceKey=_source_key(raw), article=_preview_record(library, args.preview_id, raw))
         elif args.command == "refresh-shownotes":
             article = _article_path(library, args.article_id)
-            _emit("shownotes", **_refresh_shownotes(article))
+            _emit("shownotes", **_refresh_shownotes(
+                article, cookies_from_browser=args.cookies_from_browser, cookies_file=args.cookies,
+            ))
         else:
             _emit("markdown", text=_article_markdown(library, args.article_id, content=args.content,
                 include_timestamped=args.include_timestamped == "true"))

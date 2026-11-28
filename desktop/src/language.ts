@@ -36,7 +36,7 @@ export const locale = () => currentLocale
 
 export function tr(message: string, ...values: (string | number | null | undefined)[]): string {
   const dictionary = currentLocale === "en" ? english : chinese
-  const template = Object.hasOwn(dictionary, message) ? dictionary[message] : message
+  const template = Object.prototype.hasOwnProperty.call(dictionary, message) ? dictionary[message] : message
   return values.length ? template.replace(/\{(\d+)\}/g, (match, index) => String(values[Number(index)] ?? match)) : template
 }
 

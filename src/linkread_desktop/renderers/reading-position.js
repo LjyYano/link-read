@@ -82,7 +82,10 @@
     const nonce = new Uint32Array(4);
     try { root.crypto.getRandomValues(nonce); } catch { nonce.forEach((_, index) => { nonce[index] = Math.random() * 4294967296; }); }
     const session = Array.from(nonce, number => number.toString(16).padStart(8, '0')).join('');
-    const embedded = root.parent !== root;
+    const embedded = root.parent !== root && (root.__linkreadDesktop === true || root.location?.protocol === 'linkread-reader:');
+    const allowedHostOrigin = origin =>
+      origin === 'null' || origin === 'tauri://localhost' || origin === 'https://tauri.localhost'
+      || /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
     try { root.history.scrollRestoration = 'manual'; } catch {}
     const blank = () => ({ version: 1, updatedAt: 0, activeTab: 'transcript', tabs: {}, mindmap: null });
     let state = blank();
@@ -143,7 +146,21 @@
       const { anchors, signature } = content(activeTab), y = root.scrollY || 0, line = topInset();
       let position = { signature, anchor: { kind: 'top' }, offset: Math.min(y, 100000), ratio: 0 };
       if (y > normalTabTop() + 1) {
-        const visible = anchors.find(anchor => anchor.element.getBoundingClientRect().bottom > line);
+        let visible = null;
+        if (activeTab === 'transcript' && anchors.length > 0) {
+          let lo = 0, hi = anchors.length - 1;
+          while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (anchors[mid].element.getBoundingClientRect().bottom > line) {
+              visible = anchors[mid];
+              hi = mid - 1;
+            } else {
+              lo = mid + 1;
+            }
+          }
+        } else {
+          visible = anchors.find(anchor => anchor.element.getBoundingClientRect().bottom > line) || null;
+        }
         if (visible) {
           const rect = visible.element.getBoundingClientRect(), offset = line - rect.top;
           const { element, ...anchor } = visible;
@@ -317,7 +334,7 @@
       deferredWrite = false;
     }
     root.addEventListener('message', event => {
-      if (!embedded || event.source !== root.parent) return;
+      if (!embedded || event.source !== root.parent || !allowedHostOrigin(event.origin)) return;
       const incoming = event.data?.linkReadPositionRestore, flush = event.data?.linkReadPositionFlush;
       const value = incoming || flush;
       if (!object(value) || value.version !== 1 || value.key !== key || value.session !== session) return;

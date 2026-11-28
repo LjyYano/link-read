@@ -62,6 +62,11 @@ def _http_failure(status: int) -> ProviderError:
     return ProviderError(f"API 服务端返回 HTTP {status}，请核对地址和模型", code="configuration_invalid", retryable=False, action="settings")
 
 
+def is_loopback_base_url(base_url: str) -> bool:
+    parsed = urlsplit(base_url)
+    return parsed.scheme == "http" and (parsed.hostname or "").lower() in {"localhost", "127.0.0.1", "::1"}
+
+
 def validate_base_url(value: str) -> str:
     """Accept HTTPS API roots, or HTTP loopback for locally hosted servers."""
     value = value.strip().rstrip("/")
@@ -84,6 +89,7 @@ def validate_base_url(value: str) -> str:
 
 class OpenAICompatibleProvider:
     name = "api"
+    supports_cancel = True
 
     def __init__(self, *, base_url: str, model: str, token: str | None = None):
         self.base_url = validate_base_url(base_url)
@@ -91,7 +97,9 @@ class OpenAICompatibleProvider:
         if not self.model or len(self.model) > 256 or any(ord(c) < 32 for c in self.model):
             raise ProviderError("请填写有效的模型名称", code="configuration_invalid", retryable=False, action="settings")
         self._token = token if token is not None else os.environ.get("LINKREAD_API_TOKEN", "")
-        if not self._token or any(ord(c) < 32 or ord(c) == 127 for c in self._token):
+        if any(ord(c) < 32 or ord(c) == 127 for c in self._token):
+            raise ProviderError("未配置 API Token，请在设置中填写 API Token", code="authentication_missing", retryable=False, action="settings")
+        if not self._token and not is_loopback_base_url(self.base_url):
             raise ProviderError("未配置 API Token，请在设置中填写 API Token", code="authentication_missing", retryable=False, action="settings")
         # Hybrid Qwen3/3.5/3.8 models on DashScope default to slow thinking mode.
         # Disable it for structured extraction unless the chosen model rejects it.
@@ -144,11 +152,13 @@ class OpenAICompatibleProvider:
                 allow_redirects=False,
             )
 
-    def _post(self, payload: dict, *, timeout: tuple[int, int], expect_json: bool = False, retry_transient: bool = False):
-        headers = {
-            "Authorization": "Bearer " + self._token,
-            "Content-Type": "application/json",
-        }
+    def _post(
+        self, payload: dict, *, timeout: tuple[int, int], expect_json: bool = False,
+        retry_transient: bool = False, cancel: threading.Event | None = None,
+    ):
+        headers = {"Content-Type": "application/json"}
+        if self._token:
+            headers["Authorization"] = "Bearer " + self._token
         use_session = requests.post is _DEFAULT_POST
         session = self._thread_session() if use_session else None
         post = session.post if session is not None else requests.post
@@ -162,6 +172,8 @@ class OpenAICompatibleProvider:
             body["response_format"] = {"type": "json_object"}
         started = time.monotonic()
         active_body = body
+        if cancel is not None and cancel.is_set():
+            raise ProviderError("生成已取消", code="cancelled", retryable=False)
         response = self._send_once(post, session, active_body, headers, timeout)
         if response.status_code == 400 and (disable_thinking or use_json_object):
             # Thinking-only or legacy models may reject enable_thinking or response_format.
@@ -179,12 +191,18 @@ class OpenAICompatibleProvider:
                 if time.monotonic() - started + delay >= timeout[1]:
                     break
                 _close_response(response)
-                _sleep(delay)
+                if cancel is not None:
+                    if cancel.wait(delay):
+                        raise ProviderError("生成已取消", code="cancelled", retryable=False)
+                else:
+                    _sleep(delay)
                 response = self._send_once(post, session, active_body, headers, timeout)
                 attempt += 1
         return response
 
-    def generate(self, prompt: str, schema: dict, *, timeout_seconds: int) -> dict:
+    def generate(
+        self, prompt: str, schema: dict, *, timeout_seconds: int, cancel: threading.Event | None = None,
+    ) -> dict:
         han = sum(1 for ch in prompt[:600] if "\u3400" <= ch <= "\u9fff")
         if han < 10:
             system_prompt = (
@@ -213,6 +231,7 @@ class OpenAICompatibleProvider:
                 timeout=(15, timeout_seconds),
                 expect_json=True,
                 retry_transient=True,
+                cancel=cancel,
             )
         except requests.Timeout as exc:
             raise ProviderError(f"API 请求超时（{timeout_seconds} 秒），请检查网络或增大超时", code="model_timeout") from exc

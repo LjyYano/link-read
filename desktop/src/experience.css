@@ -1,8 +1,8 @@
 /* Desktop home: a focused composer, live work, then a readable collection. */
 .recent-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; list-style: none; margin: 0; padding: 0; }
 .article-card { position: relative; display:flex; flex-direction:column; min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); transition: border-color .18s, box-shadow .18s; }
-.article-card:has(.article-card-link:hover), .article-card:focus-within { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); box-shadow: 0 4px 16px #17273d08; }
-.article-card:has([aria-expanded="true"]) { z-index: 4; }
+.article-card:hover, .article-card:focus-within { border-color: rgba(9, 105, 245, .38); box-shadow: 0 4px 16px #17273d08; }
+.article-card:focus-within { z-index: 4; }
 .article-card-link { width: 100%; padding: 0; display: flex; flex-direction: column; gap: 0; text-align: left; border: 0; border-radius: 12px 12px 0 0; background: transparent; }
 .article-card-media { position:relative; display:block; width:100%; aspect-ratio:16 / 9; overflow:hidden; border-radius:11px 11px 0 0; }
 .article-card-media > .shelf-cover { position:absolute; inset:0; width:100%; height:100%; aspect-ratio:auto; border:0; border-radius:0; }
@@ -21,7 +21,7 @@
 .task-list { list-style: none; display: grid; gap: 12px; margin: 0; padding: 0; }
 .task-card { --task-cover-width:144px; min-width: 0; border: 1px solid var(--line); border-radius: 12px; padding: 17px 20px; background: var(--paper); }
 .task-card[data-platform="apple_podcasts"] { --task-cover-width:88px; }
-.task-card-active { border-color: color-mix(in srgb, var(--accent) 28%, var(--line)); background: color-mix(in srgb, var(--accent) 2%, var(--paper)); }
+.task-card-active { border-color: rgba(9, 105, 245, .30); background: rgba(9, 105, 245, .03); }
 .task-card-heading { display: flex; align-items: center; gap: 16px; }
 .task-card-heading .shelf-cover { width: var(--task-cover-width); border-radius: 8px; }
 .task-card-info { min-width: 0; flex: 1; }
@@ -94,13 +94,14 @@
 .shelf-local-icon { color: var(--muted); flex-shrink: 0; }
 .reader-raw-notice { flex: 0 0 auto; display: flex; gap: 12px; align-items: center; justify-content: center; background: var(--surface); color: var(--muted); border-bottom: 1px solid var(--line); padding: 9px 20px; font-size: 12px; }
 .reader-raw-notice .text-button { font-size: 12px; white-space: nowrap; }
-@media (prefers-color-scheme: dark) {
-  .shelf-cover[data-cover-tone] { --cover-bg: #273b34; --cover-ink: #c9ded4; }
-  .shelf-cover[data-cover-tone="sand"] { --cover-bg: #3b3328; --cover-ink: #e2d1b7; }
-  .shelf-cover[data-cover-tone="slate"] { --cover-bg: #293647; --cover-ink: #c6d8ec; }
-  .shelf-cover[data-cover-tone="lilac"] { --cover-bg: #363042; --cover-ink: #d8cde9; }
-  .cover-typography { background: linear-gradient(135deg, #ffffff05, transparent); }
-}
+[data-theme="dark"] .article-card:hover,
+[data-theme="dark"] .article-card:focus-within { border-color: rgba(50, 127, 248, .42); }
+[data-theme="dark"] .task-card-active { border-color: rgba(50, 127, 248, .34); background: rgba(50, 127, 248, .06); }
+[data-theme="dark"] .shelf-cover[data-cover-tone] { --cover-bg: #273b34; --cover-ink: #c9ded4; }
+[data-theme="dark"] .shelf-cover[data-cover-tone="sand"] { --cover-bg: #3b3328; --cover-ink: #e2d1b7; }
+[data-theme="dark"] .shelf-cover[data-cover-tone="slate"] { --cover-bg: #293647; --cover-ink: #c6d8ec; }
+[data-theme="dark"] .shelf-cover[data-cover-tone="lilac"] { --cover-bg: #363042; --cover-ink: #d8cde9; }
+[data-theme="dark"] .cover-typography { background: linear-gradient(135deg, #ffffff05, transparent); }
 @media (max-width: 650px) {
   .article-card .cover-title { font-size: 30px; }
   .reader-raw-notice { align-items: flex-start; justify-content: space-between; }

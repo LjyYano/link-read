@@ -32,8 +32,10 @@ test('titlebar action has permission and is not mixed with implicit double-click
   const capabilities=JSON.parse(read('../src-tauri/capabilities/main.json'))
   assert.ok(capabilities.permissions.includes('core:window:allow-toggle-maximize'))
   const main=read('../src/main.tsx')
-  assert.match(main,/titlebarMouseDown\(event, getCurrentWindow\(\)\)/)
+  const titleBar=read('../src/TitleBar.tsx')
+  assert.match(titleBar,/titlebarMouseDown\(event, getCurrentWindow\(\)\)/)
   assert.doesNotMatch(main,/className="titlebar-drag"[^>]*data-tauri-drag-region/)
+  assert.doesNotMatch(titleBar,/className="titlebar-drag"[^>]*data-tauri-drag-region/)
 })
 
 test('Bilibili cover URLs accept HTTP or relative input but only fetch trusted HTTPS', () => {

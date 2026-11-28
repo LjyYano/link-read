@@ -303,12 +303,12 @@ def _check_empty_feed(root, episode: AppleEpisode) -> None:
 
 
 def _feed_item(content: bytes, episode: AppleEpisode):
-    declarations = content.replace(b"\x00", b"").lower()
+    declarations = re.sub(rb"<!\[CDATA\[.*?\]\]>", b"", content.replace(b"\x00", b""), flags=re.S).lower()
     if b"<!doctype" in declarations or b"<!entity" in declarations:
         raise ExtractionError("播客 RSS 含有不支持的 XML 声明")
     try:
         root = ElementTree.fromstring(content)
-    except ElementTree.ParseError as exc:
+    except (ElementTree.ParseError, RecursionError) as exc:
         raise ExtractionError("播客 RSS 内容无效，无法确认该集字幕") from exc
     if root.tag != "rss" or root.find("channel") is None:
         raise ExtractionError("未获取到有效的播客 RSS 订阅源")
@@ -370,15 +370,19 @@ def _json_transcript(content: bytes) -> list[TranscriptSegment]:
             raise ValueError
         segments = []
         for row in rows:
-            body = _string(row.get("body"))
             start, end = row["startTime"], row.get("endTime")
-            if (not body or any(not isinstance(value, (int, float)) or isinstance(value, bool)
-                                or not math.isfinite(value) or value < 0
-                                for value in (start,) + ((end,) if end is not None else ()))
+            if (any(not isinstance(value, (int, float)) or isinstance(value, bool)
+                    or not math.isfinite(value) or value < 0
+                    for value in (start,) + ((end,) if end is not None else ()))
                     or (end is not None and end < start)):
                 raise ValueError
+            body = _string(row.get("body"))
+            if not body:
+                continue
             segments.append(TranscriptSegment(start_ms=round(start * 1000),
                             end_ms=round(end * 1000) if end is not None else None, text=body))
+        if not segments:
+            raise ValueError
         return sorted(segments, key=lambda row: row.start_ms)
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise ExtractionError("播客 JSON 字幕缺少有效的逐句文本或时间戳") from exc
@@ -392,7 +396,7 @@ def _timed_transcript(content: bytes) -> list[TranscriptSegment]:
     producing an incomplete article, so this extractor fails explicitly.
     """
     text = content.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n").strip()
-    cues = []
+    segments = []
     for index, block in enumerate(re.split(r"\n\s*\n", text)):
         lines = block.splitlines()
         if not lines:
@@ -408,13 +412,17 @@ def _timed_transcript(content: bytes) -> list[TranscriptSegment]:
         position = next((i for i, line in enumerate(lines) if "-->" in line), -1)
         if position not in {0, 1} or any("-->" in line for line in lines[position + 1:]):
             raise ExtractionError("播客字幕含有缺失时间戳的片段，未生成不完整文章")
-        # Discard only the optional cue identifier; preserve all timed text.
-        cues.append("\n".join(lines[position:]))
-    if not cues:
+        cue = "\n".join(lines[position:])
+        if not any(line.strip() for line in lines[position + 1:]):
+            # Validate timestamp syntax via parse_srt_vtt by probing with placeholder, skipping only truly blank cues.
+            try:
+                parse_srt_vtt(cue)
+            except SubtitleUnavailableError:
+                parse_srt_vtt(cue + "\n.")
+                continue
+        segments.extend(parse_srt_vtt(cue))
+    if not segments:
         raise ExtractionError("播客公开字幕没有可读取的句子")
-    # Parse each actual cue separately. The generic parser's cross-cue YouTube
-    # rolling-caption deduplication must not remove overlapping podcast speech.
-    segments = [segment for cue in cues for segment in parse_srt_vtt(cue)]
     return sorted(segments, key=lambda segment: segment.start_ms)
 
 
@@ -523,7 +531,7 @@ def download_episode_audio(url, folder: Path, config, *, progress=None, session=
             for chunk in stream:
                 prefix.append(chunk)
                 prefix_size += len(chunk)
-                if prefix_size >= 16:
+                if prefix_size >= 8192:
                     break
             first = b"".join(prefix)
             if first.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"#EXTM3U"):

@@ -34,3 +34,19 @@ def test_update_feed_rejects_a_signature_bound_to_a_different_version(tmp_path):
     }
     with pytest.raises(ValueError, match="版本与发布版本不匹配"):
         release["manifest"]("0.2.0", "aarch64", assets, archive, public_data)
+
+
+def test_account_notarization_uses_env_password_flag_and_sanitizes_secrets(monkeypatch):
+    for name in release["NOTARY_API"]:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("LINKREAD_NOTARY_PROFILE", raising=False)
+    monkeypatch.setenv("APPLE_ID", "dev@example.test")
+    monkeypatch.setenv("APPLE_TEAM_ID", "TEAM123456")
+    monkeypatch.setenv("APPLE_PASSWORD", "super-secret-app-pw")
+
+    args = release["notary_options"]()
+    assert args == ["--apple-id", "dev@example.test", "--team-id", "TEAM123456", "--password", "@env:APPLE_PASSWORD"]
+    assert "super-secret-app-pw" not in " ".join(args)
+    sanitized = release["sanitize_error_text"]("failed with super-secret-app-pw on stderr")
+    assert "super-secret-app-pw" not in sanitized
+    assert "<REDACTED:APPLE_PASSWORD>" in sanitized

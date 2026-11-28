@@ -75,6 +75,15 @@ class LicenseCollectionTests(unittest.TestCase):
                 module.main()
         self.assertEqual(important.read_bytes(), b"Keep this file")
 
+    def test_bundled_python_distributions_discovers_onedir_dist_info_and_libs(self):
+        sidecar = self.root / "sidecar"
+        meta = sidecar / "_internal" / "example_pkg-1.2.3.dist-info"
+        meta.mkdir(parents=True)
+        (meta / "METADATA").write_text("Metadata-Version: 2.1\nName: Example_Pkg\nVersion: 1.2.3\n", encoding="utf-8")
+        (sidecar / "_internal" / "libsample.dylib").write_bytes(b"macho")
+        self.assertEqual(module.bundled_python_distributions(sidecar), {"example-pkg"})
+        self.assertEqual(module.bundled_native_libraries(sidecar), ["_internal/libsample.dylib"])
+
 
 if __name__ == "__main__":
     unittest.main()

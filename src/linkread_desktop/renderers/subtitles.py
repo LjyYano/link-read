@@ -19,6 +19,11 @@ def _clean_cue_text(text: str) -> str:
     return " ".join(text.replace("\r", " ").replace("\n", " ").split())
 
 
+def _vtt_cue_text(text: str) -> str:
+    cleaned = _clean_cue_text(text)
+    return cleaned.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("-->", "--&gt;")
+
+
 def render_subtitles(document: TranscriptDocument, fmt: SubtitleFormat = "srt") -> str:
     """Serialize every transcript segment using its original timestamps."""
     if fmt not in {"srt", "vtt"}:
@@ -31,7 +36,7 @@ def render_subtitles(document: TranscriptDocument, fmt: SubtitleFormat = "srt") 
         start = _format_timestamp(cue.start_ms, decimal=decimal)
         end_ms = cue.end_ms if cue.end_ms is not None and cue.end_ms >= cue.start_ms else cue.start_ms
         end = _format_timestamp(end_ms, decimal=decimal)
-        text = _clean_cue_text(cue.text)
+        text = _clean_cue_text(cue.text) if fmt == "srt" else _vtt_cue_text(cue.text)
         if fmt == "srt":
             blocks.append(f"{index}\n{start} --> {end}\n{text}")
         else:

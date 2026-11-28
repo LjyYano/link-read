@@ -7,6 +7,7 @@ this is a low-volume desktop/testing transport, not a production OSS service.
 import io
 import json
 import re
+from threading import Event
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -41,6 +42,7 @@ class AsrTaskFailed(AsrError):
 
 
 MAX_AUDIO_BYTES = 200 * 1024 * 1024
+MAX_ASR_JSON_BYTES = 64 * 1024 * 1024
 TEST_AUDIO = "https://dashscope.oss-cn-beijing.aliyuncs.com/samples/audio/paraformer/hello_world_female2.wav"
 
 
@@ -54,15 +56,15 @@ def oss_https(url: str) -> str:
 
 
 def segments_from_result(data: dict, *, allow_empty: bool = False) -> list[TranscriptSegment]:
-    """Use service sentence timestamps. Do not invent times from text lengths."""
+    """Use service sentence timestamps across all non-empty channels."""
     segments = []
     try:
         tracks = data["transcripts"]
         if not isinstance(tracks, list):
             raise ValueError()
         for track in tracks:
-            if track.get("channel_id", 0) != 0:
-                continue
+            if not isinstance(track, dict):
+                raise ValueError()
             for sentence in track.get("sentences", []):
                 text = sentence["text"]
                 if not isinstance(text, str) or not text.strip():
@@ -75,7 +77,7 @@ def segments_from_result(data: dict, *, allow_empty: bool = False) -> list[Trans
         raise AsrError("语音识别返回了无效的句子时间戳") from exc
     if not segments and not allow_empty:
         raise AsrError("语音识别没有返回可用语句；可能没有人声或音频格式不受支持")
-    return sorted(segments, key=lambda x: x.start_ms)
+    return sorted(segments, key=lambda x: (x.start_ms, x.end_ms if x.end_ms is not None else x.start_ms))
 
 
 class MultipartBody:
@@ -140,11 +142,30 @@ class BailianAsr:
     def _json(self, method: str, url: str, **kwargs) -> dict:
         response = self._request(method, url, **kwargs)
         try:
-            data = response.json()
+            headers = getattr(response, "headers", None)
+            if headers and hasattr(headers, "get"):
+                raw_length = headers.get("Content-Length")
+                if isinstance(raw_length, str) and raw_length.strip().isdigit() and int(raw_length.strip()) > MAX_ASR_JSON_BYTES:
+                    raise AsrError("语音识别返回结果超过大小上限，已停止读取")
+            if isinstance(response, requests.Response):
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in response.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > MAX_ASR_JSON_BYTES:
+                        raise AsrError("语音识别返回结果超过大小上限，已停止读取")
+                    chunks.append(chunk)
+                data = json.loads(b"".join(chunks).decode("utf-8"))
+            else:
+                data = response.json()
             if not isinstance(data, dict):
                 raise ValueError()
             return data
-        except ValueError as exc:
+        except AsrError:
+            raise
+        except (ValueError, UnicodeError) as exc:
             raise AsrError("语音服务没有返回有效的 JSON") from exc
         finally:
             response.close()
@@ -154,8 +175,11 @@ class BailianAsr:
         if not 0 < audio.stat().st_size <= MAX_AUDIO_BYTES:
             raise AsrError("音频为空或超过当前 200 MB 上传上限")
         report(progress, "asr_upload", "正在上传音频至百炼临时存储")
-        upload_root = ("https://dashscope-intl.aliyuncs.com/api/v1" if "dashscope-intl" in self.base
-                       else "https://dashscope.aliyuncs.com/api/v1")
+        upload_root = (
+            "https://dashscope-intl.aliyuncs.com/api/v1"
+            if urlsplit(self.base).hostname == "dashscope-intl.aliyuncs.com"
+            else "https://dashscope.aliyuncs.com/api/v1"
+        )
         policy = self._json("GET", upload_root + "/uploads",
                             params={"action": "getPolicy", "model": self.config.model}).get("data", {})
         try:
@@ -184,7 +208,7 @@ class BailianAsr:
         value = self._json("POST", self.base + "/services/audio/asr/transcription",
                            headers={"X-DashScope-Async": "enable", "X-DashScope-OssResourceResolve": "enable"},
                            json={"model": self.config.model, "input": {"file_urls": [audio_url]},
-                                 "parameters": {"channel_id": [0], "disfluency_removal_enabled": False,
+                                 "parameters": {"channel_id": [0, 1], "disfluency_removal_enabled": False,
                                                 "timestamp_alignment_enabled": True}})
         task_id = value.get("output", {}).get("task_id")
         if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9-]{8,100}", task_id):
@@ -192,30 +216,55 @@ class BailianAsr:
         return task_id
 
     @error_operation("asr")
-    def wait(self, task_id: str, *, progress=None, timeout=1800, poll_seconds=5) -> dict:
+    def wait(self, task_id: str, *, progress=None, timeout=1800, poll_seconds=5, cancel: Event | None = None) -> dict:
         deadline = time.monotonic() + timeout
         if not re.fullmatch(r"[A-Za-z0-9-]{8,100}", task_id):
             raise AsrError("缓存中的语音任务编号无效")
+        transient_errors = 0
         while time.monotonic() < deadline:
-            output = self._json("GET", self.base + "/tasks/" + task_id).get("output", {})
-            if not isinstance(output, dict):
-                raise AsrError("语音服务未返回有效任务状态")
-            status = output.get("task_status")
-            if status == "SUCCEEDED":
-                results = output.get("results", [])
-                if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict) or results[0].get("subtask_status") != "SUCCEEDED":
-                    raise AsrTaskFailed("语音文件转写失败，请检查音频是否完整、可访问")
-                url = oss_https(results[0].get("transcription_url", ""))
-                report(progress, "asr_result", "转写完成，正在读取带时间戳的识别结果")
-                return self._json("GET", url, authorized=False)
+            if cancel is not None and cancel.is_set():
+                raise AsrError("生成已取消", code="cancelled")
+            try:
+                output = self._json("GET", self.base + "/tasks/" + task_id).get("output", {})
+                if not isinstance(output, dict):
+                    raise AsrError("语音服务未返回有效任务状态")
+                status = output.get("task_status")
+                if status == "SUCCEEDED":
+                    results = output.get("results", [])
+                    if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict) or results[0].get("subtask_status") != "SUCCEEDED":
+                        raise AsrTaskFailed("语音文件转写失败，请检查音频是否完整、可访问")
+                    url = oss_https(results[0].get("transcription_url", ""))
+                    report(progress, "asr_result", "转写完成，正在读取带时间戳的识别结果")
+                    return self._json("GET", url, authorized=False)
+                transient_errors = 0
+            except AsrError as exc:
+                if not exc.retryable or isinstance(exc, AsrTaskFailed) or transient_errors >= 5:
+                    raise
+                transient_errors += 1
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                delay = min(remaining, float(poll_seconds) * min(3, transient_errors))
+                if cancel is not None:
+                    if cancel.wait(delay):
+                        raise AsrError("生成已取消", code="cancelled")
+                else:
+                    time.sleep(delay)
+                continue
             if status not in {"PENDING", "RUNNING"}:
                 raise AsrTaskFailed("语音识别任务失败或已过期；再次点击重试将重新提交转写")
             report(progress, "asr_wait", "语音识别排队中" if status == "PENDING" else "正在语音识别，等待百炼返回完整结果")
-            time.sleep(poll_seconds)
+            if cancel is not None:
+                if cancel.wait(poll_seconds):
+                    raise AsrError("生成已取消", code="cancelled")
+            else:
+                time.sleep(poll_seconds)
         raise AsrError("语音识别等待超时，云端任务已保留；重试会继续查询，不会重新计费提交", code="asr_wait_timeout", retryable=True, action="retry")
 
     @error_operation("asr")
-    def transcribe(self, audio: Path, state_file: Path, *, progress=None, allow_empty=False) -> list[TranscriptSegment]:
+    def transcribe(
+        self, audio: Path, state_file: Path, *, progress=None, allow_empty=False, cancel: Event | None = None,
+    ) -> list[TranscriptSegment]:
         state = json.loads(state_file.read_text()) if state_file.is_file() else {}
         task = state.get("task_id")
         if task:
@@ -248,7 +297,7 @@ class BailianAsr:
             state.update(task_id=task, submitting=False)
             write_text(state_file, json.dumps(state))
         try:
-            result = self.wait(task, progress=progress)
+            result = self.wait(task, progress=progress, cancel=cancel)
         except AsrTaskFailed:
             # Do not loop/resubmit automatically. A later explicit Retry may do so.
             state.pop("task_id", None)

@@ -121,7 +121,9 @@ def video_metadata(source: str, *, session=None) -> VideoMetadata:
                          thumbnail_url=cover)
 
 
-def shownotes_metadata(source: str, *, session=None) -> SourceInfo:
+def shownotes_metadata(
+    source: str, *, session=None, cookies_from_browser: str | None = None, cookies_file=None,
+) -> SourceInfo:
     """Explicit refresh of original publisher descriptions, without generation.
 
     Kept separate from the lightweight preview: YouTube descriptions need a
@@ -136,4 +138,6 @@ def shownotes_metadata(source: str, *, session=None) -> SourceInfo:
     if host in BILIBILI_VIDEO_HOSTS:
         return video_metadata(url, session=session).source
     from .extractors.youtube import youtube_metadata
+    if cookies_from_browser is not None or cookies_file is not None:
+        return youtube_metadata(url, cookies_from_browser=cookies_from_browser, cookies_file=cookies_file)
     return youtube_metadata(url)

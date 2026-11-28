@@ -20,9 +20,11 @@ export function QuickOpen({ library, error, recent, onClose, onRead, onLibrary, 
 
   useEffect(() => {
     const previous = document.activeElement
-    dialog.current?.showModal()
+    const element = dialog.current
+    element?.showModal()
     input.current?.focus()
     return () => {
+      if (element?.open) element.close()
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true })
     }
   }, [])

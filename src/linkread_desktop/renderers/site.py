@@ -58,11 +58,12 @@ def load_transcript(path: Path) -> TranscriptDocument:
 
 def article_metadata(
     document: TranscriptDocument | NoteDocument, source_file: Path, *, overview: ReadingOverview | None = None,
+    details: dict | None | object = ...,
 ) -> dict:
     transcript = document.transcript if isinstance(document, NoteDocument) else document
     info = transcript.source
-    details = read_article_details(source_file.parent)
-    linked = details.get("linkedSource") if details and info.platform == "local" else None
+    resolved_details = read_article_details(source_file.parent) if details is ... else details
+    linked = resolved_details.get("linkedSource") if resolved_details and info.platform == "local" else None
     default_title = linked["title"] if linked else display_title(transcript)
     extra = load_user_metadata(source_file)
     catalog = load_catalog(source_file)
@@ -83,7 +84,7 @@ def article_metadata(
     category_override = extra.get("category")
     if isinstance(category_override, str):
         category_override = category_override.strip()
-    category = (details["category"] if details is not None and details["category"] is not None
+    category = (resolved_details["category"] if resolved_details is not None and resolved_details["category"] is not None
                 else category_override or (catalog.category if catalog else ""))
     values = {
         "title": extra.get("title") or default_title,

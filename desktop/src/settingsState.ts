@@ -102,11 +102,22 @@ function parsedUrl(value: string, field: "api-url" | "asr-url", message: string)
   try { return new URL(value) } catch { throw new SettingsValidationError(field, message) }
 }
 
+export function isLoopbackBaseUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(cleanUrl(rawUrl))
+    const host = url.hostname.toLowerCase()
+    return url.protocol === "http:"
+      && (host === "localhost" || host === "127.0.0.1" || host === "[::1]")
+  } catch {
+    return false
+  }
+}
+
 export function validateApiConfiguration(api: Preferences["api"], token: string): Preferences["api"] {
   const normalized = { baseUrl: cleanUrl(api.baseUrl), model: clean(api.model) }
   const message = tr("请输入 HTTPS API 根地址（本机 localhost 可用 HTTP），不要包含账号、查询参数或 /chat/completions")
   const url = parsedUrl(normalized.baseUrl, "api-url", message)
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase())
   if ((url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) || !url.hostname
     || url.username || url.password || /[?#]/.test(normalized.baseUrl)
     || url.pathname.replace(/\/+$/, "").endsWith("/chat/completions")) {
@@ -115,7 +126,7 @@ export function validateApiConfiguration(api: Preferences["api"], token: string)
   if (!normalized.model || bytes(normalized.model) > 256 || controls.test(normalized.model)) {
     throw new SettingsValidationError("api-model", tr("请填写有效的模型名称（最多 256 字节）"))
   }
-  validateToken(clean(token), "api-token", true)
+  validateToken(clean(token), "api-token", !(url.protocol === "http:" && loopback))
   return normalized
 }
 
@@ -156,7 +167,8 @@ export function validateSettingsDraft(value: SettingsDraft): SettingsDraft {
   validatePath(preferences.asr.ffmpegPath, "ffmpeg-path")
   // Even dormant credentials are written when explicitly changed, so validate
   // them before the first write, not only when their provider is selected.
-  validateToken(apiToken, "api-token", preferences.provider === "api")
+  const apiTokenRequired = preferences.provider === "api" && !isLoopbackBaseUrl(preferences.api.baseUrl)
+  validateToken(apiToken, "api-token", apiTokenRequired)
   validateToken(asrToken, "asr-token", false)
   if (preferences.provider === "api") validateApiConfiguration(preferences.api, apiToken)
   if (preferences.asr.enabled) {

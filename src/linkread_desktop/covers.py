@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import re
 import stat
+from threading import Event
+import time
 from urllib.parse import parse_qs, quote, urljoin, urlsplit
 
 import requests
@@ -93,14 +95,17 @@ def remove_local_cover(folder: Path) -> None:
             continue
 
 
-def save_cover_bytes(folder: Path, ext: str, data: bytes) -> Path | None:
+def save_cover_bytes(folder: Path, ext: str, data: bytes, *, create_dir: bool = True) -> Path | None:
     """Atomically write validated cover bytes into an article directory."""
     if (ext not in COVER_EXTENSIONS or not data or len(data) > MAX_COVER_BYTES
             or detect_image_extension(data) != ext):
         return None
     if folder.is_symlink():
         return None
-    folder.mkdir(parents=True, exist_ok=True)
+    if create_dir:
+        folder.mkdir(parents=True, exist_ok=True)
+    elif not folder.is_dir():
+        return None
     target = folder / f"cover{ext}"
     if target.is_symlink():
         return None
@@ -211,6 +216,11 @@ def cover_candidates(source: SourceInfo) -> list[str]:
 
 
 def _read_bounded(response) -> bytes | None:
+    headers = getattr(response, "headers", None)
+    if headers and hasattr(headers, "get"):
+        raw_length = headers.get("Content-Length")
+        if isinstance(raw_length, str) and raw_length.strip().isdigit() and int(raw_length.strip()) > MAX_COVER_BYTES:
+            return None
     if hasattr(response, "iter_content"):
         chunks: list[bytes] = []
         total = 0
@@ -228,16 +238,20 @@ def _read_bounded(response) -> bytes | None:
     return data
 
 
-def fetch_cover_bytes(url: str | None, *, session=None) -> tuple[str, bytes] | None:
+def _fetch_cover_bytes(
+    url: str | None, *, session=None, cancel: Event | None = None, timeout: float = COVER_TIMEOUT_SECONDS,
+) -> tuple[str, bytes] | None:
     """Download a public cover image with strict CDN allowlist, redirect and size checks."""
     current = thumbnail_url(url)
-    if not current:
+    if not current or (cancel is not None and cancel.is_set()):
         return None
     client = session or requests
     try:
         for _ in range(MAX_COVER_REDIRECTS + 1):
+            if cancel is not None and cancel.is_set():
+                return None
             response = client.get(
-                current, headers=_HEADERS, timeout=COVER_TIMEOUT_SECONDS,
+                current, headers=_HEADERS, timeout=timeout,
                 allow_redirects=False, stream=True,
             )
             try:
@@ -269,11 +283,20 @@ def fetch_cover_bytes(url: str | None, *, session=None) -> tuple[str, bytes] | N
     return None
 
 
+def fetch_cover_bytes(url: str | None, *, session=None) -> tuple[str, bytes] | None:
+    """Download a public cover image with strict CDN allowlist, redirect and size checks."""
+    return _fetch_cover_bytes(url, session=session)
+
+
+_DEFAULT_FETCH_COVER_BYTES = fetch_cover_bytes
+
+
 def download_cover(
     urls: str | list[str] | None, folder: Path, *, session=None, overwrite: bool = False,
+    cancel: Event | None = None, wall_budget: float = 12.0,
 ) -> Path | None:
     """Best-effort cover download into an article directory; never raises on failure."""
-    if folder.is_symlink():
+    if folder.is_symlink() or not folder.is_dir() or (cancel is not None and cancel.is_set()):
         return None
     if not overwrite:
         existing = find_local_cover(folder)
@@ -281,14 +304,24 @@ def download_cover(
             return existing
     if not urls:
         return None
+    deadline = time.monotonic() + wall_budget
     candidates = [urls] if isinstance(urls, str) else list(urls)
     for candidate in candidates:
-        fetched = fetch_cover_bytes(candidate, session=session)
-        if fetched is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or (cancel is not None and cancel.is_set()):
+            return None
+        if fetch_cover_bytes is _DEFAULT_FETCH_COVER_BYTES:
+            fetched = _fetch_cover_bytes(
+                candidate, session=session, cancel=cancel,
+                timeout=min(COVER_TIMEOUT_SECONDS, max(1.0, remaining)),
+            )
+        else:
+            fetched = fetch_cover_bytes(candidate, session=session)
+        if fetched is None or (cancel is not None and cancel.is_set()):
             continue
         ext, data = fetched
         try:
-            saved = save_cover_bytes(folder, ext, data)
+            saved = save_cover_bytes(folder, ext, data, create_dir=False)
         except OSError:
             return None
         if saved is not None:

@@ -13,32 +13,30 @@ fi
 
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:/opt/homebrew/opt/node@24/bin:/usr/local/opt/node@24/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-if ! command -v rustup >/dev/null 2>&1; then
-  LINKREAD_INSTALLER="$(mktemp -t linkread-rust)"
-  trap 'rm -f "$LINKREAD_INSTALLER"' EXIT
-  curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 -fsSL \
-    https://sh.rustup.rs -o "$LINKREAD_INSTALLER"
-  /bin/sh "$LINKREAD_INSTALLER" \
-    -y --profile minimal --default-toolchain none --no-modify-path
-  rm -f "$LINKREAD_INSTALLER"
-  trap - EXIT
+if command -v rustup >/dev/null 2>&1; then
+  if LINKREAD_CARGO="$(rustup which --toolchain stable cargo 2>/dev/null)"; then
+    LINKREAD_RUST_BIN="$(dirname -- "$LINKREAD_CARGO")"
+    export PATH="$LINKREAD_RUST_BIN:$PATH"
+    export RUSTUP_TOOLCHAIN=stable
+  fi
 fi
-
-echo "【1/2】安装或更新 Rust stable 工具链..."
-rustup toolchain install stable --profile minimal --no-self-update
-rustup override set stable
-export RUSTUP_TOOLCHAIN=stable
-
-LINKREAD_CARGO="$(rustup which --toolchain stable cargo)"
-LINKREAD_RUST_BIN="$(dirname -- "$LINKREAD_CARGO")"
-export PATH="$LINKREAD_RUST_BIN:$PATH"
 hash -r
 
-echo "当前使用的 Cargo 路径和版本"
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+  echo "未找到本地 Rust 工具链（cargo / rustc）。请先安装 Rust stable 后再运行 dev.sh。" >&2
+  exit 1
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "未找到 npm。请先安装 Node.js 后再运行 dev.sh。" >&2
+  exit 1
+fi
+
+echo "当前使用的 Cargo 与 Rustc 路径和版本"
 command -v cargo
 cargo --version
 rustc --version
 
-echo "【2/2】启动 LinkRead..."
+echo "启动 LinkRead..."
 cd "$LINKREAD_DESKTOP_DIR"
 exec npm run tauri -- dev

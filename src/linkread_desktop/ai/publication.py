@@ -373,6 +373,7 @@ def _use_english_prompt(language: str | None, note: NoteDocument) -> bool:
 def complete_extras(
     note: NoteDocument, existing: ArticleExtras, provider: StructuredProvider, *,
     timeout_seconds: int, progress: ProgressCallback | None = None, cache_dir=None, language: str | None = None,
+    cancel=None,
 ) -> ArticleExtras:
     """Generate only missing article data, then verify every source selection."""
     missing = [name for name in _FIELDS if getattr(existing, name) is None]
@@ -435,7 +436,7 @@ def complete_extras(
         try:
             completed = validated_call(provider, prompt, schema, validate,
                                        timeout_seconds=timeout_seconds, cache_dir=cache_dir,
-                                       stage="publication")
+                                       stage="publication", cancel=cancel)
         except (ValueError, TypeError, KeyError, AttributeError) as first_error:
             hint = _validation_hint(first_error)
             report(progress, "article_ai", f"{labels}未通过结构校验，正在按约束重试一次")
@@ -453,7 +454,7 @@ def complete_extras(
                 )
             completed = validated_call(provider, retry_prompt, schema, validate,
                                        timeout_seconds=timeout_seconds, cache_dir=cache_dir,
-                                       stage="publication")
+                                       stage="publication", cancel=cancel)
         report(progress, "publication_done", f"{labels}已整理完成")
         return completed
     except ProviderError as exc:

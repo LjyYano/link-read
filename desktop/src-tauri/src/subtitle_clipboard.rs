@@ -36,7 +36,10 @@ fn file_path(value: &str) -> Option<PathBuf> {
 }
 
 pub fn resolve_path(value: &str) -> AppResult<PathBuf> {
-    let path = if value.starts_with("file:") {
+    let path = if value
+        .get(..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"))
+    {
         file_path(value).unwrap_or_default()
     } else {
         PathBuf::from(value)
@@ -71,7 +74,13 @@ fn read_pasteboard(board: &objc2_app_kit::NSPasteboard, language: Option<&str>) 
     }
     if !paths.is_empty() { return Ok(ClipboardSubtitles { paths, text: String::new() }); }
     let text = match board.stringForType(text_type) {
-        Some(value) if value.length() <= MAX_SUBTITLE_BYTES => value.to_string(),
+        Some(value) if value.length() <= MAX_SUBTITLE_BYTES => {
+            let text = value.to_string();
+            if text.len() > MAX_SUBTITLE_BYTES {
+                return Err(size_error(language));
+            }
+            text
+        }
         Some(_) => return Err(size_error(language)),
         None => String::new(),
     };

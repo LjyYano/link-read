@@ -1,7 +1,8 @@
 import { tr } from "./language.ts"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ChevronDown, CircleCheck, Clock3, ListTodo, Trash2, X } from "lucide-react"
-import { JobRow, type TaskJob } from "./Home"
+import { ConfirmDialog } from "./ConfirmDialog"
+import { JobRow, type TaskJob } from "./JobCard"
 import { groupTasks, reviewedTerminalTaskIds, unreviewedTaskIds } from "./taskCenterState"
 import type { Article } from "./api"
 import type { SettingsTarget } from "./Settings"
@@ -43,6 +44,7 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
   const [completedOpen, setCompletedOpen] = useState(Boolean(initialCompletedArticleId))
   const [clearing, setClearing] = useState(false)
   const [clearError, setClearError] = useState("")
+  const [confirmClearIds, setConfirmClearIds] = useState<string[]>()
   const announced = useRef(new Set(unseen))
   const acknowledge = useRef(onReviewed)
   acknowledge.current = onReviewed
@@ -132,14 +134,25 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
     return () => root.removeEventListener("scroll", check)
   }, [attentionOpen, groups.attention, reviewedIds])
 
-  async function clearReviewed() {
+  function clearReviewed() {
     if (clearing || !removable.length) return
-    const selected = [...removable]
-    if (!window.confirm(tr("清理 {0} 条已查看的任务记录？\n仅移除这些已结束的记录，已保存的字幕和处理缓存不会删除。", selected.length))) return
+    setConfirmClearIds([...removable])
+  }
+
+  async function confirmClearReviewed() {
+    if (!confirmClearIds?.length || clearing) return
+    const selected = confirmClearIds
     setClearing(true)
     setClearError("")
-    try { await onClearReviewed(selected) } catch (error) { setClearError(String(error)) }
-    finally { setClearing(false) }
+    try {
+      await onClearReviewed(selected)
+      setConfirmClearIds(undefined)
+    } catch (error) {
+      setClearError(String(error))
+      throw error
+    } finally {
+      setClearing(false)
+    }
   }
 
   function record(task: TaskJob) {
@@ -240,10 +253,20 @@ export function TaskCenter({ jobs, completed, initialTaskId, initialCompletedArt
     <footer className="task-center-footer">
       {clearError && <p className="task-center-error" role="alert">{clearError}</p>}
       <button className="text-button" type="button" disabled={clearing || !removable.length}
-        onClick={() => void clearReviewed()} title={tr("仅清理已查看且已结束的任务记录，保留字幕与缓存")}>
+        onClick={clearReviewed} title={tr("仅清理已查看且已结束的任务记录，保留字幕与缓存")}>
         <Trash2 size={14} aria-hidden="true" />{clearing ? tr("正在清理…") : tr("清理已查看记录")}
         {removable.length > 0 && <span>({removable.length})</span>}
       </button>
     </footer>
+    {confirmClearIds && (
+      <ConfirmDialog
+        title={tr("清理已查看记录")}
+        message={tr("清理 {0} 条已查看的任务记录？\n仅移除这些已结束的记录，已保存的字幕和处理缓存不会删除。", confirmClearIds.length)}
+        confirmLabel={tr("清理已查看记录")}
+        danger
+        onConfirm={confirmClearReviewed}
+        onCancel={() => setConfirmClearIds(undefined)}
+      />
+    )}
   </dialog>
 }

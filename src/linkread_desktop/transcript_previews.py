@@ -4,6 +4,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import shutil
+import time
 
 from .article_state import archive_mutation
 from .errors import LinkReadError
@@ -21,6 +23,34 @@ from .workspace import _source_key, find_workspace
 
 PREVIEW_DIRECTORY = ".transcript-previews"
 PREVIEW_ID = re.compile(r"[0-9a-f]{64}\Z")
+MAX_PREVIEW_AGE_SECONDS = 14 * 24 * 3600
+
+
+def cleanup_stale_previews(library: Path, *, max_age_seconds: int = MAX_PREVIEW_AGE_SECONDS) -> None:
+    """Best-effort cleanup of old temporary preview snapshots (>14 days)."""
+    root = library / PREVIEW_DIRECTORY
+    if library.is_symlink() or root.is_symlink() or not root.is_dir():
+        return
+    cutoff = time.time() - max_age_seconds
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_dir():
+            continue
+        if not PREVIEW_ID.fullmatch(entry.name):
+            continue
+        try:
+            newest = entry.stat(follow_symlinks=False).st_mtime
+            for child_name in ("request.json", "preview.html", "transcript.json"):
+                child = entry / child_name
+                if child.exists() and not child.is_symlink():
+                    newest = max(newest, child.stat(follow_symlinks=False).st_mtime)
+            if newest < cutoff:
+                shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            continue
 
 
 def snapshot_id(document: TranscriptDocument) -> str:

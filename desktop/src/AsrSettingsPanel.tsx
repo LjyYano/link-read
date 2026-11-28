@@ -49,6 +49,17 @@ export function AsrSettingsPanel({ value, onChange, token, onToken, apiToken, sa
   const [checking, setChecking] = useState(false)
   const [locating, setLocating] = useState(false)
   const [dependencyError, setDependencyError] = useState<{ configuredPath: string; message: string }>()
+  const [maxMinutesInput, setMaxMinutesInput] = useState(() =>
+    Number.isFinite(value.maxMinutes) ? String(value.maxMinutes) : "",
+  )
+  useEffect(() => {
+    if (!Number.isFinite(value.maxMinutes)) return
+    const nextText = String(value.maxMinutes)
+    setMaxMinutesInput(current => {
+      const parsed = current.trim() === "" ? Number.NaN : Number(current.trim())
+      return parsed === value.maxMinutes ? current : nextText
+    })
+  }, [value.maxMinutes])
   const environment = ffmpeg?.configuredPath === value.ffmpegPath ? ffmpeg.status : undefined
   const environmentError = dependencyError?.configuredPath === value.ffmpegPath ? dependencyError.message : ""
   const environmentReady = !checking && environment?.state === "ready"
@@ -264,8 +275,13 @@ export function AsrSettingsPanel({ value, onChange, token, onToken, apiToken, sa
             <label className="settings-label" htmlFor="asr-max-minutes">{tr("时长上限")}</label>
             <div className="settings-field-control">
               <input id="asr-max-minutes" type="number" min={1} max={720} step={1} aria-label={tr("单次转写上限（分钟）")}
-                value={value.maxMinutes} disabled={disabled}
-                onChange={event => update({ ...value, maxMinutes: Number(event.target.value) })} />
+                value={maxMinutesInput} disabled={disabled}
+                onChange={event => {
+                  const raw = event.target.value
+                  setMaxMinutesInput(raw)
+                  const trimmed = raw.trim()
+                  update({ ...value, maxMinutes: trimmed === "" ? Number.NaN : Number(trimmed) })
+                }} />
             </div>
           </div>
         </div>

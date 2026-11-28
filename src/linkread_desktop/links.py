@@ -13,7 +13,11 @@ BILIBILI_HOSTS = {"bilibili.com", "www.bilibili.com", "m.bilibili.com"}
 SHORT_HOSTS = {"b23.tv", "www.b23.tv"}
 APPLE_PODCAST_HOSTS = {"podcasts.apple.com"}
 BVID = re.compile(r"BV[0-9A-Za-z]{10}\Z")
-_URL = re.compile(r'https?://[^\s<>"\[\]【】「」]+', re.IGNORECASE)
+_URL = re.compile(
+    r'https?://podcasts\.apple\.com/(?:[A-Za-z]{2}/)?podcast/(?:(?:(?!\]\()[^/\s<>"])+/)?id[1-9][0-9]*[^\s<>"\[\]【】「」]*'
+    r'|https?://[^\s<>"\[\]【】「」]+',
+    re.IGNORECASE,
+)
 _ESCAPES = re.compile(r'\\+([:/?.=&_#%\-])')
 _AMPERSAND_ENTITY = re.compile(r'&(?:amp|#38|#x26);', re.IGNORECASE | re.ASCII)
 
@@ -42,11 +46,18 @@ def _parsed(source: str):
         raise UnsupportedSourceError("请输入 YouTube、B 站视频或 Apple Podcasts 单集 HTTPS 链接") from exc
 
 
+def _clean_path(path: str) -> list[str]:
+    trimmed = path[:-1] if path.endswith("/") else path
+    if "//" in trimmed:
+        raise UnsupportedSourceError("链接路径包含多余的斜杠")
+    return [segment for segment in trimmed.split("/") if segment]
+
+
 def apple_podcast_ids(source: str) -> tuple[str, str, str]:
     """Return show ID, episode ID and storefront; never guess an episode from a show."""
     p = _parsed(source)
-    if any(unquote(part) in {".", ".."} for part in p.path.split("/")):
-        raise UnsupportedSourceError("播客链接不能包含相对路径")
+    if "//" in p.path or any(unquote(part) in {".", ".."} for part in p.path.split("/")):
+        raise UnsupportedSourceError("播客链接不能包含相对或空路径")
     match = re.fullmatch(r"/(?:(?P<country>[A-Za-z]{2})/)?podcast/(?:[^/]+/)?id(?P<show>[1-9][0-9]{0,19})/?", p.path)
     episodes = parse_qs(p.query, keep_blank_values=True).get("i", [])
     if (p.hostname not in APPLE_PODCAST_HOSTS or match is None or len(episodes) != 1
@@ -59,6 +70,8 @@ def bilibili_part(source: str) -> tuple[str, int]:
     p = _parsed(source)
     if p.hostname not in BILIBILI_HOSTS:
         raise UnsupportedSourceError("不是受支持的 B 站视频链接")
+    if "//" in p.path:
+        raise UnsupportedSourceError("B 站链接路径无效")
     query = parse_qs(p.query, keep_blank_values=True)
     path = re.fullmatch(r"/video/(BV[0-9A-Za-z]{10})/?", p.path)
     ids = query.get("bvid", [])
@@ -88,13 +101,13 @@ def canonical_link(source: str) -> str:
         bvid, part = bilibili_part(source)
         return f"https://www.bilibili.com/video/{bvid}?p={part}"
     if p.hostname in SHORT_HOSTS:
-        if not re.fullmatch(r"/[A-Za-z0-9_-]+/?", p.path):
+        if "//" in p.path or not re.fullmatch(r"/[A-Za-z0-9_-]{1,64}/?", p.path):
             raise UnsupportedSourceError("B 站短链接格式不正确")
         return f"https://b23.tv/{p.path.strip('/')}"
-    path = p.path.strip("/").split("/")
+    path = _clean_path(p.path)
     if p.hostname in {"youtu.be", "www.youtu.be"} and len(path) == 1:
         video = path[0]
-    elif p.path.rstrip("/") == "/watch":
+    elif p.path.rstrip("/") == "/watch" and "//" not in p.path:
         values = parse_qs(p.query, keep_blank_values=True).get("v", [])
         video = values[0] if len(values) == 1 else ""
     elif len(path) == 2 and path[0] in {"shorts", "live", "embed"}:

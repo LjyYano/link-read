@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from os.path import relpath
 from pathlib import Path
-from threading import Thread
+from threading import Event, Thread
 from urllib.parse import quote
 
 from .ai.checkpoints import RunProvider
@@ -51,16 +51,23 @@ def _run_input(
     return folder, document, reused
 
 
-def _run_note(folder: Path, raw: TranscriptDocument) -> tuple[Path, NoteDocument | None]:
+def _run_note(
+    folder: Path, raw: TranscriptDocument, *, allow_corrupt_replace: bool = False,
+) -> tuple[Path, NoteDocument | None]:
     note_path = folder / "note.json"
     candidates = []
     for path in (folder / "note-polished.json", note_path):
         if path.exists() or path.is_symlink():
             if path.is_symlink() or not path.is_file():
                 raise LinkReadError(f"笔记路径不可用：{path}")
-            note = load_document(path)
-            if not isinstance(note, NoteDocument) or note.transcript != raw:
-                raise LinkReadError(f"已保存的笔记与原始字幕不匹配：{path}")
+            try:
+                note = load_document(path)
+                if not isinstance(note, NoteDocument) or note.transcript != raw:
+                    raise LinkReadError(f"已保存的笔记与原始字幕不匹配：{path}")
+            except LinkReadError:
+                if allow_corrupt_replace:
+                    continue
+                raise
             candidates.append((path, note))
     if candidates:
         return max(candidates, key=lambda candidate: len(candidate[1].analysis.reading_paragraphs))
@@ -90,9 +97,15 @@ def generate_article(
     max_chars: int | None = None, timeout: int = 300, jobs: int = 4, polish: bool = True,
     cookies_from_browser: str | None = None, cookies_file: Path | None = None,
     asr: AsrConfig | None = None, asr_cache_dir: Path | None = None, page_language: PageLanguage = "original",
+    cancel: Event | None = None, allow_corrupt_replace: bool = False,
 ) -> Path:
     """Reuse archived stages and publish the desktop article only after success."""
     started = time.monotonic()
+    cancel_event = cancel or Event()
+    sibling_cancel = Event()
+    if cancel_event.is_set():
+        sibling_cancel.set()
+    cover_cancel = Event()
     agent = RunProvider(agent, jobs, progress=progress)
     root = library.expanduser()
     output = output.expanduser() if output is not None else None
@@ -115,11 +128,12 @@ def generate_article(
         if candidates:
             cover_thread = Thread(
                 target=download_cover, args=(candidates, folder),
+                kwargs={"cancel": cover_cancel},
                 name="linkread-cover", daemon=True,
             )
             cover_thread.start()
 
-    note_path, saved_note = _run_note(folder, raw)
+    note_path, saved_note = _run_note(folder, raw, allow_corrupt_replace=allow_corrupt_replace)
     cache_dir = folder / ".ai-checkpoints"
     extras = load_extras(note_path)
     target_language = _output_language(raw, page_language)
@@ -131,16 +145,28 @@ def generate_article(
     polish_max_chars = 5000 if max_chars is None else max_chars
     translation_max_chars = 5000 if max_chars is None else min(max_chars, 5000)
 
+    def _run_analysis(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except BaseException:
+            sibling_cancel.set()
+            cover_cancel.set()
+            raise
+
     def analyze(workers):
-        result = enrich(raw, agent, max_chars=max_chars, timeout_seconds=timeout,
-                        progress=progress, workers=workers, cache_dir=cache_dir, **language_options)
+        result = _run_analysis(
+            enrich, raw, agent, max_chars=max_chars, timeout_seconds=timeout,
+            progress=progress, workers=workers, cache_dir=cache_dir, cancel=cancel_event, **language_options,
+        )
         _save_json(result, note_path)
         report(progress, "ai_saved", "AI 提炼完成，已保存可复用的笔记")
         return result
 
     def publish(document):
-        result = complete_extras(document, extras, agent, timeout_seconds=timeout, progress=progress,
-                                 cache_dir=cache_dir, **language_options)
+        result = complete_extras(
+            document, extras, agent, timeout_seconds=timeout, progress=progress,
+            cache_dir=cache_dir, cancel=cancel_event, **language_options,
+        )
         # Save this successful independent stage even if proofreading later fails.
         if result is not extras:
             save_missing_extras(note_path, extras, result)
@@ -149,68 +175,82 @@ def generate_article(
         return result
 
     def translate(workers):
-        return prepare_edition(folder, raw, page_language, agent, max_chars=translation_max_chars,
-                               timeout_seconds=timeout, workers=workers, progress=progress, cache_dir=cache_dir)
+        return prepare_edition(
+            folder, raw, page_language, agent, max_chars=translation_max_chars,
+            timeout_seconds=timeout, workers=workers, progress=progress, cache_dir=cache_dir, cancel=sibling_cancel,
+        )
 
     saved_edition = load_edition(folder, raw)
     edition_ready = saved_edition is not None and saved_edition.language == page_language
     edition = saved_edition if edition_ready else None
 
     note = saved_note
-    if translating and not edition_ready and jobs >= 2:
-        # Translation depends only on raw cues; overlap it with analysis and
-        # publication inside the same shared global concurrency budget.
-        report(progress, "parallel_start", "提炼与字幕翻译同时开始，使用统一并发上限")
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-translate") as pool:
-            translation_future = pool.submit(translate, jobs)
-            if note is None:
-                note = analyze(min(3, jobs))
-            else:
-                report(progress, "reuse", "已复用完整的 AI 提炼结果")
-            publication = pool.submit(publish, note)
-            completed = publication.result()
-            edition = translation_future.result()
-    elif note is None and effective_polish and jobs >= 3:
-        # Punctuation edits depend only on source text, not its AI summary. Start
-        # immediately, then split verified text at the real chapter boundaries.
-        report(progress, "parallel_start", "提炼与正文校对同时开始，使用统一并发上限")
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-stages") as pool:
-            early_reading = pool.submit(polish_reading, reading_seed(raw, agent), agent,
-                max_chars=polish_max_chars, timeout_seconds=timeout, progress=progress,
-                workers=jobs, cache_dir=cache_dir)
-            note = analyze(min(3, jobs))
-            publication = pool.submit(publish, note)
-            note = attach_reading(note, early_reading.result())
-            _save_json(note, note_path)
-            completed = publication.result()
-    else:
-        if note is None:
-            note = analyze(jobs)
-        else:
-            report(progress, "reuse", "已复用完整的 AI 提炼结果")
-        needs_polish = effective_polish and not note.analysis.reading_paragraphs
-        needs_publication = any(getattr(extras, name) is None for name in ("reading", "mindmap", "quotes", "catalog"))
-        if needs_polish and needs_publication and jobs >= 2:
-            report(progress, "parallel_start", "并行执行全文校对与阅读信息生成")
-            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-publish") as pool:
+    try:
+        if translating and not edition_ready and jobs >= 2:
+            # Translation depends only on raw cues; overlap it with analysis and
+            # publication inside the same shared global concurrency budget.
+            report(progress, "parallel_start", "提炼与字幕翻译同时开始，使用统一并发上限")
+            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-translate") as pool:
+                translation_future = pool.submit(translate, jobs)
+                if note is None:
+                    note = analyze(min(3, jobs))
+                else:
+                    report(progress, "reuse", "已复用完整的 AI 提炼结果")
                 publication = pool.submit(publish, note)
-                proof = polish_reading(reading_seed(raw, agent) if jobs >= 3 else note, agent,
+                completed = publication.result()
+                edition = translation_future.result()
+        elif note is None and effective_polish and jobs >= 3:
+            # Punctuation edits depend only on source text, not its AI summary. Start
+            # immediately, then split verified text at the real chapter boundaries.
+            report(progress, "parallel_start", "提炼与正文校对同时开始，使用统一并发上限")
+            with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-stages") as pool:
+                early_reading = pool.submit(
+                    polish_reading, reading_seed(raw, agent), agent,
                     max_chars=polish_max_chars, timeout_seconds=timeout, progress=progress,
-                    workers=jobs, cache_dir=cache_dir)
-                note = attach_reading(note, proof) if jobs >= 3 else proof
+                    workers=jobs, cache_dir=cache_dir, cancel=cancel_event,
+                )
+                note = analyze(min(3, jobs))
+                publication = pool.submit(publish, note)
+                note = attach_reading(note, early_reading.result())
                 _save_json(note, note_path)
                 completed = publication.result()
         else:
-            if needs_polish:
-                proof = polish_reading(reading_seed(raw, agent) if jobs >= 3 else note, agent,
-                    max_chars=polish_max_chars, timeout_seconds=timeout, progress=progress,
-                    workers=jobs, cache_dir=cache_dir)
-                note = attach_reading(note, proof) if jobs >= 3 else proof
-                _save_json(note, note_path)
-            completed = publish(note)
-        if not needs_polish:
-            report(progress, "polish_reuse" if effective_polish else "polish_skipped",
-                   "已复用完整校对正文" if effective_polish else "已跳过全文校对")
+            if note is None:
+                note = analyze(jobs)
+            else:
+                report(progress, "reuse", "已复用完整的 AI 提炼结果")
+            needs_polish = effective_polish and not note.analysis.reading_paragraphs
+            needs_publication = any(getattr(extras, name) is None for name in ("reading", "mindmap", "quotes", "catalog"))
+            if needs_polish and needs_publication and jobs >= 2:
+                report(progress, "parallel_start", "并行执行全文校对与阅读信息生成")
+                with ThreadPoolExecutor(max_workers=2, thread_name_prefix="linkread-publish") as pool:
+                    publication = pool.submit(publish, note)
+                    proof = polish_reading(
+                        reading_seed(raw, agent) if jobs >= 3 else note, agent,
+                        max_chars=polish_max_chars, timeout_seconds=timeout, progress=progress,
+                        workers=jobs, cache_dir=cache_dir, cancel=cancel_event,
+                    )
+                    note = attach_reading(note, proof) if jobs >= 3 else proof
+                    _save_json(note, note_path)
+                    completed = publication.result()
+            else:
+                if needs_polish:
+                    proof = polish_reading(
+                        reading_seed(raw, agent) if jobs >= 3 else note, agent,
+                        max_chars=polish_max_chars, timeout_seconds=timeout, progress=progress,
+                        workers=jobs, cache_dir=cache_dir, cancel=cancel_event,
+                    )
+                    note = attach_reading(note, proof) if jobs >= 3 else proof
+                    _save_json(note, note_path)
+                completed = publish(note)
+            if not needs_polish:
+                report(progress, "polish_reuse" if effective_polish else "polish_skipped",
+                       "已复用完整校对正文" if effective_polish else "已跳过全文校对")
+    except BaseException:
+        cover_cancel.set()
+        if cancel_event.is_set():
+            sibling_cancel.set()
+        raise
     report(progress, "article_ai_done", "AI 整理与阅读信息生成完成")
     completed = load_extras(note_path)
     if edition is None:
@@ -228,6 +268,9 @@ def generate_article(
     # The archived page carries the cover when it arrives within the existing budget.
     if cover_thread is not None:
         cover_thread.join(timeout=12)
+        if cover_thread.is_alive():
+            cover_cancel.set()
+            cover_thread.join(timeout=0.5)
     render_started = time.monotonic()
     metadata = article_metadata(note, note_path, overview=completed.reading)
     write_text(article, render_html(note, extras=completed, home_href=home_href,

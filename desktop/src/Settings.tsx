@@ -1,48 +1,58 @@
-import { tr } from "./language.ts"
-import type { LanguageSettings } from "./language.ts"
-import { LanguageSettingsCard } from "./LanguageSettingsCard"
-import { isTauri } from "@tauri-apps/api/core"
-import { getCurrentWindow } from "@tauri-apps/api/window"
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type RefObject } from "react"
-import { ArrowLeft, LoaderCircle } from "lucide-react"
+import { ArrowLeft, FolderOpen, LoaderCircle } from "lucide-react"
 import {
-  checkTool, deleteApiToken, deleteAsrToken, loadApiToken, loadAsrToken, providerNames,
+  checkTool, deleteApiToken, deleteAsrToken, loadApiToken, loadAsrToken, pickExecutable, providerNames,
   saveApiToken, saveAsrToken, testApiConnection, type Provider, type ToolStatus,
 } from "./api"
 import { AsrSettingsPanel } from "./AsrSettingsPanel"
+import { ConfirmDialog } from "./ConfirmDialog"
 import { ConnectionRevision } from "./connectionState"
+import { tr, type LanguageSettings } from "./language.ts"
+import { LanguageSettingsCard } from "./LanguageSettingsCard"
 import { SettingsHelp } from "./SettingsHelp"
 import { SettingsSecretField } from "./SettingsSecretField"
-import { YoutubeCookiesPanel } from "./YoutubeCookiesPanel"
-import { defaultYoutubeCookies } from "./youtubeCookies"
 import type { GenerationSettingsGate } from "./generationSettings"
 import {
-  saveSettingsDraft, settingsDraftEqual, SettingsSaveError, SettingsValidationError,
+  isLoopbackBaseUrl, saveSettingsDraft, settingsDraftEqual, SettingsSaveError, SettingsValidationError,
   validateApiConfiguration, type Preferences, type SettingsDraft,
 } from "./settingsState"
+import type { ThemeMode } from "./themeState"
+import { YoutubeCookiesPanel } from "./YoutubeCookiesPanel"
+import { defaultYoutubeCookies } from "./youtubeCookies"
 import "./settings.css"
 
 export type SettingsTarget = "ai" | "asr" | "youtube"
+export type SettingsLeaveGuard = {
+  confirm: (proceed: () => void) => boolean
+  isDirty: () => boolean
+}
 
 export function Settings({ preferences, onSave, onBack, onTokenChanged, settingsGate, settingsRecovery,
-  leaveGuard, target, language, onLanguageChange, languageError }: {
+  leaveGuard, target, language, onLanguageChange, languageError, theme, onThemeChange }: {
   preferences: Preferences
-  onSave: (preferences: Preferences) => void
+  onSave: (preferences: Preferences) => Promise<void> | void
   onBack: () => void
   onTokenChanged: () => void
   settingsGate: GenerationSettingsGate
   settingsRecovery: boolean
-  leaveGuard: RefObject<(() => boolean) | null>
+  leaveGuard: RefObject<SettingsLeaveGuard | null>
   target?: SettingsTarget
   language: LanguageSettings
-  onLanguageChange: (language: LanguageSettings) => void
+  onLanguageChange: (language: LanguageSettings) => void | Promise<void>
   languageError: string
+  theme: ThemeMode
+  onThemeChange: (theme: ThemeMode) => void | Promise<void>
 }) {
   const [draft, setDraft] = useState<SettingsDraft>(() => ({ preferences, apiToken: "", asrToken: "" }))
   const [baseline, setBaseline] = useState(draft)
+  const [draftLanguage, setDraftLanguage] = useState<LanguageSettings>(language)
+  const [baselineLanguage, setBaselineLanguage] = useState<LanguageSettings>(language)
+  const [draftTheme, setDraftTheme] = useState<ThemeMode>(theme)
+  const [baselineTheme, setBaselineTheme] = useState<ThemeMode>(theme)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState("")
   const [saving, setSaving] = useState(false)
+  const [pickingTool, setPickingTool] = useState(false)
   const [testing, setTesting] = useState(false)
   const [asrTesting, setAsrTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string }>()
@@ -50,7 +60,10 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   const [toolError, setToolError] = useState("")
   const [error, setError] = useState("")
   const [savedNotice, setSavedNotice] = useState(false)
+  const [confirmClearKind, setConfirmClearKind] = useState<"apiToken" | "asrToken">()
+  const [pendingLeaveAction, setPendingLeaveAction] = useState<() => void>()
   const keyLoadRevision = useRef(0)
+  const toolPickRevision = useRef(0)
   const preserveLoadDraft = useRef(false)
   const connectionRevision = useRef(new ConnectionRevision())
   const connectionIdentity = useRef("")
@@ -58,13 +71,19 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   const savingNow = useRef(false)
   const testingNow = useRef(false)
   const dirty = !settingsDraftEqual(draft, baseline)
+    || draftLanguage.interfaceLanguage !== baselineLanguage.interfaceLanguage
+    || draftLanguage.pageLanguage !== baselineLanguage.pageLanguage
+    || draftTheme !== baselineTheme
   const latest = useRef({ dirty, saving, asrTesting, onBack })
   latest.current = { dirty, saving, asrTesting, onBack }
-  const closing = useRef(false)
   const { provider, paths, api, asr } = draft.preferences
   const youtubeCookies = draft.preferences.youtubeCookies ?? defaultYoutubeCookies
   const disabled = loading || saving || Boolean(loadError)
   const pendingTarget = useRef(target)
+  const currentDraft = useRef(draft)
+  currentDraft.current = draft
+  const currentDisabled = useRef(disabled)
+  currentDisabled.current = disabled
 
   useLayoutEffect(() => {
     const destination = pendingTarget.current
@@ -100,16 +119,18 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
   const testIdentity = useRef("")
   const currentTestResult = testIdentity.current === identity ? testResult : undefined
 
-  function requestLeave() {
+  function requestLeave(proceed: () => void): boolean {
     if (savingNow.current || latest.current.saving) return false
-    const notices = []
-    if (latest.current.dirty) notices.push(tr("有未保存的修改，离开后将放弃这些修改。"))
-    if (latest.current.asrTesting) notices.push(tr("语音测试仍在进行，离开不会取消已提交的云端测试。"))
-    return notices.length === 0 || window.confirm(notices.join("\n") + tr("\n仍要离开设置？"))
+    if (!latest.current.dirty && !latest.current.asrTesting) return true
+    setPendingLeaveAction(() => proceed)
+    return false
   }
 
   useLayoutEffect(() => {
-    leaveGuard.current = requestLeave
+    leaveGuard.current = {
+      confirm: requestLeave,
+      isDirty: () => savingNow.current || latest.current.saving || latest.current.dirty || latest.current.asrTesting,
+    }
     return () => { leaveGuard.current = null }
   }, [leaveGuard])
 
@@ -119,6 +140,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
     return () => {
       mounted.current = false
       keyLoadRevision.current++
+      toolPickRevision.current++
       connectionRevision.current.invalidate()
     }
   }, [])
@@ -132,26 +154,13 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
       latest.current.onBack()
     }
     function beforeUnload(event: BeforeUnloadEvent) {
-      if (closing.current || (!latest.current.dirty && !savingNow.current && !latest.current.asrTesting)) return
+      if (!latest.current.dirty && !savingNow.current && !latest.current.asrTesting) return
       event.preventDefault()
       event.returnValue = ""
     }
     window.addEventListener("keydown", onKeyDown)
     window.addEventListener("beforeunload", beforeUnload)
-    let active = true
-    let unlisten: (() => void) | undefined
-    if (isTauri()) {
-      void getCurrentWindow().onCloseRequested(event => {
-        if (!requestLeave()) event.preventDefault()
-        else closing.current = true
-      }).then(cleanup => {
-        if (active) unlisten = cleanup
-        else cleanup()
-      }).catch(() => { /* Browser navigation still retains beforeunload protection. */ })
-    }
     return () => {
-      active = false
-      unlisten?.()
       window.removeEventListener("keydown", onKeyDown)
       window.removeEventListener("beforeunload", beforeUnload)
     }
@@ -222,6 +231,29 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
     }
   }
 
+  async function chooseExecutable(tool: "codex" | "claude") {
+    if (disabled || pickingTool) return
+    const rev = ++toolPickRevision.current
+    const draftAtSelection = currentDraft.current
+    setPickingTool(true)
+    setError("")
+    try {
+      const selected = await pickExecutable(tr("选择 {0} 可执行文件", providerNames[tool]))
+      if (selected && mounted.current && !currentDisabled.current
+        && toolPickRevision.current === rev && currentDraft.current === draftAtSelection
+        && currentDraft.current.preferences.provider === tool) {
+        update(current => ({
+          ...current,
+          preferences: { ...current.preferences, paths: { ...current.preferences.paths, [tool]: selected } },
+        }))
+      }
+    } catch (failure) {
+      if (mounted.current && toolPickRevision.current === rev) setError(String(failure))
+    } finally {
+      if (mounted.current) setPickingTool(false)
+    }
+  }
+
   async function tryConnection() {
     if (disabled || testingNow.current || savingNow.current) return
     testingNow.current = true
@@ -243,10 +275,9 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
     }
   }
 
-  async function clearCredential(kind: "apiToken" | "asrToken") {
+  async function executeClearCredential(kind: "apiToken" | "asrToken") {
     if (disabled || savingNow.current || testing || asrTesting) return
     const label = kind === "apiToken" ? tr("AI API 密钥") : tr("语音 API 密钥")
-    if (!window.confirm(tr("立即删除本机保存的{0}？\n取消设置不会恢复已删除的密钥。", label))) return
     savingNow.current = true
     setSaving(true)
     setError("")
@@ -259,9 +290,12 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
       connectionRevision.current.invalidate()
       setTestResult(undefined)
       setSavedNotice(false)
+      setConfirmClearKind(undefined)
       if (kind === "apiToken") onTokenChanged()
     } catch {
-      if (mounted.current) setError(tr("删除{0}失败，原有密钥仍保留。请重试。", label))
+      const message = tr("删除{0}失败，原有密钥仍保留。请重试。", label)
+      if (mounted.current) setError(message)
+      throw new Error(message)
     } finally {
       savingNow.current = false
       if (mounted.current) setSaving(false)
@@ -280,8 +314,18 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
         saveApiToken, deleteApiToken, saveAsrToken, deleteAsrToken, savePreferences: onSave,
       }))
       if (!mounted.current) return
+      if (draftLanguage.interfaceLanguage !== baselineLanguage.interfaceLanguage
+        || draftLanguage.pageLanguage !== baselineLanguage.pageLanguage) {
+        await onLanguageChange(draftLanguage)
+      }
+      if (draftTheme !== baselineTheme) {
+        await onThemeChange(draftTheme)
+      }
+      if (!mounted.current) return
       setDraft(saved)
       setBaseline(saved)
+      setBaselineLanguage(draftLanguage)
+      setBaselineTheme(draftTheme)
       setSavedNotice(true)
       onTokenChanged()
     } catch (failure) {
@@ -297,6 +341,13 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
     }
   }
 
+  const canTestConnection = Boolean(draft.apiToken.trim()) || isLoopbackBaseUrl(api.baseUrl)
+  const leaveNotices = [
+    ...(dirty ? [tr("有未保存的修改，离开后将放弃这些修改。")] : []),
+    ...(asrTesting ? [tr("语音测试仍在进行，离开不会取消已提交的云端测试。")] : []),
+  ]
+  const clearLabel = confirmClearKind === "apiToken" ? tr("AI API 密钥") : tr("语音 API 密钥")
+
   return <section className="settings-page" aria-labelledby="settings-heading">
     <header className="settings-heading">
       <button className="icon-button settings-back" type="button" aria-label={tr("返回")} title={tr("返回")} disabled={saving} onClick={onBack}>
@@ -310,21 +361,30 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
         <button type="button" className="text-button" disabled={loading || saving}
           onClick={() => void readKeys(preserveLoadDraft.current)}>{tr("重新读取")}</button>
       </div>}
-      <LanguageSettingsCard value={language} onChange={onLanguageChange} error={languageError} />
+      <LanguageSettingsCard
+        value={draftLanguage}
+        onChange={next => { setSavedNotice(false); setError(""); setDraftLanguage(next) }}
+        theme={draftTheme}
+        onThemeChange={next => { setSavedNotice(false); setError(""); setDraftTheme(next) }}
+        disabled={disabled}
+        error={languageError}
+      />
       <section className="settings-card" aria-labelledby="settings-ai-heading">
-        <header className="settings-card-header">
+        <header className="settings-card-header settings-card-header-provider">
           <div className="settings-card-title">
             <h2 id="settings-ai-heading">{tr("AI 生成")}</h2>
             <SettingsHelp label={tr("AI 工具说明")}>
-              {tr("自定义 API 使用 OpenAI 兼容接口；地址填写 API 根地址，模型填写服务商提供的模型 ID。 Codex 和 Claude Code 使用本机已安装的工具，绿点仅表示找到程序。 密钥保存在本机私有文件中。")}
+              {tr("自定义 API 使用 OpenAI 兼容接口；地址填写 API 根地址，模型填写服务商提供的模型 ID。本机 localhost/127.0.0.1 服务可留空密钥。 Codex 和 Claude Code 使用本机已安装的工具，绿点仅表示找到程序。 密钥保存在本机私有文件中。")}
             </SettingsHelp>
           </div>
           <div className="settings-provider" role="radiogroup" aria-label={tr("默认 AI 工具")} id="provider">
-            {(["api", "codex", "claude"] as Provider[]).map(value => <label key={value} className={provider === value ? "is-selected" : ""}>
-              <input type="radio" name="ai-provider" value={value} checked={provider === value} disabled={disabled}
-                onChange={() => update(current => ({ ...current, preferences: { ...current.preferences, provider: value } }), true)} />
-              <span>{providerNames[value]}</span>
-            </label>)}
+            {(["api", "codex", "claude"] as Provider[]).map(value => (
+              <label key={value} className={[provider === value ? "is-selected" : "", disabled ? "is-disabled" : ""].filter(Boolean).join(" ")}>
+                <input type="radio" name="ai-provider" value={value} checked={provider === value} disabled={disabled}
+                  onChange={() => update(current => ({ ...current, preferences: { ...current.preferences, provider: value } }), true)} />
+                <span>{providerNames[value]}</span>
+              </label>
+            ))}
           </div>
         </header>
         <div className="settings-card-body">
@@ -347,10 +407,10 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
             </label>
             <SettingsSecretField id="api-token" label={tr("API 密钥")} value={draft.apiToken} savedValue={baseline.apiToken}
               onChange={apiToken => update(current => ({ ...current, apiToken }), true)}
-              onClear={() => void clearCredential("apiToken")} disabled={disabled} clearDisabled={testing || asrTesting} />
+              onClear={() => setConfirmClearKind("apiToken")} disabled={disabled} clearDisabled={testing || asrTesting} />
             <div className="settings-card-footer settings-connect-row">
               <button className={currentTestResult?.ok ? "secondary connection-ok" : "secondary"} type="button"
-                disabled={disabled || testing || !draft.apiToken.trim()}
+                disabled={disabled || testing || !canTestConnection}
                 title={currentTestResult?.ok ? tr("重新测试当前配置") : tr("测试当前地址、模型和密钥")}
                 onClick={() => void tryConnection()}>
                 {testing ? <LoaderCircle size={15} className="spin" aria-hidden="true" />
@@ -361,14 +421,22 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
             <span className="sr-only" role="status">{currentTestResult?.ok ? tr("已连接") : ""}</span>
             {currentTestResult && !currentTestResult.ok && <p className="settings-test-error" role="alert">{currentTestResult.message}</p>}
           </> : <>
-            <label className="settings-field" htmlFor={`${provider}-path`}>
-              <span className="settings-label">{tr("程序路径")}</span>
-              <input id={`${provider}-path`} type="text" aria-label={tr("{0} 路径", providerNames[provider])} disabled={disabled}
-                placeholder={toolInfo?.executable || tr("留空自动查找")} value={paths[provider]} autoComplete="off" spellCheck={false}
-                onChange={event => update(current => ({ ...current, preferences: {
-                  ...current.preferences, paths: { ...current.preferences.paths, [provider]: event.target.value },
-                } }))} />
-            </label>
+            <div className="settings-field">
+              <label className="settings-label" htmlFor={`${provider}-path`}>{tr("程序路径")}</label>
+              <div className="settings-field-control">
+                <div className="settings-path-row">
+                  <input id={`${provider}-path`} type="text" aria-label={tr("{0} 路径", providerNames[provider])} disabled={disabled}
+                    placeholder={toolInfo?.executable || tr("留空自动查找")} value={paths[provider]} autoComplete="off" spellCheck={false}
+                    onChange={event => update(current => ({ ...current, preferences: {
+                      ...current.preferences, paths: { ...current.preferences.paths, [provider]: event.target.value },
+                    } }))} />
+                  <button type="button" className="secondary" disabled={disabled || pickingTool}
+                    onClick={() => void chooseExecutable(provider)}>
+                    <FolderOpen size={15} aria-hidden="true" /> {tr("选择…")}
+                  </button>
+                </div>
+              </div>
+            </div>
             <div className="settings-tool-status" role="status">
               {toolInfo?.executable ? <span className="settings-recognized" title={tr("仅表示已找到可执行文件，不代表已登录")}>
                 <span className="settings-green-dot" aria-hidden="true" />{tr("已检测到")} {providerNames[provider]}
@@ -382,7 +450,7 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
       <AsrSettingsPanel value={asr} onChange={asr => update(current => ({ ...current, preferences: { ...current.preferences, asr } }))}
         token={draft.asrToken} apiToken={draft.apiToken} savedToken={baseline.asrToken}
         onToken={asrToken => update(current => ({ ...current, asrToken }))}
-        onClearToken={testing || asrTesting ? undefined : () => void clearCredential("asrToken")}
+        onClearToken={testing || asrTesting ? undefined : () => setConfirmClearKind("asrToken")}
         disabled={disabled} onTestingChange={setAsrTesting} />
       <YoutubeCookiesPanel value={youtubeCookies}
         onChange={next => update(current => ({ ...current, preferences: { ...current.preferences, youtubeCookies: next } }))}
@@ -405,5 +473,29 @@ export function Settings({ preferences, onSave, onBack, onTokenChanged, settings
         </div>
       </footer>
     </form>
+    {confirmClearKind && (
+      <ConfirmDialog
+        title={tr("删除已保存密钥")}
+        message={tr("立即删除本机保存的{0}？\n取消设置不会恢复已删除的密钥。", clearLabel)}
+        confirmLabel={tr("删除密钥")}
+        danger
+        onConfirm={() => executeClearCredential(confirmClearKind)}
+        onCancel={() => setConfirmClearKind(undefined)}
+      />
+    )}
+    {pendingLeaveAction && (
+      <ConfirmDialog
+        title={tr("离开设置")}
+        message={leaveNotices.join("\n") + tr("\n仍要离开设置？")}
+        confirmLabel={tr("放弃并离开")}
+        danger={dirty}
+        onConfirm={() => {
+          const next = pendingLeaveAction
+          setPendingLeaveAction(undefined)
+          next()
+        }}
+        onCancel={() => setPendingLeaveAction(undefined)}
+      />
+    )}
   </section>
 }

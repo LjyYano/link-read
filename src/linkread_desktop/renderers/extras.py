@@ -149,6 +149,16 @@ def _sidecar(source: Path, name: str) -> Path | None:
     return None
 
 
+def load_reading_overview(source: Path) -> ReadingOverview | None:
+    reading_path = _sidecar(source, "reading.json")
+    if not reading_path:
+        return None
+    try:
+        return ReadingOverview.model_validate_json(reading_path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
+        raise LinkReadError(f"文章摘要与目录文件无效：{reading_path}（{exc}）") from exc
+
+
 def load_extras(source: Path) -> ArticleExtras:
     mindmap_path = _sidecar(source, "mindmap.md")
     quotes_path = _sidecar(source, "quotes.json")
@@ -163,17 +173,17 @@ def load_extras(source: Path) -> ArticleExtras:
             mindmap = mindmap_path.read_text(encoding="utf-8-sig")
             validate_mindmap(mindmap)
         except (OSError, ValueError) as exc:
-            raise LinkReadError(f"思维导图文件无效：{mindmap_path}（{exc}）") from exc
+            raise LinkReadError(f"思维导图文件无效：{mindmap_path.name}") from exc
     if quotes_path:
         try:
             quotes = QuoteCards.model_validate_json(quotes_path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError) as exc:
-            raise LinkReadError(f"金句文件无效：{quotes_path}（{exc}）") from exc
+            raise LinkReadError(f"金句文件无效：{quotes_path.name}") from exc
     if reading_path:
         try:
             reading = ReadingOverview.model_validate_json(reading_path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError) as exc:
-            raise LinkReadError(f"文章摘要与目录文件无效：{reading_path}（{exc}）") from exc
+            raise LinkReadError(f"文章摘要与目录文件无效：{reading_path.name}") from exc
     if links_path:
         try:
             links = MindmapLinks.model_validate_json(links_path.read_text(encoding="utf-8-sig"))

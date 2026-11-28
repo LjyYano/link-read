@@ -1,4 +1,6 @@
-use std::{fs, path::Path};
+use std::{fs, io::Read, os::unix::fs::OpenOptionsExt, path::Path};
+
+const MAX_NOTE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Add only the stored note's actual takeaways to the desktop preview.
 /// The source HTML and JSON files remain untouched.
@@ -7,12 +9,23 @@ pub fn with_takeaways(mut html: String, article_path: &Path) -> String {
         return html;
     };
     let note_path = folder.join("note.json");
-    if note_path.is_symlink() {
-        return html;
-    }
-    let note = fs::read_to_string(note_path)
+    let note = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(&note_path)
         .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        .and_then(|file| {
+            let meta = file.metadata().ok()?;
+            if !meta.is_file() || meta.len() > MAX_NOTE_BYTES {
+                return None;
+            }
+            let mut bytes = Vec::with_capacity(meta.len().min(64 * 1024) as usize);
+            file.take(MAX_NOTE_BYTES + 1).read_to_end(&mut bytes).ok()?;
+            if bytes.len() as u64 > MAX_NOTE_BYTES {
+                return None;
+            }
+            serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+        });
     let Some(note) = note else {
         return html;
     };

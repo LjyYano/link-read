@@ -3,7 +3,7 @@
 from typing import Literal
 import unicodedata
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..models import TranscriptDocument
 
@@ -131,6 +131,13 @@ class ProposedChapter(BaseModel):
     title: str = Field(min_length=1)
     summary: str = Field(min_length=1)
 
+    @field_validator("title", "summary")
+    @classmethod
+    def require_non_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("chapter fields must not be whitespace-only")
+        return value
+
 
 class ProposedHighlight(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -146,3 +153,10 @@ class ChunkInsights(BaseModel):
     chapters: list[ProposedChapter]
     highlights: list[ProposedHighlight]
     keywords: list[str]
+
+    @field_validator("summary")
+    @classmethod
+    def require_summary(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("summary must not be whitespace-only")
+        return value
