@@ -40,11 +40,12 @@ def note_fragments(note: NoteDocument, *, language: str = "en") -> dict[str, str
     words = [word.strip() for word in analysis.keywords if word.strip()]
     if words:
         # These are editorial topics, not literal word-frequency measurements.
-        # Use their existing order for typographic hierarchy without inventing counts.
+        # Use their existing order for typographic hierarchy without inventing counts:
+        # the size falls steeply with rank, so the cloud reads as a cloud, not as rows.
         keywords = []
         for index, word in enumerate(words):
-            rank_weight = (1 + index * .44) ** -.85
-            weight = rank_weight * min(1, 24 / len(word))
+            rank_weight = (1 + index * .6) ** -1.15
+            weight = rank_weight * min(1, 22 / len(word))
             keywords.append(
                 f'<button type="button" class="cloud-word cloud-tone-{index % 6}" '
                 f'style="--weight:{weight:.3f}" data-keyword="{escape(word, quote=True)}" '

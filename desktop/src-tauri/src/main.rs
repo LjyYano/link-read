@@ -1839,8 +1839,11 @@ fn cover_response(library: &Path, id: &str) -> http::Response<Vec<u8>> {
     }
 }
 
+/// Reader pages stay offline: scripts and styles are inline, and the only image
+/// sources besides inline data are the cover CDNs the library window already trusts.
+const READER_CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https://i.ytimg.com https://*.hdslb.com https://*.mzstatic.com; base-uri 'none'; form-action 'none'";
+
 fn preview_response(locations: &Locations, uri: &http::Uri) -> http::Response<Vec<u8>> {
-    const POLICY: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'";
     let decoded = percent_decode_str(uri.path().trim_start_matches('/'))
         .decode_utf8()
         .ok()
@@ -1867,7 +1870,7 @@ fn preview_response(locations: &Locations, uri: &http::Uri) -> http::Response<Ve
     http::Response::builder()
         .status(status)
         .header(http::header::CONTENT_TYPE, "text/html; charset=utf-8")
-        .header(http::header::CONTENT_SECURITY_POLICY, POLICY)
+        .header(http::header::CONTENT_SECURITY_POLICY, READER_CONTENT_SECURITY_POLICY)
         .header(http::header::CACHE_CONTROL, "no-store")
         .body(html.into_bytes())
         .expect("valid preview response")
@@ -2229,6 +2232,27 @@ mod tests {
     use std::{path::Path, process::Stdio, time::{Duration, Instant}};
     use std::sync::atomic::AtomicBool;
     use tokio::process::Command;
+
+    #[test]
+    fn reader_policy_allows_only_inlined_code_and_known_cover_images() {
+        fn directive<'a>(policy: &'a str, name: &str) -> &'a str {
+            policy.split(';').map(str::trim)
+                .find_map(|part| part.strip_prefix(name)?.strip_prefix(' ')).unwrap()
+        }
+        // The same cases drive Python's thumbnail_url and the frontend's thumbnailSource.
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/cover_hosts.json")).unwrap();
+        let policy = super::READER_CONTENT_SECURITY_POLICY;
+        assert_eq!(directive(policy, "default-src"), "'none'");
+        assert_eq!(directive(policy, "script-src"), "'unsafe-inline'");
+        assert_eq!(directive(policy, "style-src"), "'unsafe-inline'");
+        assert_eq!(directive(policy, "base-uri"), "'none'");
+        assert_eq!(directive(policy, "form-action"), "'none'");
+        let mut expected = vec!["data:"];
+        expected.extend(cases["csp"].as_array().unwrap().iter().map(|value| value.as_str().unwrap()));
+        let actual: Vec<&str> = directive(policy, "img-src").split_whitespace().collect();
+        assert_eq!(actual, expected);
+    }
 
     #[test]
     fn shownotes_refresh_distinguishes_empty_and_updated_responses() {

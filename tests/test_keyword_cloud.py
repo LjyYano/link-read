@@ -108,3 +108,16 @@ def test_keyword_cloud_is_self_contained_and_deterministic_without_mutating_note
     assert not any(tag == "link" and attrs.get("rel") in {"stylesheet", "preload"}
                    for tag, attrs in page.elements)
     assert not re.search(r"@import\s|url\(\s*['\"]?(?:https?:)?//", markup, re.I)
+
+
+def test_keyword_cloud_ships_the_layout_module_inline():
+    markup = render_html(make_note(["关键词"]))
+    assert "LinkReadKeywordLayout" in markup
+    assert not any(tag == "script" and "src" in attrs for tag, attrs in CloudParser(markup).elements)
+
+
+def test_keyword_weights_keep_the_saved_rank_order_within_range():
+    page = CloudParser(render_html(make_note(["短词", "第二个词", "第三个主题词", "第四个关键词", "很长的第五个关键词主题"])))
+    weights = [float(re.fullmatch(r"--weight:([0-9.]+)", word["attrs"]["style"])[1]) for word in page.words]
+    assert weights[0] == 1 and weights == sorted(weights, reverse=True)
+    assert all(0 < weight <= 1 for weight in weights) and weights[0] > weights[-1]

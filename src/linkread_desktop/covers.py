@@ -1,6 +1,9 @@
 """Offline local cover image cache inside each article archive folder."""
 
+import base64
+import os
 from pathlib import Path
+import re
 import stat
 from urllib.parse import parse_qs, quote, urljoin, urlsplit
 
@@ -15,6 +18,13 @@ from .storage import write_bytes
 COVER_EXTENSIONS = (".jpg", ".png", ".webp", ".gif")
 COVER_FILENAMES = frozenset(f"cover{ext}" for ext in COVER_EXTENSIONS)
 MAX_COVER_BYTES = 5 * 1024 * 1024
+# A cover above this size is linked online instead of being copied into every reading page.
+MAX_EMBEDDED_COVER_BYTES = 1024 * 1024
+# Online covers are bounded like any other saved link, independently of the inline budget.
+MAX_COVER_URL_CHARS = 8192
+COVER_MIME = {".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}
+_COVER_PREFIX_CHARS = max(len(f"data:{mime};base64,") for mime in COVER_MIME.values())
+_INLINE_COVER = re.compile(r"data:image/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+={0,2}")
 COVER_TIMEOUT_SECONDS = 10
 MAX_COVER_REDIRECTS = 3
 _HEADERS = {
@@ -120,6 +130,64 @@ def copy_local_cover(source_folder: Path, target_folder: Path) -> Path | None:
     if ext is None:
         return None
     return save_cover_bytes(target_folder, ext, data)
+
+
+def _read_cover_bytes(cover: Path) -> bytes | None:
+    """Read a regular file without following symlinks, bounded by the inline limit."""
+    try:
+        descriptor = os.open(cover, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                return None
+            data = stream.read(MAX_EMBEDDED_COVER_BYTES + 1)
+    except OSError:
+        return None
+    return data if 0 < len(data) <= MAX_EMBEDDED_COVER_BYTES else None
+
+
+def embedded_cover(folder: Path) -> str | None:
+    """Inline the validated local cover when it is small enough for the reading page."""
+    cover = find_local_cover(folder)
+    if cover is None:
+        return None
+    data = _read_cover_bytes(cover)
+    if data is None:
+        return None
+    # The type comes from the content, never from the file name.
+    ext = detect_image_extension(data)
+    if ext is None:
+        return None
+    return f"data:{COVER_MIME[ext]};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def cover_source(folder: Path | None, thumbnail: str | None) -> str | None:
+    """Prefer the offline local cover, then the allowlisted online thumbnail."""
+    if folder is not None:
+        embedded = embedded_cover(folder)
+        if embedded is not None:
+            return embedded
+    return thumbnail_url(thumbnail)
+
+
+def valid_cover_source(value: object) -> str | None:
+    """Re-validate at render time: only an inlined raster image or an allowlisted thumbnail."""
+    if not isinstance(value, str) or not value:
+        return None
+    if value.startswith("data:"):
+        # Base64 takes four characters per three bytes, in addition to the prefix.
+        limit = 4 * ((MAX_EMBEDDED_COVER_BYTES + 2) // 3) + _COVER_PREFIX_CHARS
+        return value if len(value) <= limit and _INLINE_COVER.fullmatch(value) else None
+    return value if len(value) <= MAX_COVER_URL_CHARS and thumbnail_url(value) == value else None
+
+
+def display_thumbnail(source: SourceInfo) -> str | None:
+    """The cover the library shows: a stable YouTube frame, else the saved cover URL."""
+    link = source_info_link(source)
+    if source.platform == "youtube" and link:
+        video_id = parse_qs(urlsplit(link).query).get("v")
+        if video_id:
+            return thumbnail_url(f"https://i.ytimg.com/vi/{video_id[0]}/hqdefault.jpg")
+    return thumbnail_url(source.thumbnail_url)
 
 
 def cover_candidates(source: SourceInfo) -> list[str]:

@@ -9,18 +9,21 @@ import os
 import shutil
 from pathlib import Path
 from threading import Lock
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 from .ai.provider import make_provider
 from .ai.checkpoints import provider_identity
 from .asr.config import AsrConfig
 from .asr.bailian import BailianAsr
-from .metadata import canonical_video_url, video_metadata, thumbnail_url, shownotes_metadata
+from .metadata import canonical_video_url, video_metadata, shownotes_metadata
 from .article_state import archive_mutation, file_lock, patch_reading_state, reading_state, save_reading_state
 from .article_details import DETAILS_FILENAME, detail_value, linked_source_value, read_article_details, save_article_details
 from .ai.models import NoteDocument
 from .ai.openai_compatible import OpenAICompatibleProvider
-from .covers import copy_local_cover, fetch_cover_bytes, find_local_cover, local_cover_url, remove_local_cover, save_cover_bytes
+from .covers import (
+    copy_local_cover, cover_source, display_thumbnail, fetch_cover_bytes, find_local_cover, local_cover_url,
+    remove_local_cover, save_cover_bytes,
+)
 from .generation import _run_note, generate_article
 from .errors import LinkReadError, error_context, error_details
 from .links import canonical_link
@@ -80,28 +83,29 @@ def _source_metadata(raw: TranscriptDocument) -> dict:
 
 
 def _source_info_metadata(source: SourceInfo) -> dict:
-    url = source_info_link(source)
-    thumbnail = thumbnail_url(source.thumbnail_url)
-    if source.platform == "youtube" and url:
-        video_id = parse_qs(urlsplit(url).query)["v"][0]
-        thumbnail = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
     return {
         "title": source.title,
         "platform": source.platform,
-        "sourceUrl": url,
+        "sourceUrl": source_info_link(source),
         "author": source.author,
         "publishedAt": source.published_at,
         "durationMs": source.duration_ms,
-        "thumbnailUrl": thumbnail,
+        "thumbnailUrl": display_thumbnail(source),
     }
+
+
+def _linked_source(folder: Path, source: SourceInfo) -> dict | None:
+    """Only imported subtitles borrow the title and cover of a linked source."""
+    if source.platform != "local":
+        return None
+    return (read_article_details(folder) or {}).get("linkedSource")
 
 
 def _article_record(article: Path, *, archived: tuple[Path, TranscriptDocument | NoteDocument, TranscriptDocument] | None = None) -> dict:
     source, document, raw = archived if archived is not None else _article_source(article)
     metadata = article_metadata(document, source, overview=load_extras(source).reading)
     appearance = _source_metadata(raw)
-    details = read_article_details(article.parent) if raw.source.platform == "local" else None
-    linked = details.get("linkedSource") if details else None
+    linked = _linked_source(article.parent, raw.source)
     if linked:
         appearance.update(sourceUrl=linked["url"], thumbnailUrl=linked["thumbnailUrl"])
     return {
@@ -162,6 +166,8 @@ def _linked_appearance(url: str) -> dict[str, str]:
             "url": canonical_link(resolved),
             "title": " ".join(preview.source.title.split())[:300].strip(),
             "thumbnailUrl": preview.thumbnail_url,
+            # Remembered so the reading page gives a linked podcast its square cover.
+            "platform": preview.source.platform,
         })
     except LinkReadError as exc:
         raise LinkReadError("无法读取该链接的标题或封面，文章详情未保存。", code="linked_source_unavailable") from exc
@@ -359,9 +365,13 @@ def _prepared_reader(article: Path) -> dict:
     source, document, raw = _reader_source(article)
     extras = load_extras(source)
     metadata = article_metadata(document, source, overview=extras.reading)
+    # Only saved covers and saved cover URLs are read here; opening stays offline.
+    linked = _linked_source(article.parent, raw.source)
+    cover = cover_source(article.parent, linked["thumbnailUrl"] if linked else _source_metadata(raw)["thumbnailUrl"])
     html = render_html(document, title=metadata["title"], category=metadata["category"],
                        description=metadata["description"], extras=extras,
-                       reading_state=reading_state(article.parent), edition=load_edition(article.parent, raw))
+                       reading_state=reading_state(article.parent), edition=load_edition(article.parent, raw),
+                       cover_url=cover, cover_platform=linked.get("platform") if linked else None)
     cached = article.with_name(".reader.html")
     if cached.is_symlink():
         raise LinkReadError("阅读缓存路径不可用")

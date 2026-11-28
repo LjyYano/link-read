@@ -16,7 +16,7 @@ from .ai.polish import polish_reading
 from .ai.provider import StructuredProvider
 from .ai.publication import complete_extras
 from .asr.config import AsrConfig
-from .covers import cover_candidates, download_cover, find_local_cover
+from .covers import cover_candidates, cover_source, display_thumbnail, download_cover, find_local_cover
 from .errors import LinkReadError, error_context
 from .models import TranscriptDocument
 from .pipeline import extract as extract_document
@@ -224,14 +224,16 @@ def generate_article(
             home_href = quote(Path(relpath(home, folder)).as_posix())
         except ValueError:  # The files can be on different Windows drives.
             home_href = home.resolve().as_uri()
-    render_started = time.monotonic()
     report(progress, "render", "正在生成独立 HTML 阅读页")
+    # The archived page carries the cover when it arrives within the existing budget.
+    if cover_thread is not None:
+        cover_thread.join(timeout=12)
+    render_started = time.monotonic()
     metadata = article_metadata(note, note_path, overview=completed.reading)
     write_text(article, render_html(note, extras=completed, home_href=home_href,
                                    category=metadata["category"], description=metadata["description"],
-                                   title=metadata["title"], edition=edition))
-    if cover_thread is not None:
-        cover_thread.join(timeout=12)
+                                   title=metadata["title"], edition=edition,
+                                   cover_url=cover_source(folder, display_thumbnail(raw.source))))
     metrics = {"wall_seconds": round(time.monotonic() - started, 3),
                "html_seconds": round(time.monotonic() - render_started, 3),
                "model_calls": agent.calls, "cache_hits": agent.cache_hits,

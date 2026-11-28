@@ -2,6 +2,7 @@
 <html lang="<!--LR:PAGE_LANGUAGE-->">
 <head>
 <meta charset="utf-8">
+<script>document.documentElement.classList.add('js')</script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#ffffff">
 <meta name="description" content="<!--LR:DESCRIPTION-->">
@@ -20,6 +21,17 @@
 .transcript-section h3{font-size:18px;margin:26px 0 12px;line-height:1.5}
 .reading-paragraph.unpolished{border-left:2px solid var(--line);padding-left:12px}
 .reading-paragraph{scroll-margin-top:94px}
+/* The cover sits beside the title; a page without one keeps its text-only header. */
+.hero.has-cover{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:30px;align-items:start}
+.article-cover{grid-row:1/span 3;justify-self:start;width:236px;height:133px;object-fit:cover;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.article-cover.is-square{width:168px;height:168px}
+/* The box is reserved so nothing moves when the cover arrives, but it stays invisible
+   until then, so a slow or blocked request never shows an empty frame. */
+.js .article-cover{opacity:0;transition:opacity .18s ease}
+.js .article-cover.is-loaded{opacity:1}
+@media(prefers-reduced-motion:reduce){.article-cover{transition:none}}
+@media(max-width:1050px){.article-cover{width:204px;height:115px}.article-cover.is-square{width:148px;height:148px}}
+@media(max-width:790px){.hero.has-cover{column-gap:18px}.article-cover{width:132px;height:74px}.article-cover.is-square{width:96px;height:96px}}
 .keyword-atlas {
   --cloud-blue:#284997;--cloud-violet:#67439e;--cloud-teal:#176257;
   --cloud-berry:#96396c;--cloud-gold:#89501d;--cloud-indigo:#465ba6;
@@ -45,7 +57,7 @@
   --word-tone:var(--cloud-blue);
   position:relative;display:block;flex:0 1 auto;max-width:100%;min-height:36px;
   padding:4px 6px;border:0;border-radius:9px;background:transparent;color:var(--word-tone);
-  font-size:calc(15px + 41px * var(--weight));font-weight:calc(540 + 200 * var(--weight));
+  font-size:calc((13px + 43px * var(--weight)) * var(--cloud-scale, 1));font-weight:calc(540 + 200 * var(--weight));
   line-height:1.18;letter-spacing:-.025em;overflow-wrap:anywhere;text-align:center;
 }
 .cloud-tone-1{--word-tone:var(--cloud-violet)}.cloud-tone-2{--word-tone:var(--cloud-teal)}
@@ -67,7 +79,7 @@
 .cloud-word:hover .cloud-label,.cloud-word:focus-visible .cloud-label{transform:translateY(-1px) scale(var(--cloud-zoom,1.1))}
 .keyword-cloud.is-positioned{display:block}
 .keyword-cloud.is-positioned .cloud-word{position:absolute;margin:0}
-@media(max-width:790px){.cloud-word{font-size:calc(14px + 30px * var(--weight));min-height:44px}}
+@media(max-width:790px){.cloud-word{font-size:calc((12px + 30px * var(--weight)) * var(--cloud-scale, 1));min-height:44px}}
 @media(prefers-reduced-motion:reduce){
   .cloud-word::before,.cloud-label{transition:none}
   .cloud-word:hover .cloud-label,.cloud-word:focus-visible .cloud-label{transform:none}
@@ -167,6 +179,7 @@
   .transcript-section h2,.transcript-section h3{break-after:avoid;page-break-after:avoid}
   .reading-paragraph{orphans:3;widows:3}
   .shell{display:block}.main{padding:0}
+  .hero.has-cover{display:block}.article-cover{display:none}
   .sidebar,.crumb,.tabs,.toolbar,.reading-tools,.reading-actions,.mobile-toc,#toast,.reading-resume,.panel:not(#panel-transcript){display:none!important}
   #panel-transcript{display:block!important}
 }
@@ -182,7 +195,7 @@
   </aside>
   <main class="main">
     <nav class="crumb"><!--LR:HOME--><!--LR:CATEGORY--><button type="button" class="theme-btn" aria-label="Toggle theme">◐</button></nav>
-    <header class="hero"><h1><!--LR:TITLE--></h1><!--LR:METADATA--><!--LR:READING_ACTIONS--></header>
+    <header class="hero<!--LR:HERO_CLASS-->"><!--LR:COVER--><h1><!--LR:TITLE--></h1><!--LR:METADATA--><!--LR:READING_ACTIONS--></header>
     <div class="tabs">
       <div class="reader-tab-row">
         <div class="reader-tab-strip">

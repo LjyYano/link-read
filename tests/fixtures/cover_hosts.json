@@ -1,0 +1,21 @@
+{
+  "csp": ["https://i.ytimg.com", "https://*.hdslb.com", "https://*.mzstatic.com"],
+  "accepted": [
+    "https://i.ytimg.com/vi/1-Fo8McCD9w/hqdefault.jpg",
+    "https://i0.hdslb.com/bfs/archive/cover.jpg",
+    "https://is1-ssl.mzstatic.com/image/thumb/cover/600x600bb.jpg"
+  ],
+  "rejected": [
+    "https://evil.example/cover.jpg",
+    "https://i.ytimg.com.evil.example/cover.jpg",
+    "https://ytimg.com/cover.jpg",
+    "https://hdslb.com/cover.jpg",
+    "https://i.ytimg.com:8443/cover.jpg",
+    "https://user@i.ytimg.com/cover.jpg",
+    "data:image/svg+xml,<svg onload=alert(1)>"
+  ],
+  "upgraded": [
+    {"input": "http://i.ytimg.com/vi/1-Fo8McCD9w/hqdefault.jpg", "expected": "https://i.ytimg.com/vi/1-Fo8McCD9w/hqdefault.jpg"},
+    {"input": "//i0.hdslb.com/bfs/archive/cover.jpg", "expected": "https://i0.hdslb.com/bfs/archive/cover.jpg"}
+  ]
+}

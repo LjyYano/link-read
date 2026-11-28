@@ -233,6 +233,17 @@ $$('[data-keyword]').forEach(button=>button.addEventListener('click',()=>{
   openSearch(button.dataset.keyword);
   if(!hits.length)toast(t('No matches in Transcript or Shownotes'));
 }));
+// An online cover can be unavailable offline, or a saved one can be damaged: either way
+// the header goes back to its text-only layout. Its reserved box stays invisible until
+// the image has arrived, and a stalled request is given up rather than waited on.
+$$('.article-cover').forEach(cover=>{
+  const drop=()=>{cover.closest('.hero')?.classList.remove('has-cover');cover.remove()};
+  const loaded=()=>cover.classList.add('is-loaded');
+  cover.addEventListener('load',loaded);
+  cover.addEventListener('error',drop);
+  if(cover.complete)cover.naturalWidth?loaded():drop();
+  else setTimeout(()=>{if(!cover.classList.contains('is-loaded'))drop()},8000);
+});
 // Measure actual text instead of guessing CJK widths. The static flex layout
 // remains readable without JS and is also the fallback for unusually large lists.
 const cloud=$('.keyword-cloud');
@@ -244,6 +255,7 @@ function layoutKeywords(){
   cloudWidth=width;
   cloud.classList.remove('is-positioned');
   cloud.style.height='';
+  cloud.style.removeProperty('--cloud-scale');
   const words=$$('.cloud-word',cloud);
   words.forEach(word=>{word.style.left='';word.style.top='';word.style.maxWidth=''});
   // Scale the text on hover without moving the button's pointer hit area.
@@ -251,55 +263,42 @@ function layoutKeywords(){
     const widths=words.map(word=>word.offsetWidth);
     words.forEach((word,index)=>word.style.setProperty('--cloud-zoom',Math.min(1.18,1+24/Math.max(1,widths[index])).toFixed(3)));
   };
-  if(words.length>52){fitHover();return}
-  const margin=6,gap=8;
+  const layout=window.LinkReadKeywordLayout;
+  if(words.length>52||!layout){fitHover();return}
+  const margin=4,gap=4;
   words.forEach(word=>word.style.maxWidth=Math.max(1,width-2*margin)+'px');
   cloud.classList.add('is-positioned');
-  const sizes=words.map(word=>({w:word.offsetWidth,h:word.offsetHeight}));
-  const area=sizes.reduce((sum,{w,h})=>sum+(w+gap)*(h+gap),0);
-  const initialHeight=Math.max(Math.min(320,112+words.length*6),Math.ceil(area/(width*.6)),
-    Math.max(...sizes.map(({h})=>h))+2*margin);
-  for(let attempt=0;attempt<6;attempt++){
-    const height=initialHeight+attempt*60, placed=[];
-    for(let index=0;index<words.length;index++){
-      const {w,h}=sizes[index];
-      let box=null;
-      const fits=(x,y)=>x>=margin&&y>=margin&&x+w<=width-margin&&y+h<=height-margin&&
-        !placed.some(p=>x<p.x+p.w+gap&&x+w+gap>p.x&&y<p.y+p.h+gap&&y+h+gap>p.y);
-      for(let step=0;step<1800;step++){
-        const angle=step*.34+index*2.399963, radius=step*.42;
-        const x=Math.round(width/2+Math.cos(angle)*radius*1.4-w/2);
-        const y=Math.round(height/2+Math.sin(angle)*radius*.85-h/2);
-        if(!fits(x,y))continue;
-        box={x,y,w,h};break;
+  // Few keywords would leave the sides of the card empty: enlarge the text and place again.
+  let scale=1;
+  for(let round=0;round<3;round++){
+    cloud.style.setProperty('--cloud-scale',scale.toFixed(3));
+    const sizes=words.map(word=>({w:word.offsetWidth,h:word.offsetHeight}));
+    const area=sizes.reduce((sum,{w,h})=>sum+(w+gap)*(h+gap),0);
+    const tallest=Math.max(...sizes.map(({h})=>h));
+    const initialHeight=Math.max(tallest+2*margin,Math.ceil(area/(width*.7)));
+    for(let attempt=0;attempt<8;attempt++){
+      const height=Math.min(680,initialHeight+attempt*40);
+      const boxes=layout.placeKeywords(sizes,width,height,{margin,gap});
+      if(!boxes)continue;
+      let left=width,top=height,right=0,bottom=0;
+      boxes.forEach(({x,y},index)=>{
+        left=Math.min(left,x);top=Math.min(top,y);
+        right=Math.max(right,x+sizes[index].w);bottom=Math.max(bottom,y+sizes[index].h);
+      });
+      if(right-left<width*.85&&scale<1.35&&round<2){
+        scale=Math.min(1.35,scale*width*.92/(right-left));
+        break;
       }
-      // A spiral can skip narrow gaps on phones. Try the free edges of
-      // existing words before growing the canvas or falling back to flex.
-      if(!box){
-        const xs=[margin,width-w-margin,Math.round((width-w)/2),...placed.flatMap(p=>[p.x-w-gap,p.x+p.w+gap])];
-        const ys=[margin,height-h-margin,Math.round((height-h)/2),...placed.flatMap(p=>[p.y-h-gap,p.y+p.h+gap])];
-        let best=Infinity;
-        for(const x of xs)for(const y of ys){
-          if(!fits(x,y))continue;
-          const distance=((x+w/2-width/2)/width)**2+((y+h/2-height/2)/height)**2;
-          if(distance<best){best=distance;box={x,y,w,h}}
-        }
-      }
-      if(!box)break;
-      placed.push(box);
+      const fittedHeight=Math.max(tallest+2*margin,bottom-top+2*margin);
+      const offsetX=Math.round((width-right-left)/2),offsetY=Math.round((fittedHeight-bottom-top)/2);
+      cloud.style.height=fittedHeight+'px';
+      words.forEach((word,index)=>{
+        word.style.left=(boxes[index].x+offsetX)+'px';
+        word.style.top=(boxes[index].y+offsetY)+'px';
+      });
+      fitHover();
+      return;
     }
-    if(placed.length!==words.length)continue;
-    const left=Math.min(...placed.map(p=>p.x)),right=Math.max(...placed.map(p=>p.x+p.w));
-    const top=Math.min(...placed.map(p=>p.y)),bottom=Math.max(...placed.map(p=>p.y+p.h));
-    const fittedHeight=Math.max(initialHeight,bottom-top+2*margin);
-    const offsetX=Math.round((width-right-left)/2),offsetY=Math.round((fittedHeight-bottom-top)/2);
-    cloud.style.height=fittedHeight+'px';
-    words.forEach((word,index)=>{
-      word.style.left=(placed[index].x+offsetX)+'px';
-      word.style.top=(placed[index].y+offsetY)+'px';
-    });
-    fitHover();
-    return;
   }
   cloud.classList.remove('is-positioned');
   fitHover();

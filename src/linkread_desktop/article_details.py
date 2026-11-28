@@ -36,7 +36,11 @@ def linked_source_value(value: object) -> dict[str, str]:
         raise LinkReadError("已关联的来源信息无效")
     url, cover = value.get("url"), value.get("thumbnailUrl")
     title = detail_value(value.get("title"), "title")
-    if (not isinstance(url, str) or len(url) > 4096 or canonical_link(url) != url
+    # The platform only decides the cover's shape; overlays saved before it existed have none.
+    platform = value.get("platform")
+    if ("platform" in value and (not isinstance(platform, str)
+            or platform not in {"youtube", "bilibili", "apple_podcasts"})
+            or not isinstance(url, str) or len(url) > 4096 or canonical_link(url) != url
             or urlsplit(url).hostname in SHORT_HOSTS or not title
             or not isinstance(cover, str) or len(cover) > 8192 or thumbnail_url(cover) != cover):
         raise LinkReadError("已关联的来源信息无效")

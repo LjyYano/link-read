@@ -130,11 +130,27 @@ def _tab(name: str, label: str) -> str:
             f'tabindex="{0 if active else -1}">{icon(name)}<span>{label}</span></button>')
 
 
+# Intrinsic size reserves the cover's box before it decodes; podcasts are square.
+_COVER_SIZE = {"apple_podcasts": ("600", "600", " is-square")}
+
+
+def _cover(platform: str, cover_url: str | None) -> str:
+    """Optional decoration beside the title: anything untrusted leaves the text-only header."""
+    # covers imports the renderers package, so this import has to stay local.
+    from ..covers import valid_cover_source
+    source = valid_cover_source(cover_url)
+    if source is None:
+        return ""
+    width, height, square = _COVER_SIZE.get(platform, ("480", "270", ""))
+    return (f'<img class="article-cover{square}" src="{escape(source, quote=True)}" alt="" '
+            f'width="{width}" height="{height}" decoding="async" referrerpolicy="no-referrer">')
+
+
 def render_html(
     document: TranscriptDocument | NoteDocument, *, home_href: str | None = None,
     category: str | None = None, description: str | None = None, extras: ArticleExtras | None = None,
     title: str | None = None, reading_state: dict | None = None, edition: ReadingEdition | None = None,
-    language: str | None = None,
+    language: str | None = None, cover_url: str | None = None, cover_platform: str | None = None,
 ) -> str:
     """Fill the bundled html-library article template for single-file offline use."""
     note = document if isinstance(document, NoteDocument) else None
@@ -209,6 +225,7 @@ def render_html(
         f'<span>{label("Starred" if starred else "Star")}</span></button></div>'
     )
     strings = json_data(ZH if language == "zh-CN" else {})
+    cover = _cover(cover_platform or transcript.source.platform, cover_url)
     return fill_template("reader.html", {
         "PAGE_LANGUAGE": "zh-CN" if language == "zh-CN" else "en",
         "TITLE": escape(title),
@@ -216,6 +233,8 @@ def render_html(
         "HOME": f'<a href="{home}">{label("Library")}</a>' if home else f'<span>{label("Library")}</span>',
         "SIDEBAR_HOME": f'<a href="{home}">{label("Yano · Library")}</a>' if home else label("Yano · Library"),
         "CATEGORY": f'<span>/</span><span>{escape(category)}</span>' if category else "",
+        "COVER": cover,
+        "HERO_CLASS": " has-cover" if cover else "",
         "METADATA": _metadata(transcript, language),
         "READING_ACTIONS": reading_actions,
         "TABS": tabs_html,
@@ -235,5 +254,6 @@ def render_html(
         "SHOWNOTES_PANEL": panels.get("shownotes", ""),
         "READER_LABELS": strings,
         "READER_SCRIPT": (resources.joinpath("reading-position.js").read_text(encoding="utf-8")
+                          + "\n" + resources.joinpath("keyword-layout.js").read_text(encoding="utf-8")
                           + "\n" + resources.joinpath("reader.js").read_text(encoding="utf-8")),
     }, language=language)

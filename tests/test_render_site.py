@@ -1,9 +1,11 @@
+import base64
 from hashlib import sha256
 import json
 import re
 
 import pytest
 
+from linkread_desktop import covers
 from linkread_desktop.ai.models import Chapter, NoteAnalysis, NoteDocument, lexical_content
 from linkread_desktop.desktop import _prepared_reader
 from linkread_desktop.errors import ExtractionError, LinkReadError
@@ -13,6 +15,7 @@ from linkread_desktop.renderers.extras import load_extras
 from linkread_desktop.renderers.html import render_html
 from linkread_desktop.renderers.markdown import render_markdown
 from linkread_desktop.renderers.site import build_site, load_document, render_home
+from test_local_cover import JPEG_BYTES
 
 
 def make_doc(*, title='示例视频', source='youtube', text='你好。', video_id='1-Fo8McCD9w'):
@@ -302,3 +305,49 @@ def test_editorial_summary_and_outline_are_shared_by_render_and_site(tmp_path):
     sidecar.write_text(json.dumps(overview), encoding='utf-8')
     with pytest.raises(LinkReadError, match='字幕索引超出'):
         _prepared_reader(article)
+
+
+def test_site_pages_carry_the_cover_while_the_bookshelf_stays_text(tmp_path):
+    source_dir = tmp_path / 'transcripts'
+    (source_dir / 'a').mkdir(parents=True)
+    (source_dir / 'a' / 'transcript.json').write_text(make_doc().model_dump_json(), encoding='utf-8')
+    assert build_site(source_dir, tmp_path / 'site') == 1
+    page = next((tmp_path / 'site' / 'pages').glob('*/index.html')).read_text(encoding='utf-8')
+    assert 'class="article-cover" src="https://i.ytimg.com/vi/1-Fo8McCD9w/hqdefault.jpg"' in page
+    assert '<img' not in (tmp_path / 'site' / 'index.html').read_text(encoding='utf-8')
+
+    covers.save_cover_bytes(source_dir / 'a', '.jpg', JPEG_BYTES)
+    assert build_site(source_dir, tmp_path / 'site2') == 1
+    page = next((tmp_path / 'site2' / 'pages').glob('*/index.html')).read_text(encoding='utf-8')
+    inline = 'class="article-cover" src="data:image/jpeg;base64,' + base64.b64encode(JPEG_BYTES).decode('ascii') + '"'
+    assert inline in page
+    assert '<img' not in (tmp_path / 'site2' / 'index.html').read_text(encoding='utf-8')
+
+
+def test_site_page_of_linked_subtitles_shows_the_linked_cover(tmp_path):
+    source_dir = tmp_path / 'subtitles'
+    source_dir.mkdir()
+    raw = TranscriptDocument(source=SourceInfo(platform='local', title='导入.srt'), transcript_source='local',
+                             segments=[TranscriptSegment(start_ms=0, end_ms=1000, text='导入的原文')])
+    (source_dir / 'transcript.json').write_text(raw.model_dump_json(), encoding='utf-8')
+    (source_dir / 'transcript.reading.json').write_text('{"lead":"导语","sections":[]}', encoding='utf-8')
+    assert build_site(source_dir, tmp_path / 'site') == 1
+    assert 'article-cover' not in next((tmp_path / 'site' / 'pages').glob('*/index.html')).read_text(encoding='utf-8').split('<body>')[1].split('<script')[0]
+
+    video = 'https://www.bilibili.com/video/BV1BhKf6mEYR?p=2'
+    artwork = 'https://i0.hdslb.com/bfs/archive/fixture.jpg'
+    details = {'version': 1, 'title': None, 'category': None,
+               'linkedSource': {'url': video, 'title': '原视频', 'thumbnailUrl': artwork}}
+    (source_dir / '.article-details.json').write_text(json.dumps(details), encoding='utf-8')
+    assert build_site(source_dir, tmp_path / 'site2') == 1
+    page = next((tmp_path / 'site2' / 'pages').glob('*/index.html')).read_text(encoding='utf-8')
+    assert f'class="article-cover" src="{artwork}"' in page
+
+    # A linked podcast episode keeps its square artwork instead of being cropped to 16:9.
+    episode_art = 'https://is1-ssl.mzstatic.com/image/thumb/podcast/600x600bb.jpg'
+    details['linkedSource'] = {'url': 'https://podcasts.apple.com/us/podcast/id1234567890?i=1000000000001',
+                               'title': '单集标题', 'thumbnailUrl': episode_art, 'platform': 'apple_podcasts'}
+    (source_dir / '.article-details.json').write_text(json.dumps(details), encoding='utf-8')
+    assert build_site(source_dir, tmp_path / 'site3') == 1
+    page = next((tmp_path / 'site3' / 'pages').glob('*/index.html')).read_text(encoding='utf-8')
+    assert f'class="article-cover is-square" src="{episode_art}"' in page

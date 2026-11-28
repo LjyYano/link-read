@@ -9,7 +9,8 @@ import re
 from pydantic import ValidationError
 
 from ..errors import ExtractionError
-from ..models import TranscriptDocument
+from ..covers import cover_source, display_thumbnail
+from ..models import SourceInfo, TranscriptDocument
 from ..ai.models import NoteDocument
 from ..storage import write_text
 from ..article_state import reading_state
@@ -97,6 +98,14 @@ def article_metadata(
         if not isinstance(values[key], str):
             raise ExtractionError(f"{key} 必须为字符串：{source_file}")
     return values
+
+
+def _page_cover(source_file: Path, source: SourceInfo) -> tuple[str | None, str | None]:
+    """The cover and the platform that decides its shape, with the App reader's precedence."""
+    details = read_article_details(source_file.parent)
+    linked = details.get("linkedSource") if details and source.platform == "local" else None
+    thumbnail = linked["thumbnailUrl"] if linked else display_thumbnail(source)
+    return cover_source(source_file.parent, thumbnail), linked.get("platform") if linked else None
 
 
 def _slug(relative: Path) -> str:
@@ -220,11 +229,13 @@ def build_site(source: Path, output_dir: Path, *, language: str = "legacy") -> i
         metadata = record["metadata"]
         document = record["document"]
         transcript = document.transcript if isinstance(document, NoteDocument) else document
+        cover, cover_platform = _page_cover(record["path"], transcript.source)
         html = render_html(document, home_href="../../index.html",
                            title=metadata["title"],
                            category=metadata["category"], description=metadata["description"],
                            extras=extras, reading_state=record["readingState"],
-                           edition=load_edition(record["path"].parent, transcript))
+                           edition=load_edition(record["path"].parent, transcript),
+                           cover_url=cover, cover_platform=cover_platform)
         pages.append((folder, html, metadata))
     home = render_home(records, language=language)
     for folder, html, metadata in pages:
